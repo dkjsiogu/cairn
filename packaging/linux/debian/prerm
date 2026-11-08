@@ -1,0 +1,9 @@
+#!/bin/sh
+# Stop the hourly update timer when Cairn is removed.
+set -e
+
+if [ "$1" = remove ] && [ -d /run/systemd/system ]; then
+  systemctl disable --now cairn-update.timer >/dev/null 2>&1 || true
+fi
+
+exit 0

@@ -8,7 +8,7 @@ A small, native Minecraft: Java Edition launcher written in Rust. Renamed to **C
 
 [简体中文](README.md) | **English**
 
-> Current version: **0.42.1** (preview)
+> Current version: **0.42.2** (preview)
 >
 > Goals: small binaries, few dependencies, visible install progress, and a repair path after interruption. See [implementation status](docs/design/14-implementation-status.md) for exact boundaries.
 
@@ -39,7 +39,7 @@ It is not a universal launcher, and it is not 1.0 yet. What works and what does 
 0.41: automatic updates.
 
 - **Windows**: new versions download in the background and are swapped in when you close Cairn. You can turn this off in Settings.
-- **Linux**: the deb adds Cairn's apt repository, so the system updates Cairn daily. You can also `sudo apt install cairn` directly; see the install steps below.
+- **Linux**: the deb adds Cairn's apt repository and checks it for Cairn updates every hour. You can also `sudo apt install cairn` directly; see the install steps below.
 - To update right away, click the hint in the sidebar. On Linux the system asks for your password.
 - See [26 · Automatic updates](docs/design/26-auto-update.md).
 
@@ -62,7 +62,7 @@ It is not a universal launcher, and it is not 1.0 yet. What works and what does 
 
 - **See what is being downloaded**: the progress page lists the finished steps and how long each took, the current step, the last few files (asset files by their real names), whether they come from Mojang or the BMCLAPI mirror, the speed and the time left.
 - **Automatic Java**: if no suitable Java is installed when you press Launch, Cairn downloads Mojang's official runtime and then launches; nothing to hunt down and nothing changed on the system. The compressed files are preferred (about a third of the size) and every file is verified. Settings, first-run setup and launch settings can download it too.
-- **Launcher updates**: a quiet check at start (at most every 12 hours) shows a small badge in the sidebar when a new version exists. The dialog shows the release notes and verifies the download against SHA256SUMS; Windows restarts into the new version in one click, Linux gets a copyable install command. Settings has a manual "Check for updates".
+- **Launcher updates**: a quiet check at every start and every 2 hours while open shows a small badge in the sidebar when a new version exists. The dialog shows the release notes and verifies the download against SHA256SUMS; Windows restarts into the new version in one click, Linux gets a copyable install command. Settings has a manual "Check for updates".
 - **A framework for the UI code**: the 12,000-line `main.rs` is now modules per page and dialog, state is grouped by feature, and background tasks share one progress model. See [23 · UI framework](docs/design/23-ui-framework.md) (Chinese).
 - Long version names no longer cover the buttons on the Worlds page.
 
@@ -205,7 +205,7 @@ Drag a `.mrpack` or `.zip` into the window to start an import. A single mod `.ja
 | Platform | File | Size | Requirements |
 |---|---|---:|---|
 | Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | ~9 MB | Windows 10/11, Java 21 |
-| Linux x64 (deb) | [cairn_0.42.1_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.42.1_amd64.deb) | ~3.4 MB | Ubuntu 24.04+ / glibc ≥ 2.39, Java 21 |
+| Linux x64 (deb) | [cairn_0.42.2_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.42.2_amd64.deb) | ~3.4 MB | Ubuntu 24.04+ / glibc ≥ 2.39, Java 21 |
 
 Checksums: [SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS).
 
@@ -232,12 +232,12 @@ sudo apt update && sudo apt install cairn
 Or install the deb; it adds the same apt repository:
 
 ```bash
-sudo apt install ./cairn_0.42.1_amd64.deb
+sudo apt install ./cairn_0.42.2_amd64.deb
 ```
 
 You can also double-click the deb in a software center. After installation, **Cairn** appears in the application menu. An installed `nailong` package is replaced automatically.
 
-The system updates Cairn daily (unattended-upgrades). To turn that off:
+The system checks for Cairn updates every hour (`cairn-update.timer`) and upgrades only the cairn package. To turn that off:
 
 ```bash
 sudo rm /etc/apt/apt.conf.d/52cairn-auto-update

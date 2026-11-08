@@ -921,7 +921,7 @@ impl App {
                 let hint = match kind {
                     Install::Exe if on => "后台下载，关掉时换上",
                     Install::Exe => "只提示新版本",
-                    Install::AptRepo => "由系统每天更新",
+                    Install::AptRepo => "由系统每小时更新",
                     _ => "没有 apt 源，需手动更新",
                 };
                 ui.label(egui::RichText::new(hint).size(13.0).color(t::sub()));

@@ -1,15 +1,18 @@
-//! 启动器自己的更新。启动时和之后每 12 小时安静地查一次，有新版本时侧栏出现一个小提示。
+//! 启动器自己的更新。每次打开时安静地查一次（10 分钟内查过就不查），开着时每 2 小时再查，
+//! 有新版本时侧栏出现一个小提示。
 //!
 //! - Windows：打开了「自动更新」就在后台下载、校验，关掉 Cairn 时换成新版本；
 //!   侧栏提示变成「重启更新」，也可以马上重启。
-//! - Linux（deb 装的）：系统每天通过 apt 源自动更新，启动器发现程序被换掉后提示重启。
+//! - Linux（deb 装的）：deb 带的定时器每小时从 apt 源更新 Cairn，启动器发现程序被换掉后提示重启。
 //!   想马上更新时，点「更新」弹出系统的授权窗口；装不上就给出一条能复制的命令。
 
 use crate::prelude::*;
 use nailong_core::update::{self, Install, Release};
 
-/// 两次自动检查之间至少隔这么久。
-const CHECK_EVERY_SECS: u64 = 12 * 60 * 60;
+/// 开着时两次自动检查之间隔多久。
+const CHECK_EVERY_SECS: u64 = 2 * 60 * 60;
+/// 打开时，离上次检查不到这么久就不查（反复重启时不用每次都问 GitHub）。
+const CHECK_ON_START_AFTER_SECS: u64 = 10 * 60;
 
 enum UpdateMsg {
     Checked(Result<Release, String>),
@@ -139,8 +142,10 @@ impl App {
     /// 程序有没有被系统换掉；收后台结果。
     pub(crate) fn poll_update(&mut self, ctx: &egui::Context) {
         let cache = self.root.cache();
+        let mut starting = false;
         if !self.update.started {
             self.update.started = true;
+            starting = true;
             self.update.kind = update::install_kind();
             update::cleanup(&cache);
             // 上次关掉时没换成（比如被强制结束）：重启就换上。
@@ -153,9 +158,13 @@ impl App {
         if due {
             self.update.tick = Some(Instant::now());
             ctx.request_repaint_after(Duration::from_secs(61));
-            if self.update.rx.is_none()
-                && now().saturating_sub(self.prefs.update_checked) > CHECK_EVERY_SECS
-            {
+            let since = now().saturating_sub(self.prefs.update_checked);
+            let interval = if starting {
+                CHECK_ON_START_AFTER_SECS
+            } else {
+                CHECK_EVERY_SECS
+            };
+            if self.update.rx.is_none() && since > interval {
                 self.check_update(ctx, false);
             }
             if self.update.ready.is_none()
@@ -466,7 +475,7 @@ impl App {
                         }
                     });
                 } else if kind == Install::AptRepo {
-                    line(ui, "系统每天会自动更新，也可以现在更新。", t::dim());
+                    line(ui, "系统每小时会自动更新，也可以现在更新。", t::dim());
                 }
                 if let Some(error) = &self.update.error {
                     line(ui, error, t::danger());

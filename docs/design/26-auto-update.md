@@ -3,13 +3,14 @@
 > 0.41 起，Windows 和 Linux 都能自动更新。
 >
 > - **Windows**：Cairn 在后台下载新版本，关掉 Cairn 时换上。
-> - **Linux**：deb 装好后会加上 Cairn 的 apt 源，系统每天自动更新。也可以用 `sudo apt install cairn` 安装。
+> - **Linux**：deb 装好后会加上 Cairn 的 apt 源，每小时自动检查并更新（0.42.2 起；以前要等系统每天一次的 unattended-upgrades）。也可以用 `sudo apt install cairn` 安装。
 
 代码在 `core::update`（检查、下载、校验、替换）和 `dialogs/update.rs`（界面）。打包在 `scripts/build-deb.sh`、`scripts/build-apt-repo.sh` 和 `packaging/linux/apt/`。
 
 ## 1. 什么时候检查
 
-- 打开 Cairn 时检查一次，之后每 12 小时一次。
+- 每次打开 Cairn 时检查一次（10 分钟内查过就跳过），开着时每 2 小时再查一次。
+- 0.42.1 以前是「最多 12 小时一次」：新版本发出来后，刚打开的启动器可能半天都不知道。
 - 只查 GitHub 上标为 Latest 的正式版。
 - 设置右上角可以手动检查。
 
@@ -18,7 +19,7 @@
 | 装法 | 怎么认出来 | 自动更新 | 手动更新 |
 | --- | --- | --- | --- |
 | Windows exe | Windows | 后台下载，关掉时换上 | 「下载并更新」→「现在重启」 |
-| deb + apt 源 | 程序是 `/usr/bin/cairn`，dpkg 里有 cairn，apt 源里有 Cairn 的地址 | 系统每天更新 | 「更新」→ 系统授权窗口 →「现在重启」 |
+| deb + apt 源 | 程序是 `/usr/bin/cairn`，dpkg 里有 cairn，apt 源里有 Cairn 的地址 | 每小时更新 | 「更新」→ 系统授权窗口 →「现在重启」 |
 | deb，没有 apt 源 | 同上，但没有 apt 源 | 无 | 同上 |
 | 别的 | 自己编译的、直接运行二进制的 | 无 | 下载 deb，给出安装命令 |
 
@@ -71,9 +72,14 @@
 - 卸载（remove）时保留这两个文件；彻底删除（purge）时删掉。
 - 这两个文件不是 conffile。升级时不会弹出「是否覆盖配置文件」。
 
-### 4.3 系统每天更新
+### 4.3 每小时更新
 
-- Ubuntu 默认开着 unattended-upgrades，每天运行一次。上面那行配置把 Cairn 加进允许自动升级的来源。
+- **定时器**：deb 带一个 `cairn-update.timer`，开机 5 分钟后跑一次，之后每小时一次（随机错开 10 分钟）。它以 root 运行 `/usr/lib/cairn/update`：
+  - 只更新 Cairn 这一个源的索引：`apt-get update` 把源列表指向 `cairn.sources`，别的源的索引不动。
+  - 只升级 cairn 这一个包：`apt-get install --only-upgrade cairn`。apt 被占用时最多等 2 分钟。
+  - 删掉 `/etc/apt/apt.conf.d/52cairn-auto-update` 或 apt 源后，定时器什么都不做。
+- **启用和停用**：第一次安装，或从 0.42.2 以前升级时，启用定时器。玩家自己停用以后，升级不会再打开它。卸载时停用。
+- **unattended-upgrades**：Ubuntu 默认开着，每天运行一次。上面那行配置也把 Cairn 加进了允许自动升级的来源，算是第二道保险。
 - 程序被换掉以后，正在运行的 Cairn 不受影响。启动器每分钟看一次 `/proc/self/exe`：末尾多了 ` (deleted)`，就说明被换掉了。这时用 `dpkg-query` 读出新版本，侧栏提示「重启更新到 X」。
 - 系统没装或没开 unattended-upgrades（比如部分 Debian）时，用 `sudo apt upgrade` 或系统的软件更新器也能收到新版本。
 
@@ -97,13 +103,14 @@
   - Linux 系统在后台装好、还没查到更新说明时，写「更新说明在 GitHub 上」。
 - **设置**：外观卡片最后一行是「自动更新」。
   - Windows：开关。
-  - Linux：显示「由系统每天更新」或「没有 apt 源，需手动更新」。
+  - Linux：显示「由系统每小时更新」或「没有 apt 源，需手动更新」。
 
 ## 6. 测试
 
 - **core**：认出 apt 源（deb822、一行式、注释掉的不算）；apt 报错的说明；暂存的版本只在比现在新、文件还在时才算。
 - **界面**：「跳过」不影响已就绪的版本。
 - **postinst**：用临时目录代替 `/etc` 跑了这几种情况：第一次安装、从 0.40.1 升级、删掉后再升级、玩家已加过源、remove、purge。
+- **定时器**：用假的 `systemctl` 跑维护脚本：第一次安装和从 0.42.0 升级会启用，从 0.42.2 升级只重新加载，remove 时停用。只更新 Cairn 源的 `apt-get update` 写法用独立目录实跑过，别的源的索引不会被清掉。`systemd-analyze verify` 检查过两个单元文件。
 - **unattended-upgrades**：用它自己的 `match_whitelist_string` 核对，Cairn 的来源能匹配，Ubuntu 的不能。
 - **apt 源**：本地用真密钥建源，起一个 HTTP 服务，用独立的 apt 目录跑 `apt-get update` 和 `apt-get install --download-only cairn`：验签通过，选中最新版本。
 - **截图核对**：更新弹窗的各个状态、侧栏提示、设置里的「自动更新」，深浅两种主题。

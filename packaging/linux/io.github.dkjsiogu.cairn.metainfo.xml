@@ -28,6 +28,11 @@
   <url type="bugtracker">https://github.com/dkjsiogu/cairn/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.42.2" date="2026-11-08">
+      <description>
+        <p>Updates arrive sooner. Cairn checks for a new version every time it opens and every two hours while open. On Linux the deb adds an hourly timer that upgrades only the cairn package from its own repository, instead of waiting for the daily system upgrade.</p>
+      </description>
+    </release>
     <release version="0.42.1" date="2026-11-08">
       <description>
         <p>Imports Prism Launcher and MultiMC instance exports that sit inside one folder or carry their own component patches and libraries. Old version files now get the native library path at launch, and automatic memory tuning recognizes loaders from the libraries when a pack uses its own main class.</p>

@@ -1,0 +1,21 @@
+#!/bin/sh
+# Upgrade Cairn from its own apt repository. Run as root by cairn-update.timer.
+#
+# Only touches the Cairn source and the cairn package. Does nothing when the
+# player removed the source or turned automatic updates off by deleting
+# /etc/apt/apt.conf.d/52cairn-auto-update.
+set -e
+
+sources=/etc/apt/sources.list.d/cairn.sources
+[ -e /etc/apt/apt.conf.d/52cairn-auto-update ] || exit 0
+[ -e "$sources" ] || exit 0
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq \
+  -o Dir::Etc::SourceList="$sources" \
+  -o Dir::Etc::SourceParts=/dev/null \
+  -o APT::Get::List-Cleanup=0
+apt-get install -qq -y --only-upgrade \
+  -o DPkg::Lock::Timeout=120 \
+  -o Dpkg::Options::=--force-confold \
+  cairn

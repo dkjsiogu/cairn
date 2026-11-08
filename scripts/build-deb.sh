@@ -54,6 +54,12 @@ install -Dm644 packaging/linux/apt/cairn-archive-keyring.gpg \
 install -Dm644 packaging/linux/apt/cairn.sources "$stage/usr/share/cairn/apt/cairn.sources"
 install -Dm644 packaging/linux/apt/52cairn-auto-update \
   "$stage/usr/share/cairn/apt/52cairn-auto-update"
+# Hourly update timer: upgrades only the cairn package from its own source.
+install -Dm755 packaging/linux/apt/cairn-update "$stage/usr/lib/cairn/update"
+install -Dm644 packaging/linux/systemd/cairn-update.service \
+  "$stage/usr/lib/systemd/system/cairn-update.service"
+install -Dm644 packaging/linux/systemd/cairn-update.timer \
+  "$stage/usr/lib/systemd/system/cairn-update.timer"
 
 for size in 16 24 32 48 64 128 256 512; do
   install -Dm644 "packaging/linux/icons/io.github.dkjsiogu.cairn-${size}.png" \
@@ -97,6 +103,7 @@ Description: Lightweight Minecraft launcher
 EOF
 
 install -m755 packaging/linux/debian/postinst "$stage/DEBIAN/postinst"
+install -m755 packaging/linux/debian/prerm "$stage/DEBIAN/prerm"
 install -m755 packaging/linux/debian/postrm "$stage/DEBIAN/postrm"
 
 (cd "$stage" && find . -type f ! -path './DEBIAN/*' -printf '%P\n' | sort | xargs md5sum > DEBIAN/md5sums)

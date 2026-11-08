@@ -1,8 +1,11 @@
 #!/bin/sh
-# Add the Cairn apt source and daily automatic updates.
+# Add the Cairn apt source, daily unattended upgrades and an hourly update timer.
 #
-# Only on a fresh install, or when upgrading from a version without them
-# (before 0.41.0). If the player deletes either file later, it stays deleted.
+# The source and the unattended-upgrades setting are added on a fresh install,
+# or when upgrading from a version without them (before 0.41.0). The timer is
+# enabled on a fresh install, or when upgrading from a version without it
+# (before 0.42.2). If the player deletes either file or disables the timer
+# later, upgrades leave that choice alone.
 set -e
 
 share=/usr/share/cairn/apt
@@ -17,6 +20,12 @@ if [ "$1" = configure ]; then
     fi
     if [ ! -e "$auto" ]; then
       install -m 644 "$share/52cairn-auto-update" "$auto"
+    fi
+  fi
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    if [ -z "$2" ] || dpkg --compare-versions "$2" lt 0.42.2; then
+      systemctl enable --now cairn-update.timer >/dev/null 2>&1 || true
     fi
   fi
 fi

@@ -1,7 +1,7 @@
-# 14 · 原型实现状态（0.1 → 0.42.1）
+# 14 · 原型实现状态（0.1 → 0.42.2）
 
 > 日期：2026-11-07
-> 对应发布：GitHub Release `v0.42.1` 的 `cairn.exe`、`cairn_0.42.1_amd64.deb`，以及 apt 源 `https://dkjsiogu.github.io/cairn/apt`（0.37 起改名 Cairn）
+> 对应发布：GitHub Release `v0.42.2` 的 `cairn.exe`、`cairn_0.42.2_amd64.deb`，以及 apt 源 `https://dkjsiogu.github.io/cairn/apt`（0.37 起改名 Cairn）
 > 目的：把「设计稿」和「已经跑起来的代码」分开记账，避免把计划当成已完成。
 
 ## 1. 一句话结论
@@ -47,6 +47,8 @@
 0.34.0 加入 JVM 自动调参（`tuning.rs`，规范见 `docs/design/19-jvm-tuning.md`）：内存默认自动，按物理内存、逻辑处理器、Java 版本、加载器和 Mod 数量算出堆大小，配官方启动器那套 G1 参数并按堆放大 Region；Java 25 加紧凑对象头；大整合包配强机器时自动换分代 ZGC。设置里显示结果、依据和完整参数，可手动指定内存、回收器或追加 JVM 参数；CLI 增加 `--gc`、`--jvm-arg`，`--dry-run` 打印计算过程。生成的参数在本机 OpenJDK 11/17/21/25 和 GraalVM 21 上逐一启动验证。顺带修复 CLI 传相对 `--game-dir` 时游戏目录被解析两次的问题。
 
 0.34.1 修复 26.x 无法安装和启动：版本文件 `default-user-jvm` 的首条没有 `rules`，解析失败；`${natives_directory}` 误指向 `java` 子目录，`java.library.path` 变成 `.../java/java`。实测 26.1、26.3 原版可安装并进入世界。调参在版本文件带官方默认时跟随官方（26.x 为 ZGC + 紧凑对象头 + 预先占用 + 字符串去重，初始堆 2 GB）。Java 选择改为够用里最低的大版本，同版本优先 64 位 OpenJDK。
+
+0.42.2 更新来得更快（见 [26](26-auto-update.md)）。启动器每次打开都检查（10 分钟内查过就跳过），开着时每 2 小时再查；以前最多 12 小时一次，新版本发出后可能半天都不知道。deb 带上 `cairn-update.timer`：开机 5 分钟后和之后每小时以 root 跑 `/usr/lib/cairn/update`，只更新 Cairn 源的索引、只升级 cairn 包，删掉 `52cairn-auto-update` 就不做；第一次安装或从 0.42.2 以前升级时启用，卸载时停用（新增 `prerm`）。
 
 0.42.1 支持带组件补丁的 Prism/MultiMC 实例整合包。`install::prism` 按 Prism 的规则把 `mmc-pack.json` 的组件依次叠起来（主类、参数、游戏本体、资源索引后者覆盖；tweaker、JVM 参数、agent 追加；同名库替换；Java 取兼容列表里最小的），组件优先用包里的 `patches/<uid>.json`，没有就取 Prism 元数据；`MMC-hint: local` 的库从包里的 `libraries/` 放进去；需要 ForgeWrapper、jarMods、mavenFiles 的组件明确报不支持。实例导出包可以套一层文件夹（导入和拖入都认）。另外：Prism 写法里没写路径的 native classifier 补上路径；只有 `minecraftArguments` 的老版本启动时补 `-Djava.library.path`；自动调参在主类是自定义启动类时从库认加载器。实测一个 1.7.10 + LWJGL3 的大型实例包（323 个 Mod）导入后进到主菜单。
 
@@ -159,7 +161,7 @@
 | 大文件分段下载 | `core::http` | 完成 | client jar 4 段并行、段续传、源回退 |
 | 重复安装快速路径 | `core::install::forge` / `neoforge` | 完成 | health 通过则 0 下载、0 processor |
 | Windows 交叉编译 | `x86_64-pc-windows-gnu` | 通过 | 无 MinGW DLL 依赖，仅系统 DLL |
-| 发布包 | GitHub Release `v0.42.1` | 完成（CI 构建） | 单 exe 约 8 MB / deb 约 4 MB |
+| 发布包 | GitHub Release `v0.42.2` | 完成（CI 构建） | 单 exe 约 8 MB / deb 约 4 MB |
 | apt 源 | GitHub Pages `dkjsiogu.github.io/cairn/apt` | 完成（CI 部署） | 最近 3 个版本；ed25519 签名；系统每天自动更新 |
 
 ### 2.1 实测记录
