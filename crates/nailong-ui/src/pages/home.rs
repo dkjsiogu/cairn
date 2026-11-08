@@ -5,10 +5,7 @@ use crate::prelude::*;
 impl App {
     /// 启动台下方的截图墙：游戏真正写截图的目录（和启动时的游戏目录一致）。
     pub(crate) fn screenshot_strip(&mut self, ui: &mut egui::Ui, row: &Row, width: f32) {
-        let game_dir = row
-            .game_dir
-            .clone()
-            .unwrap_or_else(|| self.root.dir().to_path_buf());
+        let game_dir = row.game_dir.clone();
         if self.gallery.shots.is_none() {
             self.gallery.shots = Some(shots::Shots::new(ui.ctx(), self.root.clone()));
             self.gallery.stale = true;
@@ -331,19 +328,12 @@ impl App {
     }
 
     pub(crate) fn main_view(&mut self, ui: &mut egui::Ui) {
-        let rows: Vec<Row> = self.visible_rows().cloned().collect();
-        let Some(row) = self
-            .selected_row()
-            .filter(|r| self.is_visible(r))
-            .or_else(|| rows.first().cloned())
-        else {
+        let rows: Vec<Row> = self.rows.clone();
+        let Some(row) = self.selected_row().or_else(|| rows.first().cloned()) else {
             self.welcome_view(ui);
             return;
         };
-        let game_dir = row
-            .game_dir
-            .clone()
-            .unwrap_or_else(|| self.root.version_dir(&row.profile));
+        let game_dir = row.game_dir.clone();
         let mut cache = self.home_cache_for(&row, &game_dir);
         if self.verify_home_content(ui.ctx(), &row) {
             cache = self.home_cache_for(&row, &game_dir);
@@ -585,10 +575,7 @@ impl App {
         {
             return cache.clone();
         }
-        let dir = row
-            .game_dir
-            .clone()
-            .unwrap_or_else(|| self.root.version_dir(&row.profile));
+        let dir = row.game_dir.clone();
         let index = installed::load(&dir);
         let count = |kind: mods::ContentKind| {
             index
@@ -664,10 +651,7 @@ impl App {
         if fresh || self.busy.is_some() {
             return false;
         }
-        let dir = row
-            .game_dir
-            .clone()
-            .unwrap_or_else(|| self.root.version_dir(&row.profile));
+        let dir = row.game_dir.clone();
         let (tx, rx) = mpsc::channel();
         self.home.scan = Some((row.id.clone(), rx));
         self.home.verified = Some(row.id.clone());

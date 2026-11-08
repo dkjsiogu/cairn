@@ -54,8 +54,14 @@ impl App {
         self.install.forge = preferred_forge(&cat, &mc);
     }
 
+    /// 补全：对这个版本（同一个名字）再装一遍。游戏文件不动，只重写版本 JSON 和 jar。
     pub(crate) fn start_repair(&mut self, row: Row) {
-        self.start_install_worker(row.mc, row.loader, row.loader_version.unwrap_or_default());
+        self.start_install_worker(
+            row.mc,
+            row.loader,
+            row.loader_version.unwrap_or_default(),
+            row.id,
+        );
     }
 
     pub(crate) fn start_modpack(&mut self, path: PathBuf) {
@@ -97,7 +103,7 @@ impl App {
         };
         std::thread::spawn(move || {
             let msg = match modpack::import_pack(&root, &path, &source, &sink) {
-                Ok(instance) => Msg::InstallDone(format!("instance:{}", instance.id)),
+                Ok(pack) => Msg::InstallDone(pack.id),
                 Err(Error::Cancelled) => Msg::InstallCancelled,
                 Err(e) => Msg::InstallFailed(e.to_string()),
             };
@@ -107,7 +113,14 @@ impl App {
         });
     }
 
-    pub(crate) fn start_install_worker(&mut self, mc: String, loader: LoaderKind, version: String) {
+    /// 装一个版本到 `versions/<name>/`。名字已存在就是补全或换加载器版本。
+    pub(crate) fn start_install_worker(
+        &mut self,
+        mc: String,
+        loader: LoaderKind,
+        version: String,
+        name: String,
+    ) {
         if self.busy.is_some() {
             return;
         }
@@ -115,11 +128,12 @@ impl App {
             self.error = Some(format!("这个版本没有可用的 {}", loader.name()));
             return;
         }
-        let target = match loader {
-            LoaderKind::Vanilla => mc.clone(),
-            LoaderKind::Fabric => fabric::profile_id(&mc, &version),
-            LoaderKind::NeoForge => format!("neoforge-{version}"),
-            LoaderKind::Forge => forge::profile_id(&mc, &version),
+        let name = match versions::check_name(&name) {
+            Ok(name) => name,
+            Err(e) => {
+                self.error = Some(e.to_string());
+                return;
+            }
         };
         let target_label = if loader == LoaderKind::Vanilla {
             mc.clone()
@@ -131,17 +145,15 @@ impl App {
         self.show_install = true;
         self.show_manage = false;
         self.show_mods = false;
-        if loader == LoaderKind::Vanilla {
-            self.show_base = true;
-        }
         cancel::reset();
         self.cancel_requested = false;
         self.busy = Some(Task::Install);
-        self.activity = Some(Activity::new(target_label.clone(), "准备安装"));
+        self.activity = Some(Activity::new(name.clone(), "准备安装"));
         self.install.repair_target = Some(RepairTarget::Loader {
             mc: mc.clone(),
             loader,
             version: version.clone(),
+            name: name.clone(),
         });
         self.install.mc = mc.clone();
         self.install.kind = loader;
@@ -151,13 +163,13 @@ impl App {
             LoaderKind::Forge => self.install.forge = version.clone(),
             LoaderKind::Vanilla => {}
         }
-        self.log.push(format!("安装 {target_label}"));
+        self.log.push(format!("安装 {name}（{target_label}）"));
 
         let root = self.root.clone();
         let source = self.prefs.source.clone();
-        let point_dir = root.version_dir(&target);
-        let point_files = vec![format!("{target}.json"), format!("{target}.jar")];
-        let point_json = point_dir.join(format!("{target}.json"));
+        let point_dir = root.version_dir(&name);
+        let point_files = vec![format!("{name}.json"), format!("{name}.jar")];
+        let point_json = root.version_json(&name);
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
         let tx = Arc::new(Mutex::new(tx));
@@ -170,7 +182,7 @@ impl App {
             })
         };
         std::thread::spawn(move || {
-            // 重装/修复已有加载器前留一份，恢复点里会带上版本 JSON 与补丁 jar。
+            // 补全或换加载器版本前留一份，恢复点里会带上版本 JSON 与 jar。
             if point_json.is_file()
                 && let Err(e) = rollback::backup_extra(&point_dir, "更新加载器前", &point_files)
             {
@@ -179,18 +191,18 @@ impl App {
                 }
                 return;
             }
-            let result: Result<String, Error> = match loader {
-                LoaderKind::Vanilla => {
-                    vanilla::install_with(&root, &mc, &source, &sink).map(|()| target.clone())
-                }
-                LoaderKind::Fabric => fabric::install_with(&root, &mc, &version, &source, &sink),
-                LoaderKind::NeoForge => {
-                    neoforge::install_with(&root, &mc, &version, &source, &sink)
-                }
-                LoaderKind::Forge => forge::install_with(&root, &mc, &version, &source, &sink),
-            };
+            let version = (loader != LoaderKind::Vanilla).then_some(version);
+            let result = versions::install(
+                &root,
+                &name,
+                &mc,
+                loader.core(),
+                version.as_deref(),
+                &source,
+                &sink,
+            );
             let msg = match result {
-                Ok(id) => Msg::InstallDone(id),
+                Ok(name) => Msg::InstallDone(name),
                 Err(Error::Cancelled) => Msg::InstallCancelled,
                 Err(e) => Msg::InstallFailed(e.to_string()),
             };
@@ -200,31 +212,42 @@ impl App {
         });
     }
 
-    pub(crate) fn delete_row(&mut self, row: &Row) {
+    pub(crate) fn delete_row(&mut self, row: &Row, permanent: bool) {
         if let Some(reason) = self.write_block(Some(&row.id)) {
             self.error = Some(reason.into());
             self.delete_confirm = None;
             return;
         }
-        let result = if let Some(id) = row.id.strip_prefix("instance:") {
-            self.root.remove_instance(id)
+        let result = if permanent {
+            versions::remove_permanently(&self.root, &row.id)
         } else {
-            self.root.remove_version(&row.profile)
+            versions::remove(&self.root, &row.id)
         };
         match result {
             Ok(()) => {
-                self.notice = Some(format!("已删除 {}", row.label));
+                self.delete_failed = None;
+                self.notice = Some(if permanent {
+                    format!("已删除「{}」", row.id)
+                } else {
+                    format!("已把「{}」移到回收站", row.id)
+                });
                 self.error = None;
                 self.delete_confirm = None;
                 self.refresh();
-                if self.visible_count() == 0 {
+                if self.rows.is_empty() {
                     self.show_manage = false;
                     self.open_install();
                 }
             }
             Err(e) => {
-                self.error = Some(format!("删除失败: {e}"));
                 self.delete_confirm = None;
+                if permanent {
+                    self.error = Some(format!("没能删除：{e}"));
+                } else {
+                    // 回收站用不了（比如在 U 盘上）：问要不要直接删。
+                    self.error = Some(e.to_string());
+                    self.delete_failed = Some(row.id.clone());
+                }
             }
         }
     }
@@ -249,21 +272,12 @@ impl App {
         }
         ui.add_space(6.0);
         if motion::secondary_sized(ui, "打开目录", true, 78.0, 34.0, 12.0).clicked() {
-            *open_dir = Some(
-                row.game_dir
-                    .clone()
-                    .unwrap_or_else(|| self.root.version_dir(&row.profile)),
-            );
+            *open_dir = Some(row.game_dir.clone());
         }
     }
 
     pub(crate) fn manage_view(&mut self, ui: &mut egui::Ui) {
-        let rows: Vec<Row> = self
-            .rows
-            .iter()
-            .filter(|row| self.show_base || !row.hidden)
-            .cloned()
-            .collect();
+        let rows: Vec<Row> = self.rows.clone();
         if self.selected.is_none()
             && let Some(first) = rows.first()
         {
@@ -272,7 +286,7 @@ impl App {
         let selected = self.selected_row();
         let mut chosen: Option<Row> = None;
         let mut go_install = false;
-        let mut delete_target: Option<Row> = None;
+        let mut delete_target: Option<(Row, bool)> = None;
         let mut open_dir: Option<PathBuf> = None;
 
         egui::Panel::left("manage_versions")
@@ -315,24 +329,6 @@ impl App {
                     });
                 });
                 ui.add_space(10.0);
-                let mut show_base = self.show_base;
-                ui.horizontal(|ui| {
-                    if toggle_switch(ui, show_base).clicked() {
-                        show_base = !show_base;
-                    }
-                    ui.label(
-                        egui::RichText::new("显示基础版本")
-                            .size(13.0)
-                            .color(if show_base { t::ink() } else { t::sub() }),
-                    );
-                });
-                if show_base != self.show_base {
-                    self.show_base = show_base;
-                    if !show_base {
-                        self.ensure_visible_selection();
-                    }
-                }
-                ui.add_space(8.0);
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .max_height((ui.available_height() - 46.0).max(120.0))
@@ -412,7 +408,7 @@ impl App {
                                     // 长名字换行完整显示，不截断。
                                     ui.add(
                                         egui::Label::new(
-                                            egui::RichText::new(&row.label)
+                                            egui::RichText::new(&row.id)
                                                 .size(24.0)
                                                 .family(display_family())
                                                 .color(t::ink()),
@@ -425,13 +421,9 @@ impl App {
                             ui.horizontal(|ui| {
                                 status_dot(ui, row.health.missing == 0);
                                 ui.label(
-                                    egui::RichText::new(format!(
-                                        "{} · {}",
-                                        row.mc,
-                                        row.loader.name()
-                                    ))
-                                    .size(13.0)
-                                    .color(t::sub()),
+                                    egui::RichText::new(row_kind(&row))
+                                        .size(13.0)
+                                        .color(t::sub()),
                                 );
                                 ui.label(egui::RichText::new("·").size(13.0).color(t::sub()));
                                 ui.label(
@@ -538,7 +530,7 @@ impl App {
                             .corner_radius(motion::R)
                             .inner_margin(egui::Margin::symmetric(16, 14))
                             .show(ui, |ui| {
-                                info_line(ui, "版本 ID", &row.id);
+                                self.name_line(ui, &row);
                                 ui.add_space(8.0);
                                 info_line(
                                     ui,
@@ -550,34 +542,24 @@ impl App {
                                         None => row.loader.name().to_string(),
                                     },
                                 );
+                                if let Some(pack) = &row.pack {
+                                    ui.add_space(8.0);
+                                    info_line(ui, "整合包", pack);
+                                }
                                 ui.add_space(8.0);
-                                let dir = row
-                                    .game_dir
-                                    .clone()
-                                    .unwrap_or_else(|| self.root.version_dir(&row.profile));
+                                let dir = row.game_dir.clone();
                                 ui.horizontal(|ui| {
-                                    if path_row(ui, "游戏目录", &dir) {
+                                    if path_row(ui, "文件夹", &dir) {
                                         open_dir = Some(dir.clone());
                                     }
                                 });
-                                ui.add_space(8.0);
-                                if row.required_by > 0 {
-                                    ui.add_space(8.0);
-                                    info_line(ui, "被依赖", &format!("{} 个版本", row.required_by));
-                                }
-                                if row.used_by > 0 {
-                                    ui.add_space(8.0);
-                                    info_line(ui, "被使用", &format!("{} 个整合包", row.used_by));
-                                }
-                                ui.add_space(8.0);
-                                info_line(
-                                    ui,
-                                    "隔离",
-                                    if row.game_dir.is_some() {
-                                        "已启用（内容与存档在版本目录）"
-                                    } else {
-                                        "未启用（与其它版本共享）"
-                                    },
+                                ui.add_space(4.0);
+                                ui.label(
+                                    egui::RichText::new(
+                                        "Mod、存档、配置都在这个文件夹里，和别的版本互不影响",
+                                    )
+                                    .size(13.0)
+                                    .color(t::dim()),
                                 );
                             });
 
@@ -608,19 +590,19 @@ impl App {
 
                         ui.add_space(10.0);
                         ui.horizontal(|ui| {
-                            if self.delete_confirm.as_deref() == Some(row.id.as_str()) {
+                            if self.delete_failed.as_deref() == Some(row.id.as_str()) {
                                 ui.label(
-                                    egui::RichText::new(format!("确认删除 {}？", row.label))
+                                    egui::RichText::new("回收站用不了。直接删除？删了找不回来。")
                                         .size(13.0)
                                         .color(t::warn()),
                                 );
                                 if ui.button("取消").clicked() {
-                                    self.delete_confirm = None;
+                                    self.delete_failed = None;
                                 }
                                 if ui
                                     .add(
                                         egui::Button::new(
-                                            egui::RichText::new("确认删除")
+                                            egui::RichText::new("直接删除")
                                                 .size(13.0)
                                                 .color(t::danger()),
                                         )
@@ -632,7 +614,38 @@ impl App {
                                     )
                                     .clicked()
                                 {
-                                    delete_target = Some(row.clone());
+                                    delete_target = Some((row.clone(), true));
+                                }
+                            } else if self.delete_confirm.as_deref() == Some(row.id.as_str()) {
+                                let worlds = self.version_summary(&row).3;
+                                ui.label(
+                                    egui::RichText::new(if worlds > 0 {
+                                        format!("把「{}」连同 {worlds} 个世界移到回收站？", row.id)
+                                    } else {
+                                        format!("把「{}」移到回收站？", row.id)
+                                    })
+                                    .size(13.0)
+                                    .color(t::warn()),
+                                );
+                                if ui.button("取消").clicked() {
+                                    self.delete_confirm = None;
+                                }
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new("移到回收站")
+                                                .size(13.0)
+                                                .color(t::danger()),
+                                        )
+                                        .fill(t::tint(t::danger(), 0.16))
+                                        .stroke(egui::Stroke::new(
+                                            1.0,
+                                            t::tint(t::danger(), 0.71),
+                                        )),
+                                    )
+                                    .clicked()
+                                {
+                                    delete_target = Some((row.clone(), false));
                                 }
                             } else if ui
                                 .add(
@@ -657,17 +670,90 @@ impl App {
         if let Some(row) = chosen {
             self.selected = Some(row.id.clone());
             self.delete_confirm = None;
+            self.delete_failed = None;
+            self.renaming = None;
         }
         if let Some(dir) = open_dir {
             open_folder(&dir);
         }
-        if let Some(row) = delete_target {
-            self.delete_row(&row);
+        if let Some((row, permanent)) = delete_target {
+            self.delete_row(&row, permanent);
             self.delete_confirm = None;
         }
         if go_install {
             self.show_manage = false;
             self.open_install();
+        }
+    }
+
+    /// 「名字」这一行：平时显示名字和「改名」，点了变成输入框。
+    fn name_line(&mut self, ui: &mut egui::Ui, row: &Row) {
+        let editing = self.renaming.as_ref().is_some_and(|(id, _)| id == &row.id);
+        let mut start = false;
+        let mut save: Option<String> = None;
+        let mut cancel = false;
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("名字").size(13.0).color(t::sub()));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if !editing {
+                    let blocked = self.write_block(Some(&row.id));
+                    let link = ui.add_enabled_ui(blocked.is_none(), |ui| action_link(ui, "改名"));
+                    if let Some(reason) = blocked {
+                        link.response.on_disabled_hover_text(reason);
+                    } else if link.inner.clicked() {
+                        start = true;
+                    }
+                    ui.label(egui::RichText::new(&row.id).size(13.0));
+                    return;
+                }
+                if action_link(ui, "取消").clicked() {
+                    cancel = true;
+                }
+                if action_link(ui, "保存").clicked() {
+                    save = self.renaming.as_ref().map(|(_, text)| text.clone());
+                }
+                if let Some((_, text)) = &mut self.renaming {
+                    let response = ui.add(
+                        egui::TextEdit::singleline(text)
+                            .desired_width(220.0)
+                            .frame(crate::dialogs::add_account::field_frame()),
+                    );
+                    if !response.has_focus() && !response.lost_focus() {
+                        response.request_focus();
+                    }
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        save = Some(text.clone());
+                    }
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        cancel = true;
+                    }
+                }
+            });
+        });
+        if start {
+            self.renaming = Some((row.id.clone(), row.id.clone()));
+        }
+        if cancel {
+            self.renaming = None;
+        }
+        if let Some(text) = save {
+            if let Some(reason) = self.write_block(Some(&row.id)) {
+                self.error = Some(reason.into());
+                return;
+            }
+            match versions::rename(&self.root, &row.id, &text) {
+                Ok(name) => {
+                    self.renaming = None;
+                    self.error = None;
+                    if name != row.id {
+                        self.notice = Some(format!("已改名为「{name}」"));
+                    }
+                    self.refresh();
+                    self.selected = Some(name);
+                    self.gallery.stale = true;
+                }
+                Err(e) => self.error = Some(e.to_string()),
+            }
         }
     }
 
@@ -683,10 +769,7 @@ impl App {
     }
 
     pub(crate) fn row_summary(&self, row: &Row) -> (usize, usize, usize, usize) {
-        let dir = row
-            .game_dir
-            .clone()
-            .unwrap_or_else(|| self.root.version_dir(&row.profile));
+        let dir = row.game_dir.clone();
         let index = installed::load(&dir);
         let count = |kind: mods::ContentKind| {
             index
@@ -953,16 +1036,63 @@ impl App {
                                             );
                                             ui.add_space(8.0);
                                             info_line(ui, "下载", "约 200–300 MB");
-                                            ui.add_space(8.0);
-                                            info_line(
-                                                ui,
-                                                "目标",
-                                                &self.root.dir().display().to_string(),
-                                            );
                                             ui.add_space(14.0);
+                                            ui.label(
+                                                egui::RichText::new("名字")
+                                                    .size(13.0)
+                                                    .color(t::sub()),
+                                            );
+                                            ui.add_space(4.0);
+                                            let auto = versions::unique_name(
+                                                &self.root,
+                                                &versions::default_name(&mc, kind.core()),
+                                            );
+                                            if !self.install.name_edited {
+                                                self.install.name = auto.clone();
+                                            }
+                                            let response = ui.add(
+                                                egui::TextEdit::singleline(&mut self.install.name)
+                                                    .hint_text(auto.as_str())
+                                                    .desired_width(ui.available_width())
+                                                    .frame(
+                                                        crate::dialogs::add_account::field_frame(),
+                                                    ),
+                                            );
+                                            if response.changed() {
+                                                self.install.name_edited = true;
+                                            }
+                                            let name_problem =
+                                                match versions::check_name(&self.install.name) {
+                                                    Err(e) => Some(e.to_string()),
+                                                    Ok(name)
+                                                        if versions::unique_name(
+                                                            &self.root, &name,
+                                                        ) != name =>
+                                                    {
+                                                        Some("已经有叫这个名字的版本了".into())
+                                                    }
+                                                    Ok(_) => None,
+                                                };
+                                            ui.add_space(4.0);
+                                            ui.label(
+                                                egui::RichText::new(match &name_problem {
+                                                    Some(problem) => problem.clone(),
+                                                    None => {
+                                                        "一个版本一个文件夹，Mod 和存档都在里面"
+                                                            .to_string()
+                                                    }
+                                                })
+                                                .size(13.0)
+                                                .color(if name_problem.is_some() {
+                                                    t::warn()
+                                                } else {
+                                                    t::dim()
+                                                }),
+                                            );
                                             ui.add_space(14.0);
                                             let can_install = self.busy.is_none()
                                                 && !mc.is_empty()
+                                                && name_problem.is_none()
                                                 && available(&catalog, kind, &mc)
                                                 && (kind == LoaderKind::Vanilla
                                                     || !version.is_empty());
@@ -1072,7 +1202,9 @@ impl App {
         };
         if go {
             self.install.mc = mc.clone();
-            self.start_install_worker(mc, kind, version);
+            let name = self.install.name.clone();
+            self.install.name_edited = false;
+            self.start_install_worker(mc, kind, version, name);
         }
         if back {
             self.show_install = false;
@@ -1155,7 +1287,8 @@ impl App {
                                         mc,
                                         loader,
                                         version,
-                                    } => self.start_install_worker(mc, loader, version),
+                                        name,
+                                    } => self.start_install_worker(mc, loader, version, name),
                                     RepairTarget::Modpack(path) => self.start_modpack(path),
                                 }
                             }
@@ -1250,14 +1383,29 @@ pub(crate) fn version_row(ui: &mut egui::Ui, row: &Row, active: bool) -> egui::R
     child.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 2.0;
         // 列表里放不下就省略，悬停整行看全名。
-        ui.add(egui::Label::new(egui::RichText::new(&row.label).size(14.0)).truncate());
-        ui.label(
-            egui::RichText::new(format!("{} · {}", row.mc, row.loader.name()))
-                .size(13.0)
-                .color(t::sub()),
+        ui.add(egui::Label::new(egui::RichText::new(&row.id).size(14.0)).truncate());
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(row_kind(row))
+                    .size(13.0)
+                    .color(t::sub()),
+            )
+            .truncate(),
         );
     });
-    response.on_hover_text(&row.label)
+    response.on_hover_text(format!("{}\n{}", row.id, row_kind(row)))
+}
+
+/// 版本名下面那一行：`1.21.1 · NeoForge 21.1.209`，整合包前面加上「整合包」。
+pub(crate) fn row_kind(row: &Row) -> String {
+    let loader = match &row.loader_version {
+        Some(version) => format!("{} {version}", row.loader.name()),
+        None => row.loader.name().to_string(),
+    };
+    match &row.pack {
+        Some(_) => format!("整合包 · {} · {loader}", row.mc),
+        None => format!("{} · {loader}", row.mc),
+    }
 }
 
 /// 首次启动的步骤编号：完成的一步用绿色，未完成用暖色。
@@ -1293,5 +1441,8 @@ pub(crate) struct InstallForm {
     pub(crate) fabric: String,
     pub(crate) neoforge: String,
     pub(crate) forge: String,
+    /// 新版本的名字（文件夹名）。没改过时跟着 MC 版本和加载器自动换。
+    pub(crate) name: String,
+    pub(crate) name_edited: bool,
     pub(crate) repair_target: Option<RepairTarget>,
 }

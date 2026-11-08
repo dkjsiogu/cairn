@@ -24,6 +24,7 @@ pub mod shots;
 pub mod snapshots;
 pub mod tuning;
 pub mod update;
+pub mod versions;
 pub mod yggdrasil;
 
 pub use error::{Error, Result};

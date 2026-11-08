@@ -201,31 +201,11 @@ struct Album {
 }
 
 impl App {
-    /// 每个游戏目录和它对应的版本名；几个版本共用一个目录时写「几个版本共用」。
+    /// 每个版本的游戏目录（版本文件夹）和版本名。
     pub(crate) fn shot_dirs(&self) -> Vec<(PathBuf, String)> {
-        let mut out: Vec<(PathBuf, Vec<String>)> = Vec::new();
-        for row in &self.rows {
-            if row.hidden {
-                continue;
-            }
-            let dir = row
-                .game_dir
-                .clone()
-                .unwrap_or_else(|| self.root.dir().to_path_buf());
-            match out.iter_mut().find(|(d, _)| d == &dir) {
-                Some((_, labels)) => labels.push(row.label.clone()),
-                None => out.push((dir, vec![row.label.clone()])),
-            }
-        }
-        out.into_iter()
-            .map(|(dir, labels)| {
-                let label = if labels.len() == 1 {
-                    labels[0].clone()
-                } else {
-                    format!("{} 个版本共用", labels.len())
-                };
-                (dir, label)
-            })
+        self.rows
+            .iter()
+            .map(|row| (row.game_dir.clone(), row.id.clone()))
             .collect()
     }
 

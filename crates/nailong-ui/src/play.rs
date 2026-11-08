@@ -58,10 +58,7 @@ impl App {
     ) -> Option<(tuning::Plan, java::JavaRuntime)> {
         let key = Self::tuning_key(&row.id, cfg);
         if !self.play.tuning_cache.contains_key(&key) {
-            let game_dir = row
-                .game_dir
-                .clone()
-                .unwrap_or_else(|| self.root.dir().to_path_buf());
+            let game_dir = row.game_dir.clone();
             let chosen = cfg.java.as_deref().and_then(|path| self.java_at(path));
             let entry = if cfg.java.is_some() && chosen.is_none() {
                 None
@@ -170,10 +167,7 @@ impl App {
         self.play.last = Some(log::LastLaunch {
             label: row.label.clone(),
             log: launch::log_path(&self.root, &row.profile),
-            game_dir: row
-                .game_dir
-                .clone()
-                .unwrap_or_else(|| self.root.dir().to_path_buf()),
+            game_dir: row.game_dir.clone(),
             started: std::time::SystemTime::now(),
             outcome: log::Outcome::Running,
         });
@@ -192,7 +186,8 @@ impl App {
         let java_path = cfg.java.clone();
         let account_id = self.accounts.current.clone();
         let fallback_name = self.prefs.username.clone();
-        let version_label = row.label.clone();
+        // 截图记下的「地点：版本」用版本名。
+        let version_label = row.id.clone();
         let embed_shots = self.prefs.embed_shots;
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
@@ -254,7 +249,7 @@ impl App {
                 memory_mb: tuning.memory_mb,
                 gc: tuning.gc,
                 jvm_args: tuning.extra,
-                game_dir: row.game_dir.clone(),
+                game_dir: Some(row.game_dir.clone()),
                 java: java_path,
                 width,
                 height,

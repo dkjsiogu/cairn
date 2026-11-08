@@ -5,11 +5,7 @@ use crate::prelude::*;
 impl App {
     pub(crate) fn saves_game_dir(&self) -> Option<PathBuf> {
         let row = self.worlds.row.as_ref()?;
-        Some(
-            row.game_dir
-                .clone()
-                .unwrap_or_else(|| self.root.dir().to_path_buf()),
-        )
+        Some(row.game_dir.clone())
     }
 
     pub(crate) fn open_saves(&mut self, row: Row) {
@@ -112,10 +108,7 @@ impl App {
     pub(crate) fn auto_dirs(&self) -> Vec<PathBuf> {
         let mut dirs = Vec::new();
         for row in &self.rows {
-            let dir = row
-                .game_dir
-                .clone()
-                .unwrap_or_else(|| self.root.dir().to_path_buf());
+            let dir = row.game_dir.clone();
             if !dirs.contains(&dir) {
                 dirs.push(dir);
             }
@@ -246,7 +239,6 @@ impl App {
         let game_dir = self
             .saves_game_dir()
             .unwrap_or_else(|| self.root.dir().to_path_buf());
-        let shared = row.game_dir.is_none();
         let mut reload = false;
         let mut open_dir: Option<PathBuf> = None;
         let mut backup_all = false;
@@ -257,7 +249,7 @@ impl App {
         let mut delete_world: Option<String> = None;
         let mut delete_snapshot: Option<(String, String)> = None;
         let mut wanted_row: Option<Row> = None;
-        let version_rows: Vec<Row> = self.visible_rows().cloned().collect();
+        let version_rows: Vec<Row> = self.rows.clone();
 
         egui::Panel::top("saves_header")
             .frame(
@@ -298,17 +290,10 @@ impl App {
                                 });
                         });
                         ui.label(
-                            egui::RichText::new(if shared {
-                                format!(
-                                    "{} 个世界 · 该版本未隔离，存档在共享目录",
-                                    self.worlds.list.len()
-                                )
-                            } else {
-                                format!(
-                                    "{} 个世界 · 快照分块去重，第二次只写改动块",
-                                    self.worlds.list.len()
-                                )
-                            })
+                            egui::RichText::new(format!(
+                                "{} 个世界 · 快照分块去重，第二次只写改动块",
+                                self.worlds.list.len()
+                            ))
                             .size(13.0)
                             .color(t::sub()),
                         );

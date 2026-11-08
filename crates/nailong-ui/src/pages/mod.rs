@@ -68,7 +68,7 @@ impl App {
                 self.ensure_visible_selection();
             }
             Nav::Versions => {
-                if self.visible_count() == 0 {
+                if self.rows.is_empty() {
                     self.open_install();
                 } else {
                     self.show_mods = false;
@@ -92,10 +92,7 @@ impl App {
         if self.page_locked() {
             return;
         }
-        let Some(row) = self
-            .selected_row()
-            .or_else(|| self.visible_rows().next().cloned())
-        else {
+        let Some(row) = self.selected_row().or_else(|| self.rows.first().cloned()) else {
             self.open_install();
             return;
         };
@@ -137,10 +134,7 @@ impl App {
         if self.page_locked() {
             return;
         }
-        let Some(row) = self
-            .selected_row()
-            .or_else(|| self.visible_rows().next().cloned())
-        else {
+        let Some(row) = self.selected_row().or_else(|| self.rows.first().cloned()) else {
             self.open_install();
             return;
         };

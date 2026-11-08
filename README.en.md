@@ -8,7 +8,7 @@ A small, native Minecraft: Java Edition launcher written in Rust. Renamed to **C
 
 [简体中文](README.md) | **English**
 
-> Current version: **0.41.0** (preview)
+> Current version: **0.42.0** (preview)
 >
 > Goals: small binaries, few dependencies, visible install progress, and a repair path after interruption. See [implementation status](docs/design/14-implementation-status.md) for exact boundaries.
 
@@ -26,6 +26,15 @@ A cairn is the pile of stones hikers leave by a trail: it does not walk for you,
 It is not a universal launcher, and it is not 1.0 yet. What works and what does not is laid out below.
 
 ## Interface
+
+0.42: one folder per version.
+
+- Each version is one folder, `versions/<name>/`, holding a complete version file plus its mods, worlds and config. Versions do not depend on each other; deleting one never breaks another.
+- Name a version when you install it. The same Minecraft version and loader can be installed several times, e.g. "Survival" and "Testing". Versions can be renamed.
+- Deleting a version moves its folder, worlds included, to the trash.
+- Modpacks install as a version folder too.
+- Settings can clean up libraries and assets no version uses any more.
+- See [27 · One folder per version](docs/design/27-version-folders.md).
 
 0.41: automatic updates.
 
@@ -196,7 +205,7 @@ Drag a `.mrpack` or `.zip` into the window to start an import. A single mod `.ja
 | Platform | File | Size | Requirements |
 |---|---|---:|---|
 | Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | ~9 MB | Windows 10/11, Java 21 |
-| Linux x64 (deb) | [cairn_0.41.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.41.0_amd64.deb) | ~3.4 MB | Ubuntu 24.04+ / glibc ≥ 2.39, Java 21 |
+| Linux x64 (deb) | [cairn_0.42.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.42.0_amd64.deb) | ~3.4 MB | Ubuntu 24.04+ / glibc ≥ 2.39, Java 21 |
 
 Checksums: [SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS).
 
@@ -223,7 +232,7 @@ sudo apt update && sudo apt install cairn
 Or install the deb; it adds the same apt repository:
 
 ```bash
-sudo apt install ./cairn_0.41.0_amd64.deb
+sudo apt install ./cairn_0.42.0_amd64.deb
 ```
 
 You can also double-click the deb in a software center. After installation, **Cairn** appears in the application menu. An installed `nailong` package is replaced automatically.

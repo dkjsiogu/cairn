@@ -6,9 +6,7 @@ pub(crate) use crate::{motion, rings};
 pub(crate) use eframe::egui;
 pub(crate) use nailong_core::auth;
 pub(crate) use nailong_core::bench;
-pub(crate) use nailong_core::install::{
-    catalog, fabric, forge, health, modpack, neoforge, vanilla,
-};
+pub(crate) use nailong_core::install::{catalog, health, modpack};
 pub(crate) use nailong_core::installed;
 pub(crate) use nailong_core::launch::{self, LaunchOptions};
 pub(crate) use nailong_core::launchcfg::{self, MemoryPick, VersionLaunch};
@@ -19,6 +17,7 @@ pub(crate) use nailong_core::rollback;
 pub(crate) use nailong_core::saves;
 pub(crate) use nailong_core::snapshots;
 pub(crate) use nailong_core::tuning;
+pub(crate) use nailong_core::versions;
 pub(crate) use nailong_core::{Error, Root, cancel, java};
 pub(crate) use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 pub(crate) use std::path::PathBuf;

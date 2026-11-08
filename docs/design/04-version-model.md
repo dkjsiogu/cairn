@@ -1,5 +1,7 @@
 # 04 · 版本模型与磁盘布局
 
+> **0.42 起磁盘布局以 [27 · 一个版本一个文件夹](27-version-folders.md) 为准**：每个版本是 `versions/<名字>/`，带完整的版本 JSON 和全部游戏文件；原版和加载器的 profile 只在 `cache/cairn/profiles/` 里做安装缓存。本文下面的 `instances/`、`instance.toml`、隔离模式是早期设计，没有实现。继承与合并规则（§4）仍然适用。
+
 > 本文回答四个问题：版本 JSON 长什么样、如何沿 `inheritsFrom` 合并、实例如何引用版本、文件放在哪里。
 > 2026 年新格式（`26.x`、`default-user-jvm`、natives 子目录）的实测记录见 [附录 A](appendix-a-version-json-2026.md)。
 

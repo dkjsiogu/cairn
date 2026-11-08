@@ -6,8 +6,9 @@ use crate::install::{fabric, forge, neoforge, vanilla};
 use crate::manifest::{Context, VersionJson, library_specs_for};
 use crate::paths::{Root, write_atomic};
 use crate::progress::{Progress, Sink};
+use crate::versions;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -16,17 +17,10 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InstanceMeta {
-    pub name: String,
-    pub profile: String,
-    pub game_dir: String,
-    pub format: String,
-    pub source: String,
-}
-
+/// 导入好的整合包：`versions/<id>/` 一个版本文件夹，游戏文件就在里面。
 #[derive(Debug, Clone)]
 pub struct ImportedInstance {
+    /// 版本名（文件夹名）。
     pub id: String,
     pub name: String,
     pub profile: String,
@@ -247,7 +241,7 @@ pub fn import_mrpack(
         .ok_or_else(|| Error::Install("整合包没有声明 Minecraft 版本".into()))?;
 
     (sink)(Progress::stage("安装整合包加载器"));
-    let profile = install_loader(root, &mc, &index.dependencies, mirror, sink)?;
+    let profile = install_loader(&root.store(), &mc, &index.dependencies, mirror, sink)?;
     let name = if index.name.trim().is_empty() {
         archive_stem(archive)
     } else {
@@ -300,9 +294,9 @@ fn import_curseforge(
         .or_else(|| manifest.minecraft.mod_loaders.first());
     (sink)(Progress::stage("安装整合包加载器"));
     let profile = match loader {
-        Some(loader) => install_curse_loader(root, &mc, &loader.id, mirror, sink)?,
+        Some(loader) => install_curse_loader(&root.store(), &mc, &loader.id, mirror, sink)?,
         None => {
-            vanilla::install_with(root, &mc, mirror, sink)?;
+            vanilla::install_with(&root.store(), &mc, mirror, sink)?;
             mc.clone()
         }
     };
@@ -362,7 +356,7 @@ fn import_prism(
         .filter(|version| !version.is_empty())
         .ok_or_else(|| Error::Install("Prism/MultiMC 整合包没有声明 Minecraft 版本".into()))?;
     (sink)(Progress::stage("安装整合包加载器"));
-    let profile = install_prism_loader(root, &mc, &pack.components, mirror, sink)?;
+    let profile = install_prism_loader(&root.store(), &mc, &pack.components, mirror, sink)?;
     let name = instance_cfg_name(&mut zip).unwrap_or_else(|| archive_stem(archive));
     let (id, instance_dir, game_dir) = create_instance(root, &name, &profile, "prism", archive)?;
 
@@ -422,7 +416,7 @@ fn import_mcbbs(
         println!("! MCBBS 整合包含自定义 libraries，当前只安装 addon 加载器");
     }
     (sink)(Progress::stage("安装整合包加载器"));
-    let profile = install_mcbbs_loader(root, &mc, &manifest.addons, mirror, sink)?;
+    let profile = install_mcbbs_loader(&root.store(), &mc, &manifest.addons, mirror, sink)?;
     let name = manifest
         .name
         .clone()
@@ -650,9 +644,11 @@ fn import_embedded(
     if manifest.get("mainClass").and_then(|v| v.as_str()).is_none() {
         return Err(Error::Unsupported(format!("{format} 整合包缺少 mainClass")));
     }
-    (sink)(Progress::stage("安装 Minecraft 基础版本"));
-    vanilla::install_with(root, base, mirror, sink)?;
-    let profile = unique_loader_id(root, format, name);
+    (sink)(Progress::stage("安装 Minecraft 原版"));
+    // 整合包自带的版本 JSON 当作一个 profile 放进缓存，和加载器一样再合并进版本文件夹。
+    let store = root.store();
+    vanilla::install_with(&store, base, mirror, sink)?;
+    let profile = unique_loader_id(&store, format, name);
     let obj = manifest
         .as_object_mut()
         .ok_or_else(|| Error::Install(format!("{format} manifest 不是对象")))?;
@@ -670,7 +666,7 @@ fn import_embedded(
         Value::String(jar_id.unwrap_or_else(|| base.to_string())),
     );
     let text = serde_json::to_vec_pretty(&manifest).unwrap();
-    write_atomic(&root.version_json(&profile), &text)?;
+    write_atomic(&store.version_json(&profile), &text)?;
     let version: VersionJson = serde_json::from_slice(&text)
         .map_err(|e| Error::Install(format!("{format} 版本解析失败: {e}")))?;
 
@@ -1176,6 +1172,8 @@ fn instance_cfg_name(zip: &mut zip::ZipArchive<File>) -> Option<String> {
     None
 }
 
+/// 给整合包占一个版本文件夹，返回（版本名，文件夹，游戏目录）。游戏目录就是这个文件夹。
+/// 版本 JSON 在最后才写，没装完的不会出现在版本列表里。
 fn create_instance(
     root: &Root,
     name: &str,
@@ -1183,12 +1181,11 @@ fn create_instance(
     format: &str,
     archive: &Path,
 ) -> Result<(String, PathBuf, PathBuf)> {
-    let id = unique_instance_id(root, name);
-    let instance_dir = root.instance_dir(&id);
-    let game_dir = instance_dir.join("minecraft");
-    std::fs::create_dir_all(&game_dir).map_err(|e| crate::error::io(&game_dir, e))?;
+    let id = versions::unique_name(root, &versions::safe_name(name));
+    let dir = root.version_dir(&id);
+    std::fs::create_dir_all(&dir).map_err(|e| crate::error::io(&dir, e))?;
     let _ = (profile, format, archive);
-    Ok((id, instance_dir, game_dir))
+    Ok((id, dir.clone(), dir))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1203,21 +1200,25 @@ fn finish_instance(
     instance_dir: PathBuf,
     sink: &Sink,
 ) -> Result<ImportedInstance> {
-    let meta = InstanceMeta {
-        name: name.to_string(),
+    let (mc, loader, loader_version) = versions::detect(&root.store(), profile);
+    let meta = versions::Meta {
+        mc,
+        loader,
+        loader_version,
         profile: profile.to_string(),
-        game_dir: "minecraft".to_string(),
-        format: format.to_string(),
-        source: archive
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default(),
+        pack: Some(versions::Pack {
+            name: name.to_string(),
+            format: format.to_string(),
+            source: archive
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default(),
+        }),
     };
-    let _ = root;
-    write_atomic(
-        &instance_dir.join("instance.json"),
-        &serde_json::to_vec_pretty(&meta).unwrap(),
-    )?;
+    if let Err(e) = versions::create(root, id, profile, meta) {
+        let _ = std::fs::remove_dir_all(&instance_dir);
+        return Err(e);
+    }
     (sink)(Progress {
         stage: "安装完成".into(),
         files_done: 1,
@@ -1228,14 +1229,10 @@ fn finish_instance(
         current: None,
         source: None,
     });
-    println!(
-        "✓ 整合包 {} 导入完成（{}）",
-        meta.name,
-        instance_dir.display()
-    );
+    println!("✓ 整合包 {name} 导入完成（{}）", instance_dir.display());
     Ok(ImportedInstance {
         id: id.to_string(),
-        name: meta.name,
+        name: name.to_string(),
         profile: profile.to_string(),
         game_dir,
     })
@@ -1247,17 +1244,6 @@ fn archive_stem(archive: &Path) -> String {
         .map(|s| s.to_string_lossy().to_string())
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "整合包".to_string())
-}
-
-fn unique_instance_id(root: &Root, name: &str) -> String {
-    let base = slug(name);
-    let mut id = base.clone();
-    let mut n = 2;
-    while root.instance_dir(&id).exists() {
-        id = format!("{base}-{n}");
-        n += 1;
-    }
-    id
 }
 
 fn slug(name: &str) -> String {

@@ -28,6 +28,11 @@
   <url type="bugtracker">https://github.com/dkjsiogu/cairn/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.42.0" date="2026-11-08">
+      <description>
+        <p>One folder per version. Each version is a single folder with a complete version file and its own mods, worlds and config, so deleting one never breaks another. Name versions when installing and rename them later; the same loader can be installed several times. Deleting moves the folder to the trash. Modpacks install as a version folder too. Settings can clean up libraries and assets no version uses.</p>
+      </description>
+    </release>
     <release version="0.41.0" date="2026-11-08">
       <description>
         <p>Automatic updates. On Windows, new versions download in the background and are swapped in when Cairn closes. On Linux, the deb adds Cairn's apt repository, so the system updates Cairn daily; Cairn can also be installed with apt directly.</p>

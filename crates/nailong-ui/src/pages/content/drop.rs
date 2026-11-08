@@ -9,10 +9,7 @@ impl App {
             return self.content.row.clone().zip(self.content.game_dir.clone());
         }
         let row = self.selected_row()?;
-        let dir = row
-            .game_dir
-            .clone()
-            .unwrap_or_else(|| self.root.version_dir(&row.profile));
+        let dir = row.game_dir.clone();
         Some((row, dir))
     }
 
@@ -110,7 +107,6 @@ impl App {
         let mut names: Vec<String> = Vec::new();
         let mut skipped: Vec<String> = Vec::new();
         let mut problems: Vec<String> = Vec::new();
-        let mut marked = false;
         if !plan.items.is_empty() {
             let (reason, ok) = self.describe_drop(&DropPlan {
                 target: plan.target.clone(),
@@ -135,15 +131,6 @@ impl App {
                         })
                         .collect();
                     if !fresh.is_empty() {
-                        if row.instance.is_none()
-                            && !self.root.isolated_marker(&row.profile).exists()
-                        {
-                            let _ = std::fs::create_dir_all(game_dir);
-                            match std::fs::write(self.root.isolated_marker(&row.profile), b"1") {
-                                Ok(()) => marked = true,
-                                Err(e) => problems.push(format!("启用版本隔离失败: {e}")),
-                            }
-                        }
                         let loader = loader_state_files(&self.root, row, game_dir);
                         if problems.is_empty() {
                             if let Err(e) = rollback::backup_extra(game_dir, "导入内容前", &loader)
@@ -217,9 +204,6 @@ impl App {
         }
         if imported.is_empty() {
             return;
-        }
-        if marked {
-            self.refresh();
         }
         if on_content {
             // 新导入的要看得见：清掉筛选；全是另一类时切到那一类。

@@ -32,21 +32,38 @@ fn login_errors_are_actionable_not_raw_aadsts() {
 }
 
 #[test]
-fn detects_loader_base_dependencies() {
-    let root = temp_root("deps");
-    std::fs::create_dir_all(root.versions()).unwrap();
-    let base = root.versions().join("1.21.1");
-    let loader = root.versions().join("neoforge-21.1.209");
-    std::fs::create_dir_all(&base).unwrap();
-    std::fs::create_dir_all(&loader).unwrap();
-    std::fs::write(base.join("1.21.1.json"), r#"{"id":"1.21.1"}"#).unwrap();
+fn version_rows_read_the_cairn_record_or_guess() {
+    let root = temp_root("info");
+    let made = root.version_dir("生存");
+    std::fs::create_dir_all(&made).unwrap();
     std::fs::write(
-        loader.join("neoforge-21.1.209.json"),
-        r#"{"id":"neoforge-21.1.209","inheritsFrom":"1.21.1"}"#,
+        made.join("生存.json"),
+        r#"{"id":"生存","cairn":{"mc":"1.21.1","loader":"neoforge","loaderVersion":"21.1.209",
+            "profile":"neoforge-21.1.209","pack":{"name":"城市","format":"mrpack"}}}"#,
     )
     .unwrap();
-    let deps = profile_dependents(&root);
-    assert_eq!(deps.get("1.21.1"), Some(&1));
+    assert_eq!(
+        version_info(&root, "生存"),
+        (
+            "1.21.1".to_string(),
+            LoaderKind::NeoForge,
+            Some("21.1.209".to_string()),
+            Some("城市".to_string())
+        )
+    );
+    // 别的启动器装的：没有记录，按 id 猜。
+    let other = root.version_dir("fabric-loader-0.16.10-1.21.1");
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(
+        other.join("fabric-loader-0.16.10-1.21.1.json"),
+        r#"{"id":"fabric-loader-0.16.10-1.21.1"}"#,
+    )
+    .unwrap();
+    let (mc, loader, version, pack) = version_info(&root, "fabric-loader-0.16.10-1.21.1");
+    assert_eq!(
+        (mc.as_str(), loader, version.as_deref(), pack),
+        ("1.21.1", LoaderKind::Fabric, Some("0.16.10"), None)
+    );
     let _ = std::fs::remove_dir_all(root.dir());
 }
 

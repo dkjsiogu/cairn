@@ -404,11 +404,7 @@ impl App {
         }
         let game_dir = self
             .selected_row()
-            .map(|row| {
-                row.game_dir
-                    .clone()
-                    .unwrap_or_else(|| self.root.version_dir(&row.profile))
-            })
+            .map(|row| row.game_dir.clone())
             .unwrap_or_else(|| self.root.dir().to_path_buf());
         let mut close = false;
         let mut open_account = false;
@@ -717,6 +713,7 @@ impl App {
                                 },
                             );
                         });
+                        self.cleanup_row(ui);
                         ui.add_space(10.0);
                         ui.label(
                             egui::RichText::new(
@@ -929,6 +926,129 @@ impl App {
                 };
                 ui.label(egui::RichText::new(hint).size(13.0).color(t::sub()));
             });
+        });
+    }
+}
+
+enum CleanupMsg {
+    Planned(Result<versions::Cleanup, String>),
+    Done(Result<(usize, u64), String>),
+}
+
+/// 「清理不用的文件」：先算能空出多少，点了才删。见 docs/design/27-version-folders.md。
+#[derive(Default)]
+pub(crate) struct CleanupState {
+    rx: Option<mpsc::Receiver<CleanupMsg>>,
+    plan: Option<versions::Cleanup>,
+    status: Option<String>,
+}
+
+impl App {
+    fn cleanup_row(&mut self, ui: &mut egui::Ui) {
+        if let Some(rx) = &self.cleanup.rx {
+            if let Ok(msg) = rx.try_recv() {
+                self.cleanup.rx = None;
+                match msg {
+                    CleanupMsg::Planned(Ok(plan)) => {
+                        self.cleanup.status = plan
+                            .files
+                            .is_empty()
+                            .then(|| "没有可以清理的文件".to_string());
+                        self.cleanup.plan = Some(plan).filter(|p| !p.files.is_empty());
+                    }
+                    CleanupMsg::Planned(Err(e)) | CleanupMsg::Done(Err(e)) => {
+                        self.cleanup.status = Some(e);
+                    }
+                    CleanupMsg::Done(Ok((_, bytes))) => {
+                        self.cleanup.status = Some(format!("已清理，空出 {}", human_size(bytes)));
+                    }
+                }
+            }
+            if self.cleanup.rx.is_some() {
+                ui.ctx().request_repaint_after(Duration::from_millis(100));
+            }
+        }
+        let working = self.cleanup.rx.is_some();
+        let blocked = self.busy.is_some();
+        let mut plan_now = false;
+        let mut clean_now = false;
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("不用的运行库和资源")
+                    .size(13.0)
+                    .color(t::sub()),
+            )
+            .on_hover_text("删掉版本以后，它用过的运行库、资源和安装缓存还留着");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if working {
+                    ui.label(egui::RichText::new("正在处理…").size(13.0).color(t::dim()));
+                    return;
+                }
+                let link = |ui: &mut egui::Ui, text: &str| {
+                    let response = ui.add_enabled_ui(!blocked, |ui| action_link(ui, text));
+                    if blocked {
+                        response
+                            .response
+                            .on_disabled_hover_text("有任务在运行，完成后再清理");
+                        false
+                    } else {
+                        response.inner.clicked()
+                    }
+                };
+                match &self.cleanup.plan {
+                    Some(plan) => {
+                        if link(ui, "清理") {
+                            clean_now = true;
+                        }
+                        ui.label(
+                            egui::RichText::new(format!("能空出 {}", human_size(plan.bytes)))
+                                .size(13.0),
+                        );
+                    }
+                    None => {
+                        if link(ui, "算一下") {
+                            plan_now = true;
+                        }
+                        if let Some(status) = &self.cleanup.status {
+                            ui.label(egui::RichText::new(status).size(13.0).color(t::sub()));
+                        }
+                    }
+                }
+            });
+        });
+        if plan_now {
+            self.start_cleanup(ui.ctx(), false);
+        }
+        if clean_now {
+            self.start_cleanup(ui.ctx(), true);
+        }
+    }
+
+    /// 在后台算（或执行）清理。执行时重新算一遍，免得删掉刚装的版本要用的文件。
+    fn start_cleanup(&mut self, ctx: &egui::Context, run: bool) {
+        if self.busy.is_some() || self.cleanup.rx.is_some() {
+            return;
+        }
+        self.cleanup.plan = None;
+        self.cleanup.status = None;
+        let (tx, rx) = mpsc::channel();
+        self.cleanup.rx = Some(rx);
+        let root = self.root.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let plan = versions::plan_cleanup(&root).map_err(|e| e.to_string());
+            let msg = match (plan, run) {
+                (plan, false) => CleanupMsg::Planned(plan),
+                (Err(e), true) => CleanupMsg::Done(Err(e)),
+                (Ok(plan), true) => CleanupMsg::Done(
+                    versions::run_cleanup(&root, &plan)
+                        .map(|removed| (removed, plan.bytes))
+                        .map_err(|e| e.to_string()),
+                ),
+            };
+            let _ = tx.send(msg);
+            ctx.request_repaint();
         });
     }
 }

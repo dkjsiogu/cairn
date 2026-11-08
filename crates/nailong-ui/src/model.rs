@@ -20,6 +20,25 @@ impl LoaderKind {
         }
     }
 
+    /// core 里的写法。
+    pub(crate) fn core(self) -> versions::Loader {
+        match self {
+            Self::Vanilla => versions::Loader::Vanilla,
+            Self::Fabric => versions::Loader::Fabric,
+            Self::NeoForge => versions::Loader::NeoForge,
+            Self::Forge => versions::Loader::Forge,
+        }
+    }
+
+    pub(crate) fn from_core(loader: versions::Loader) -> Self {
+        match loader {
+            versions::Loader::Vanilla => Self::Vanilla,
+            versions::Loader::Fabric => Self::Fabric,
+            versions::Loader::NeoForge => Self::NeoForge,
+            versions::Loader::Forge => Self::Forge,
+        }
+    }
+
     pub(crate) fn rank(self) -> u8 {
         match self {
             Self::Fabric => 0,
@@ -47,34 +66,34 @@ pub(crate) fn target_label(row: &Row) -> String {
     }
 }
 
-/// 只有内容直接写进版本目录时，版本身份/补丁 jar 才在恢复点范围内。
+/// 恢复点里要带上的版本文件：版本 JSON 和客户端 jar 就在游戏目录（版本文件夹）里。
 pub(crate) fn loader_state_files(
     root: &Root,
     row: &Row,
     game_dir: &std::path::Path,
 ) -> Vec<String> {
-    if game_dir != root.version_dir(&row.profile) {
-        return Vec::new();
-    }
+    let _ = (root, game_dir);
     vec![
         format!("{}.json", row.profile),
         format!("{}.jar", row.profile),
     ]
 }
 
+/// 一个版本：`versions/<名字>/` 一个文件夹（见 docs/design/27-version-folders.md）。
 #[derive(Clone)]
 pub(crate) struct Row {
+    /// 版本名，也就是文件夹名。
     pub(crate) id: String,
+    /// 和 `id` 一样；启动、补全、恢复点都按它找版本 JSON。
     pub(crate) profile: String,
     pub(crate) label: String,
     pub(crate) mc: String,
     pub(crate) loader: LoaderKind,
     pub(crate) loader_version: Option<String>,
-    pub(crate) game_dir: Option<PathBuf>,
-    pub(crate) instance: Option<String>,
-    pub(crate) hidden: bool,
-    pub(crate) required_by: usize,
-    pub(crate) used_by: usize,
+    /// 游戏目录，就是版本文件夹。
+    pub(crate) game_dir: PathBuf,
+    /// 整合包的名字；不是整合包时为 None。
+    pub(crate) pack: Option<String>,
     pub(crate) health: health::Health,
 }
 
@@ -84,6 +103,8 @@ pub(crate) enum RepairTarget {
         mc: String,
         loader: LoaderKind,
         version: String,
+        /// 装到哪个版本（文件夹名）。
+        name: String,
     },
     Modpack(PathBuf),
 }
@@ -95,6 +116,7 @@ impl RepairTarget {
                 mc,
                 loader,
                 version,
+                ..
             } => {
                 if *loader == LoaderKind::Vanilla {
                     mc.clone()
@@ -333,76 +355,23 @@ pub(crate) fn preferred_forge(cat: &catalog::Catalog, mc: &str) -> String {
     cat.forge_for(mc).first().cloned().unwrap_or_default()
 }
 
-pub(crate) fn profile_dependents(root: &Root) -> HashMap<String, usize> {
-    let mut out = HashMap::new();
-    let Ok(entries) = std::fs::read_dir(root.versions()) else {
-        return out;
-    };
-    for entry in entries.flatten() {
-        if !entry.path().is_dir() {
-            continue;
+/// 一个版本是什么：MC 版本、加载器、加载器版本、整合包名。Cairn 装的读 JSON 里的 `cairn`
+/// 记录，别的启动器装的按内容猜。
+pub(crate) fn version_info(
+    root: &Root,
+    name: &str,
+) -> (String, LoaderKind, Option<String>, Option<String>) {
+    match versions::meta(root, name) {
+        Some(meta) => (
+            meta.mc,
+            LoaderKind::from_core(meta.loader),
+            meta.loader_version,
+            meta.pack.map(|pack| pack.name),
+        ),
+        None => {
+            let (mc, loader, version) = versions::detect(root, name);
+            (mc, LoaderKind::from_core(loader), version, None)
         }
-        let id = entry.file_name().to_string_lossy().to_string();
-        let Ok(bytes) = std::fs::read(root.version_json(&id)) else {
-            continue;
-        };
-        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-            continue;
-        };
-        if let Some(parent) = value.get("inheritsFrom").and_then(|v| v.as_str()) {
-            *out.entry(parent.to_string()).or_insert(0) += 1;
-        }
-    }
-    out
-}
-
-pub(crate) fn instance_usage(root: &Root) -> HashMap<String, usize> {
-    let mut out = HashMap::new();
-    let Ok(entries) = std::fs::read_dir(root.instances()) else {
-        return out;
-    };
-    for entry in entries.flatten() {
-        let Ok(bytes) = std::fs::read(entry.path().join("instance.json")) else {
-            continue;
-        };
-        let Ok(meta) = serde_json::from_slice::<modpack::InstanceMeta>(&bytes) else {
-            continue;
-        };
-        *out.entry(meta.profile).or_insert(0) += 1;
-    }
-    out
-}
-
-pub(crate) fn profile_info(root: &Root, profile: &str) -> (String, LoaderKind, Option<String>) {
-    let value: serde_json::Value = std::fs::read(root.version_json(profile))
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default();
-    let inherited = value
-        .get("inheritsFrom")
-        .and_then(|v| v.as_str())
-        .unwrap_or(profile)
-        .to_string();
-    if let Some(rest) = profile.strip_prefix("fabric-loader-") {
-        match rest.rsplit_once('-') {
-            Some((version, mc)) => (
-                mc.to_string(),
-                LoaderKind::Fabric,
-                Some(version.to_string()),
-            ),
-            None => (inherited, LoaderKind::Fabric, Some(rest.to_string())),
-        }
-    } else if let Some(rest) = profile.strip_prefix("neoforge-") {
-        (inherited, LoaderKind::NeoForge, Some(rest.to_string()))
-    } else if let Some(rest) = profile.strip_prefix("forge-") {
-        match rest.split_once('-') {
-            Some((mc, version)) => (mc.to_string(), LoaderKind::Forge, Some(version.to_string())),
-            None => (inherited, LoaderKind::Forge, Some(rest.to_string())),
-        }
-    } else if let Some((mc, version)) = profile.split_once("-forge-") {
-        (mc.to_string(), LoaderKind::Forge, Some(version.to_string()))
-    } else {
-        (profile.to_string(), LoaderKind::Vanilla, None)
     }
 }
 

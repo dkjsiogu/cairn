@@ -18,11 +18,7 @@ impl App {
         if self.page_locked() {
             return;
         }
-        let game_dir = row.as_ref().map(|row| {
-            row.game_dir
-                .clone()
-                .unwrap_or_else(|| self.root.version_dir(&row.profile))
-        });
+        let game_dir = row.as_ref().map(|row| row.game_dir.clone());
         let kind = match row.as_ref() {
             Some(row) if mod_loader(row.loader).is_none() => mods::ContentKind::ResourcePack,
             _ => mods::ContentKind::Mod,
@@ -180,7 +176,7 @@ impl App {
                 );
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let rows: Vec<Row> = self.visible_rows().cloned().collect();
+                let rows: Vec<Row> = self.rows.clone();
                 let label = self
                     .content
                     .row
@@ -431,11 +427,7 @@ impl App {
             self.selected = Some(row.id.clone());
         }
         self.content.row = row.clone();
-        self.content.game_dir = row.as_ref().map(|row| {
-            row.game_dir
-                .clone()
-                .unwrap_or_else(|| self.root.version_dir(&row.profile))
-        });
+        self.content.game_dir = row.as_ref().map(|row| row.game_dir.clone());
         match &row {
             Some(row) => {
                 self.content.mc = Some(row.mc.clone());

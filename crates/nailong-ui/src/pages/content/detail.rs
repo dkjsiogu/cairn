@@ -25,15 +25,6 @@ impl App {
             self.content.error = Some("目标目录无效".into());
             return;
         };
-        if row.instance.is_none() {
-            if let Some(parent) = game_dir.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            if let Err(e) = std::fs::write(self.root.isolated_marker(&row.profile), b"1") {
-                self.content.error = Some(format!("启用版本隔离失败: {e}"));
-                return;
-            }
-        }
         cancel::reset();
         self.cancel_requested = false;
         self.content.quick = Some(project_key(&project));
@@ -193,15 +184,6 @@ impl App {
         if let Err(e) = std::fs::create_dir_all(&mods_dir) {
             self.content.error = Some(format!("创建 mods 目录失败: {e}"));
             return;
-        }
-        if row.instance.is_none() {
-            if let Some(parent) = game_dir.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            if let Err(e) = std::fs::write(self.root.isolated_marker(&row.profile), b"1") {
-                self.content.error = Some(format!("启用版本隔离失败: {e}"));
-                return;
-            }
         }
         cancel::reset();
         self.cancel_requested = false;

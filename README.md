@@ -8,7 +8,7 @@
 
 **简体中文** | [English](README.en.md)
 
-> 当前版本：**0.41.0**（预览版）
+> 当前版本：**0.42.0**（预览版）
 >
 > 目标：小体积、少依赖、安装过程可见、中断可补。功能边界见 [实现状态](docs/design/14-implementation-status.md)。
 
@@ -26,6 +26,15 @@ Cairn 是登山者叠在路边的石堆：它不帮你走路，只标出回去�
 它不是“万能启动器”，也还不是 1.0。能做和不能做的，下文列清楚了。
 
 ## 界面
+
+0.42：一个版本一个文件夹。
+
+- 每个版本是 `versions/<名字>/` 一个文件夹，里面有完整的版本文件、Mod、存档和配置。版本之间没有依赖，删掉一个不影响别的。
+- 安装时可以起名。同一个 MC 版本和加载器可以装好几份，比如「生存」和「测试」。可以改名。
+- 删除版本是移到回收站，存档跟着一起。
+- 整合包也装成一个版本文件夹。
+- 设置里可以清理没有版本在用的运行库和资源。
+- 详见 [27 · 一个版本一个文件夹](docs/design/27-version-folders.md)。
 
 0.41：自动更新。
 
@@ -197,7 +206,7 @@ Cairn 是登山者叠在路边的石堆：它不帮你走路，只标出回去�
 | 平台 | 文件 | 大小 | 要求 |
 |---|---|---:|---|
 | Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | 约 9 MB | Windows 10/11，Java 21 |
-| Linux x64 (deb) | [cairn_0.41.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.41.0_amd64.deb) | 约 3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39，Java 21 |
+| Linux x64 (deb) | [cairn_0.42.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.42.0_amd64.deb) | 约 3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39，Java 21 |
 
 校验值：[SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS)。
 
@@ -224,7 +233,7 @@ sudo apt update && sudo apt install cairn
 或者下载 deb 安装，效果一样：deb 会自动加上这个 apt 源。
 
 ```bash
-sudo apt install ./cairn_0.41.0_amd64.deb
+sudo apt install ./cairn_0.42.0_amd64.deb
 ```
 
 也可以双击 deb 用软件中心安装。安装后应用菜单里会有 **Cairn**。装过旧的 `nailong` 包也没关系，`cairn` 会替换它。

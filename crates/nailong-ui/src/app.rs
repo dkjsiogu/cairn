@@ -54,6 +54,8 @@ impl App {
                 fabric: "0.19.5".into(),
                 neoforge: "21.1.209".into(),
                 forge: "52.1.20".into(),
+                name: String::new(),
+                name_edited: false,
                 repair_target: None,
             },
             rollback: RollbackState {
@@ -142,8 +144,10 @@ impl App {
             show_install: false,
             show_manage: false,
             show_mods: false,
-            show_base: false,
             delete_confirm: None,
+            renaming: None,
+            delete_failed: None,
+            cleanup: Default::default(),
             window_focused: true,
             busy: None,
             cancel_requested: false,
@@ -192,6 +196,18 @@ impl App {
                 "manage" => {
                     app.show_manage = true;
                     app.show_install = false;
+                }
+                "rename" | "delete" => {
+                    app.show_manage = true;
+                    app.show_install = false;
+                    if let Some(row) = &row {
+                        app.selected = Some(row.id.clone());
+                        if screen == "rename" {
+                            app.renaming = Some((row.id.clone(), format!("{} 生存", row.id)));
+                        } else {
+                            app.delete_confirm = Some(row.id.clone());
+                        }
+                    }
                 }
                 "mods" => {
                     if row.is_some() {
@@ -296,10 +312,7 @@ impl App {
                         app.play.last = Some(log::LastLaunch {
                             label: row.label.clone(),
                             log: launch::log_path(&app.root, &row.profile),
-                            game_dir: row
-                                .game_dir
-                                .clone()
-                                .unwrap_or_else(|| app.root.dir().to_path_buf()),
+                            game_dir: row.game_dir.clone(),
                             started: std::time::SystemTime::now() - Duration::from_secs(180),
                             outcome: log::Outcome::Exited(1),
                         });
@@ -400,10 +413,7 @@ impl App {
             .and_then(|value| value.parse::<usize>().ok())
             && let Some(row) = app.selected_row().or_else(|| app.rows.first().cloned())
         {
-            let dir = row
-                .game_dir
-                .clone()
-                .unwrap_or_else(|| app.root.version_dir(&row.profile));
+            let dir = row.game_dir.clone();
             app.content.updates = installed::load(&dir)
                 .entries
                 .into_iter()
@@ -430,9 +440,6 @@ impl App {
                 })
                 .collect();
             app.content.row = Some(row);
-        }
-        if app.visible_count() == 0 && !app.rows.is_empty() {
-            app.show_manage = true;
         }
         #[cfg(debug_assertions)]
         if std::env::var("NAILONG_DEBUG_SCREEN").as_deref() == Ok("welcome") {
@@ -633,83 +640,30 @@ impl App {
         self.home.verified = None;
         self.play.tuning_cache.clear();
         self.version_cache = None;
-        let required_by = profile_dependents(&self.root);
-        let used_by = instance_usage(&self.root);
         let mut rows = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(self.root.versions()) {
-            for entry in entries.flatten() {
-                if !entry.path().is_dir() {
-                    continue;
-                }
-                let id = entry.file_name().to_string_lossy().to_string();
-                if !self.root.version_json(&id).exists() {
-                    continue;
-                }
-                let (mc, loader, loader_version) = profile_info(&self.root, &id);
-                let label = match &loader_version {
-                    Some(version) => format!("{mc} · {} {version}", loader.name()),
-                    None => mc.clone(),
-                };
-                let row_health = health::inspect(&self.root, &id);
-                let required = required_by.get(&id).copied().unwrap_or(0);
-                let used = used_by.get(&id).copied().unwrap_or(0);
-                let isolated = self.root.isolated_marker(&id).exists()
-                    || self.root.version_dir(&id).join("mods").is_dir();
-                let game_dir = isolated.then(|| self.root.version_dir(&id));
-                rows.push(Row {
-                    id: id.clone(),
-                    profile: id,
-                    label,
-                    mc,
-                    loader,
-                    loader_version,
-                    game_dir,
-                    instance: None,
-                    hidden: loader == LoaderKind::Vanilla && required > 0,
-                    required_by: required,
-                    used_by: used,
-                    health: row_health,
-                });
-            }
-        }
-        if let Ok(entries) = std::fs::read_dir(self.root.instances()) {
-            for entry in entries.flatten() {
-                if !entry.path().is_dir() {
-                    continue;
-                }
-                let meta_path = entry.path().join("instance.json");
-                let Ok(bytes) = std::fs::read(&meta_path) else {
-                    continue;
-                };
-                let Ok(meta) = serde_json::from_slice::<modpack::InstanceMeta>(&bytes) else {
-                    continue;
-                };
-                if !self.root.version_json(&meta.profile).exists() {
-                    continue;
-                }
-                let (mc, loader, loader_version) = profile_info(&self.root, &meta.profile);
-                let game_dir = entry.path().join(&meta.game_dir);
-                let id = format!("instance:{}", entry.file_name().to_string_lossy());
-                rows.push(Row {
-                    id,
-                    profile: meta.profile.clone(),
-                    label: format!("{} · 整合包", meta.name),
-                    mc,
-                    loader,
-                    loader_version,
-                    game_dir: Some(game_dir),
-                    instance: Some(meta.name),
-                    hidden: false,
-                    required_by: 0,
-                    used_by: 0,
-                    health: health::inspect(&self.root, &meta.profile),
-                });
-            }
+        for name in versions::names(&self.root) {
+            let (mc, loader, loader_version, pack) = version_info(&self.root, &name);
+            let label = match (&pack, &loader_version) {
+                (Some(pack), _) => format!("{pack} · 整合包"),
+                (None, Some(version)) => format!("{mc} · {} {version}", loader.name()),
+                (None, None) => mc.clone(),
+            };
+            rows.push(Row {
+                id: name.clone(),
+                profile: name.clone(),
+                label,
+                mc,
+                loader,
+                loader_version,
+                game_dir: self.root.version_dir(&name),
+                pack,
+                health: health::inspect(&self.root, &name),
+            });
         }
         rows.sort_by(|a, b| {
-            b.instance
+            b.pack
                 .is_some()
-                .cmp(&a.instance.is_some())
+                .cmp(&a.pack.is_some())
                 .then_with(|| mc_key(&b.mc).cmp(&mc_key(&a.mc)))
                 .then_with(|| a.loader.rank().cmp(&b.loader.rank()))
         });
@@ -724,38 +678,20 @@ impl App {
             .cloned()
     }
 
-    pub(crate) fn is_visible(&self, row: &Row) -> bool {
-        self.show_base || !row.hidden
-    }
-
-    pub(crate) fn visible_count(&self) -> usize {
-        self.rows.iter().filter(|r| self.is_visible(r)).count()
-    }
-
-    pub(crate) fn visible_rows(&self) -> impl Iterator<Item = &Row> {
-        self.rows.iter().filter(|r| self.is_visible(r))
-    }
-
     pub(crate) fn ensure_visible_selection(&mut self) {
         let valid = self
             .selected
             .as_ref()
-            .and_then(|id| self.rows.iter().find(|r| &r.id == id))
-            .is_some_and(|r| self.is_visible(r));
+            .is_some_and(|id| self.rows.iter().any(|r| &r.id == id));
         if !valid {
-            // 首屏优先选“看起来像常用版本”的那个：有整合包实例、有内容、
-            // 安装完整。没有任何线索时退回列表最后一个，避免总选到空版本。
+            // 首屏优先选“看起来像常用版本”的那个：整合包、有内容、安装完整。
+            // 没有任何线索时退回列表最后一个，避免总选到空版本。
             self.selected = self
                 .rows
                 .iter()
-                .filter(|row| self.is_visible(row))
                 .max_by_key(|row| {
-                    let dir = row
-                        .game_dir
-                        .clone()
-                        .unwrap_or_else(|| self.root.version_dir(&row.profile));
-                    let content = installed::load(&dir).entries.len();
-                    (row.instance.is_some(), content, row.health.missing == 0)
+                    let content = installed::load(&row.game_dir).entries.len();
+                    (row.pack.is_some(), content, row.health.missing == 0)
                 })
                 .map(|row| row.id.clone());
         }
@@ -802,10 +738,14 @@ pub(crate) struct App {
     pub(crate) show_gallery: bool,
     /// 截图页的状态和全部截图（启动台那一排也用它）。
     pub(crate) gallery: crate::pages::gallery::GalleryState,
-    /// 版本页是否也列出被加载器依赖的原版。
-    pub(crate) show_base: bool,
     /// 等待确认删除的版本。
     pub(crate) delete_confirm: Option<String>,
+    /// 正在改名的版本和输入框里的新名字。
+    pub(crate) renaming: Option<(String, String)>,
+    /// 移不到回收站的版本：问玩家要不要直接删。
+    pub(crate) delete_failed: Option<String>,
+    /// 设置里的「清理不用的文件」。
+    pub(crate) cleanup: crate::dialogs::settings::CleanupState,
     /// 当前页面的编号，变了就放一次切页动效。
     pub(crate) page_key: u8,
     /// 进入当前页面的时间。

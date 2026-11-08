@@ -23,6 +23,9 @@ fn data_home(base: &Path) -> PathBuf {
 #[derive(Debug, Clone)]
 pub struct Root {
     dir: PathBuf,
+    /// 版本放在哪。正常是 `versions/`；`store()` 返回的视图指向 `cache/cairn/profiles/`，
+    /// 安装用的原版和加载器 profile 装在那里，合并后才写进 `versions/<名字>/`。
+    versions: Option<PathBuf>,
 }
 
 impl Root {
@@ -30,7 +33,24 @@ impl Root {
         let dir = dir.into();
         // 游戏进程的工作目录是版本目录，相对路径会让类路径全部失效。
         let dir = std::path::absolute(&dir).unwrap_or(dir);
-        Self { dir }
+        Self {
+            dir,
+            versions: None,
+        }
+    }
+
+    /// 安装用的视图：`versions()` 指向 `cache/cairn/profiles/`，其余目录不变。
+    /// 安装原版和加载器的代码照旧写 `version_json` 和 `client_jar`，只是落在缓存里。
+    pub fn store(&self) -> Root {
+        Root {
+            dir: self.dir.clone(),
+            versions: Some(self.profiles()),
+        }
+    }
+
+    /// 原版和加载器 profile 的缓存目录。
+    pub fn profiles(&self) -> PathBuf {
+        self.cache().join("profiles")
     }
 
     pub fn default_root() -> PathBuf {
@@ -60,7 +80,9 @@ impl Root {
     }
 
     pub fn versions(&self) -> PathBuf {
-        self.dir.join("versions")
+        self.versions
+            .clone()
+            .unwrap_or_else(|| self.dir.join("versions"))
     }
 
     pub fn libraries(&self) -> PathBuf {
@@ -83,16 +105,18 @@ impl Root {
         self.dir.join("cache").join(APP_DIR)
     }
 
-    pub fn instances(&self) -> PathBuf {
-        self.dir.join("instances")
-    }
-
-    pub fn instance_dir(&self, id: &str) -> PathBuf {
-        self.instances().join(sanitize(id))
-    }
-
+    /// 启动时解压 native 库的目录。路径只用 ASCII（旧版 LWJGL 读不了别的）；名字里有
+    /// 别的字符时加一段哈希，免得「生存」和「测试」都变成 `__` 撞在一起。
     pub fn natives(&self, profile: &str) -> PathBuf {
-        self.dir.join("natives").join(sanitize(profile))
+        let safe = sanitize(profile);
+        let name = if safe == profile {
+            safe
+        } else {
+            use sha2::{Digest, Sha256};
+            let hash = crate::http::hex(&Sha256::digest(profile.as_bytes()));
+            format!("{safe}-{}", &hash[..8])
+        };
+        self.dir.join("natives").join(name)
     }
 
     pub fn version_dir(&self, id: &str) -> PathBuf {
@@ -113,21 +137,10 @@ impl Root {
         self.version_dir(id).join(".nailong-incomplete")
     }
 
-    /// Present when a version has opted into its own game directory (mods,
-    /// saves and options no longer live in the shared root).
-    pub fn isolated_marker(&self, id: &str) -> PathBuf {
-        self.version_dir(id).join(".nailong-isolated")
-    }
-
     /// Remove a version directory by its exact on-disk name.  Only direct
     /// children are accepted, so a profile id can never escape `versions/`.
     pub fn remove_version(&self, id: &str) -> Result<()> {
         remove_child(&self.versions(), id)
-    }
-
-    /// Remove an instance directory by its exact on-disk name.
-    pub fn remove_instance(&self, id: &str) -> Result<()> {
-        remove_child(&self.instances(), id)
     }
 
     pub fn ensure(&self) -> Result<()> {
@@ -139,7 +152,6 @@ impl Root {
             self.indexes(),
             self.objects(),
             self.cache(),
-            self.instances(),
         ] {
             std::fs::create_dir_all(&p).map_err(|e| io(&p, e))?;
         }
@@ -217,27 +229,21 @@ pub fn to_trash(path: &Path) -> Result<()> {
         // SAFETY: 结构体里的指针都指向这里活着的缓冲区，调用是同步的。
         let code = unsafe { SHFileOperationW(&mut op) };
         if code != 0 || op.fAnyOperationsAborted != 0 {
-            return Err(Error::Install(format!(
-                "没能移到回收站（{code}）: {}",
-                path.display()
-            )));
+            return Err(Error::Plain(format!("没能移到回收站（错误 {code}）")));
         }
         Ok(())
     }
     #[cfg(not(windows))]
     {
-        let status = std::process::Command::new("gio")
+        let output = std::process::Command::new("gio")
             .arg("trash")
             .arg(path)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-        match status {
-            Ok(status) if status.success() => Ok(()),
-            _ => Err(Error::Install(format!(
-                "没能移到回收站（需要 gio）: {}",
-                path.display()
-            ))),
+            .output();
+        match output {
+            Ok(out) if out.status.success() => Ok(()),
+            // 比如放在 /tmp 或 U 盘上：这个位置没有回收站。
+            Ok(_) => Err(Error::Plain("这个位置不能用回收站".into())),
+            Err(_) => Err(Error::Plain("没能移到回收站：找不到 gio".into())),
         }
     }
 }

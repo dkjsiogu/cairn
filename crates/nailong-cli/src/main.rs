@@ -1,9 +1,10 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use nailong_core::install::{fabric, forge, modpack, neoforge, vanilla};
+use nailong_core::install::modpack;
 use nailong_core::launch::{self, LaunchOptions};
 use nailong_core::manifest::{self, Context as ResolveContext};
 use nailong_core::progress::{Progress, Sink, from_fn};
+use nailong_core::versions::{self, Loader};
 use nailong_core::{Root, bench, cancel, java, tuning};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -39,10 +40,30 @@ enum Commands {
     Update,
     /// 查看某个版本的解析结果
     Info { profile: String },
-    /// 安装
+    /// 安装一个版本（一个版本一个文件夹：versions/<名字>/）
     Install {
+        /// 版本名；不填时用默认名，例如「1.21.1 NeoForge」。名字已存在就是补全或换加载器版本
+        #[arg(long)]
+        name: Option<String>,
         #[command(subcommand)]
         target: InstallTarget,
+    },
+    /// 删除一个版本：整个文件夹移到回收站，包括存档
+    Remove {
+        name: String,
+        /// 不进回收站，直接删掉（找不回来）
+        #[arg(long)]
+        permanent: bool,
+    },
+    /// 给版本改名
+    Rename { from: String, to: String },
+    /// 清理没有版本在用的运行库、资源和缓存；不加 --yes 只列出能释放多少
+    Clean {
+        #[arg(long)]
+        yes: bool,
+        /// 列出每个要删的文件
+        #[arg(long)]
+        list: bool,
     },
     /// 测一下这台电脑：用模拟游戏负载在每个 Java 21+ 上比较 G1 和 ZGC，所有版本共用结论
     Bench,
@@ -93,15 +114,6 @@ enum InstallTarget {
     Modpack { path: PathBuf },
 }
 
-/// 和界面一样：版本做了隔离就用版本目录，否则用数据目录。
-fn default_game_dir(root: &Root, profile: &str) -> PathBuf {
-    if root.isolated_marker(profile).exists() {
-        root.version_dir(profile)
-    } else {
-        root.dir().to_path_buf()
-    }
-}
-
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let root = Root::new(cli.root.clone().unwrap_or_else(Root::default_root));
@@ -114,26 +126,62 @@ fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::List => {
-            let versions = root.versions();
-            if !versions.exists() {
+            let names = versions::names(&root);
+            if names.is_empty() {
                 println!("（还没有安装任何版本）");
-                return Ok(());
             }
-            let mut ids = Vec::new();
-            for e in std::fs::read_dir(&versions)
-                .with_context(|| format!("读取 {}", versions.display()))?
-            {
-                let e = e?;
-                if e.path().is_dir() {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    if root.version_json(&name).exists() {
-                        ids.push(name);
+            for name in names {
+                let what = match versions::meta(&root, &name) {
+                    Some(meta) => {
+                        let loader = match &meta.loader_version {
+                            Some(v) => format!(" · {} {v}", meta.loader.label()),
+                            None => String::new(),
+                        };
+                        let pack = meta
+                            .pack
+                            .map(|p| format!(" · 整合包 {}", p.name))
+                            .unwrap_or_default();
+                        format!("{}{loader}{pack}", meta.mc)
                     }
+                    None => "别的启动器装的".to_string(),
+                };
+                println!("  ● {name}  （{what}）");
+            }
+        }
+        Commands::Remove { name, permanent } => {
+            if permanent {
+                versions::remove_permanently(&root, &name)?;
+                println!("✓ 已删除「{name}」");
+            } else {
+                versions::remove(&root, &name)?;
+                println!("✓ 已把「{name}」移到回收站");
+            }
+        }
+        Commands::Rename { from, to } => {
+            let to = versions::rename(&root, &from, &to)?;
+            println!("✓ 「{from}」改名为「{to}」");
+        }
+        Commands::Clean { yes, list } => {
+            let plan = versions::plan_cleanup(&root)?;
+            if list {
+                for file in &plan.files {
+                    println!(
+                        "  {}",
+                        file.strip_prefix(root.dir()).unwrap_or(file).display()
+                    );
                 }
             }
-            ids.sort();
-            for id in ids {
-                println!("  ● {id}");
+            let mb = plan.bytes as f64 / 1024.0 / 1024.0;
+            if plan.files.is_empty() {
+                println!("没有可以清理的文件");
+            } else if yes {
+                let removed = versions::run_cleanup(&root, &plan)?;
+                println!("✓ 删了 {removed} 个文件，释放 {mb:.0} MB");
+            } else {
+                println!(
+                    "能清理 {} 个文件，释放 {mb:.0} MB。加 --yes 执行",
+                    plan.files.len()
+                );
             }
         }
         Commands::Bench => {
@@ -251,26 +299,33 @@ fn main() -> anyhow::Result<()> {
                 r.asset_index.as_ref().map(|a| a.id.clone())
             );
         }
-        Commands::Install { target } => {
+        Commands::Install { name, target } => {
             cancel::reset();
             let sink = cli_progress();
-            match target {
-                InstallTarget::Vanilla { mc } => {
-                    vanilla::install_with(&root, &mc, &cli.mirror, &sink)?;
-                }
-                InstallTarget::Fabric { mc, loader } => {
-                    fabric::install_with(&root, &mc, &loader, &cli.mirror, &sink)?;
-                }
-                InstallTarget::Neoforge { mc, version } => {
-                    neoforge::install_with(&root, &mc, &version, &cli.mirror, &sink)?;
-                }
-                InstallTarget::Forge { mc, version } => {
-                    forge::install_with(&root, &mc, &version, &cli.mirror, &sink)?;
-                }
+            let (mc, loader, version) = match target {
+                InstallTarget::Vanilla { mc } => (mc, Loader::Vanilla, None),
+                InstallTarget::Fabric { mc, loader } => (mc, Loader::Fabric, Some(loader)),
+                InstallTarget::Neoforge { mc, version } => (mc, Loader::NeoForge, Some(version)),
+                InstallTarget::Forge { mc, version } => (mc, Loader::Forge, Some(version)),
                 InstallTarget::Modpack { path } => {
-                    modpack::import_pack(&root, &path, &cli.mirror, &sink)?;
+                    let pack = modpack::import_pack(&root, &path, &cli.mirror, &sink)?;
+                    println!("✓ 版本「{}」", pack.id);
+                    return Ok(());
                 }
-            }
+            };
+            let name = name.unwrap_or_else(|| {
+                versions::unique_name(&root, &versions::default_name(&mc, loader))
+            });
+            let name = versions::install(
+                &root,
+                &name,
+                &mc,
+                loader,
+                version.as_deref(),
+                &cli.mirror,
+                &sink,
+            )?;
+            println!("✓ 版本「{name}」：{}", root.version_dir(&name).display());
         }
         Commands::Launch {
             profile,
@@ -297,7 +352,7 @@ fn main() -> anyhow::Result<()> {
                 width,
                 height,
                 demo,
-                game_dir: Some(game_dir.unwrap_or_else(|| default_game_dir(&root, &profile))),
+                game_dir: Some(game_dir.unwrap_or_else(|| root.version_dir(&profile))),
                 dry_run,
                 print_plan,
                 ..Default::default()

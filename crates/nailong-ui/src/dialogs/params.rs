@@ -607,7 +607,7 @@ impl App {
             memory_mb: settings.memory_mb,
             gc: settings.gc,
             jvm_args: settings.extra,
-            game_dir: row.game_dir.clone(),
+            game_dir: Some(row.game_dir.clone()),
             java: Some(java.path.clone()),
             width,
             height,

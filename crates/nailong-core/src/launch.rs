@@ -228,10 +228,11 @@ fn build(root: &Root, profile: &str, opts: &LaunchOptions, write: bool) -> Resul
         );
     }
 
+    // 游戏目录就是版本文件夹（见 docs/design/27-version-folders.md）。
     let game_dir = opts
         .game_dir
         .clone()
-        .unwrap_or_else(|| root.dir().to_path_buf());
+        .unwrap_or_else(|| root.version_dir(profile));
     // 游戏以这个目录为工作目录启动，--gameDir 再给相对路径就会被解析两次。
     let game_dir = std::path::absolute(&game_dir).unwrap_or(game_dir);
     if write {

@@ -51,6 +51,10 @@ pub enum Error {
     #[error("安装失败: {0}")]
     Install(String),
 
+    /// 直接给玩家看的一句话，不加前缀。
+    #[error("{0}")]
+    Plain(String),
+
     #[error("找不到 Java {0}")]
     JavaNotFound(u32),
 
