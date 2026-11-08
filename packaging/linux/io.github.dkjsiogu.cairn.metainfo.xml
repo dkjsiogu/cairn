@@ -28,6 +28,11 @@
   <url type="bugtracker">https://github.com/dkjsiogu/cairn/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.41.0" date="2026-11-08">
+      <description>
+        <p>Automatic updates. On Windows, new versions download in the background and are swapped in when Cairn closes. On Linux, the deb adds Cairn's apt repository, so the system updates Cairn daily; Cairn can also be installed with apt directly.</p>
+      </description>
+    </release>
     <release version="0.40.1" date="2026-11-08">
       <description>
         <p>The initial heap now always equals the maximum heap. When free memory is too low for ZGC to reserve the whole heap, automatic tuning uses G1 for that launch.</p>

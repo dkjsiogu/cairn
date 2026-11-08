@@ -1,8 +1,12 @@
-//! 启动器自己的更新：启动时安静地查一次（最多 12 小时一次），有新版本时侧栏出现一个小提示，
-//! 点开看更新说明、下载（带进度），Windows 一键重启到新版本，Linux 给出安装 deb 的命令。
+//! 启动器自己的更新。启动时和之后每 12 小时安静地查一次，有新版本时侧栏出现一个小提示。
+//!
+//! - Windows：打开了「自动更新」就在后台下载、校验，关掉 Cairn 时换成新版本；
+//!   侧栏提示变成「重启更新」，也可以马上重启。
+//! - Linux（deb 装的）：系统每天通过 apt 源自动更新，启动器发现程序被换掉后提示重启。
+//!   想马上更新时，点「更新」弹出系统的授权窗口；装不上就给出一条能复制的命令。
 
 use crate::prelude::*;
-use nailong_core::update::{self, Release};
+use nailong_core::update::{self, Install, Release};
 
 /// 两次自动检查之间至少隔这么久。
 const CHECK_EVERY_SECS: u64 = 12 * 60 * 60;
@@ -10,7 +14,13 @@ const CHECK_EVERY_SECS: u64 = 12 * 60 * 60;
 enum UpdateMsg {
     Checked(Result<Release, String>),
     Progress(Progress),
-    Downloaded(Result<PathBuf, String>),
+    /// Linux：下载好了，正在等系统的授权窗口。
+    Authorizing,
+    /// 新版本就绪，重启 Cairn 就是它。
+    Ready(String),
+    /// 下载好了 deb，要玩家自己装；附上没能自动装的原因。
+    Manual(PathBuf, Option<String>),
+    Failed(String),
 }
 
 #[derive(Default)]
@@ -21,21 +31,79 @@ pub(crate) struct UpdateState {
     /// 手动检查后给出的结果，例如「已经是最新版」。
     pub(crate) status: Option<String>,
     pub(crate) open: bool,
+    /// 这次运行的 Cairn 是怎么装的。
+    pub(crate) kind: Install,
+    /// 新版本已经就绪，重启 Cairn 就是它：Windows 下载好了等着换上，Linux 已经装好。
+    pub(crate) ready: Option<String>,
     rx: Option<mpsc::Receiver<UpdateMsg>>,
     /// 正在下载的进度。
     activity: Option<Activity>,
-    downloaded: Option<PathBuf>,
+    /// 正在等系统的授权窗口。
+    authorizing: bool,
+    /// 下载好了，要玩家自己装的 deb。
+    manual: Option<PathBuf>,
     error: Option<String>,
     started: bool,
+    /// 上次做定时检查的时间。
+    tick: Option<Instant>,
 }
 
 impl UpdateState {
-    /// 侧栏要不要显示「新版本」。
-    pub(crate) fn badge(&self, skipped: &str) -> Option<&str> {
+    /// 侧栏的提示：版本号，和是不是已经就绪（只差重启）。
+    pub(crate) fn badge(&self, skipped: &str) -> Option<(String, bool)> {
+        if let Some(version) = &self.ready {
+            return Some((version.clone(), true));
+        }
         self.latest
             .as_ref()
             .filter(|release| release.version != skipped)
-            .map(|release| release.version.as_str())
+            .map(|release| (release.version.clone(), false))
+    }
+
+    fn busy(&self) -> bool {
+        self.activity.is_some() || self.authorizing
+    }
+
+    /// 截图核对用：`update`、`update-apt`、`update-ready`、`update-linux-ready`、
+    /// `update-manual`、`update-auth`、`update-sidebar`、`update-sidebar-new`（只显示侧栏提示）、
+    /// `update-settings`、`update-settings-apt`（设置里的「自动更新」）。
+    #[cfg(debug_assertions)]
+    pub(crate) fn debug(&mut self, screen: &str) {
+        self.started = true;
+        self.tick = Some(Instant::now());
+        self.latest = Some(Release {
+            version: "0.42.0".into(),
+            notes: "自动更新\n\n\
+                    * Windows：后台下载，关掉 Cairn 时换成新版本\n\
+                    * Linux：deb 带上 apt 源，系统每天自动更新"
+                .into(),
+            page: update::release_page("0.42.0"),
+            assets: Vec::new(),
+        });
+        self.kind = if cfg!(windows) {
+            Install::Exe
+        } else {
+            Install::AptRepo
+        };
+        self.open = !screen.starts_with("update-sidebar") && !screen.starts_with("update-settings");
+        match screen {
+            "update-apt" => self.kind = Install::AptRepo,
+            "update-ready" | "update-sidebar" => {
+                self.kind = Install::Exe;
+                self.ready = Some("0.42.0".into());
+            }
+            "update-linux-ready" => self.ready = Some("0.42.0".into()),
+            "update-manual" => {
+                self.kind = Install::Deb;
+                self.manual = Some(PathBuf::from("/home/player/下载/cairn_0.41.0_amd64.deb"));
+                self.error = Some("没有授权".into());
+            }
+            "update-auth" => self.authorizing = true,
+            "update-sidebar-new" => self.kind = Install::Exe,
+            "update-settings" => self.kind = Install::Exe,
+            "update-settings-apt" => self.kind = Install::AptRepo,
+            _ => self.kind = Install::Exe,
+        }
     }
 }
 
@@ -67,19 +135,42 @@ fn plain_notes(notes: &str) -> Vec<String> {
 }
 
 impl App {
-    /// 每帧调用：第一次时清理上次更新留下的旧程序，并按需在后台检查；收后台结果。
+    /// 每帧调用：第一次时清理上次更新留下的文件；每分钟看一次要不要检查新版本、
+    /// 程序有没有被系统换掉；收后台结果。
     pub(crate) fn poll_update(&mut self, ctx: &egui::Context) {
+        let cache = self.root.cache();
         if !self.update.started {
             self.update.started = true;
-            update::cleanup();
-            if now().saturating_sub(self.prefs.update_checked) > CHECK_EVERY_SECS {
+            self.update.kind = update::install_kind();
+            update::cleanup(&cache);
+            // 上次关掉时没换成（比如被强制结束）：重启就换上。
+            self.update.ready = update::staged(&cache).map(|staged| staged.version);
+        }
+        let due = self
+            .update
+            .tick
+            .is_none_or(|tick| tick.elapsed() >= Duration::from_secs(60));
+        if due {
+            self.update.tick = Some(Instant::now());
+            ctx.request_repaint_after(Duration::from_secs(61));
+            if self.update.rx.is_none()
+                && now().saturating_sub(self.prefs.update_checked) > CHECK_EVERY_SECS
+            {
                 self.check_update(ctx, false);
+            }
+            if self.update.ready.is_none()
+                && matches!(self.update.kind, Install::AptRepo | Install::Deb)
+                && update::replaced_on_disk()
+            {
+                self.update.ready = update::installed_version()
+                    .filter(|version| update::is_newer(version, update::current()));
             }
         }
         let Some(rx) = &self.update.rx else {
             return;
         };
         let mut done = false;
+        let mut auto = false;
         while let Ok(msg) = rx.try_recv() {
             match msg {
                 UpdateMsg::Checked(result) => {
@@ -90,6 +181,10 @@ impl App {
                     match result {
                         Ok(release) if update::is_newer(&release.version, update::current()) => {
                             self.update.status = None;
+                            auto = self.update.kind == Install::Exe
+                                && self.prefs.auto_update
+                                && release.version != self.prefs.update_skip
+                                && self.update.ready.as_deref() != Some(release.version.as_str());
                             self.update.latest = Some(release);
                         }
                         Ok(_) => {
@@ -105,13 +200,28 @@ impl App {
                         activity.update(p);
                     }
                 }
-                UpdateMsg::Downloaded(result) => {
+                UpdateMsg::Authorizing => {
+                    self.update.activity = None;
+                    self.update.authorizing = true;
+                }
+                UpdateMsg::Ready(version) => {
                     done = true;
                     self.update.activity = None;
-                    match result {
-                        Ok(path) => self.update.downloaded = Some(path),
-                        Err(e) => self.update.error = Some(e),
-                    }
+                    self.update.authorizing = false;
+                    self.update.ready = Some(version);
+                }
+                UpdateMsg::Manual(path, why) => {
+                    done = true;
+                    self.update.activity = None;
+                    self.update.authorizing = false;
+                    self.update.manual = Some(path);
+                    self.update.error = why;
+                }
+                UpdateMsg::Failed(e) => {
+                    done = true;
+                    self.update.activity = None;
+                    self.update.authorizing = false;
+                    self.update.error = Some(e);
                 }
             }
         }
@@ -119,6 +229,9 @@ impl App {
             self.update.rx = None;
         } else {
             ctx.request_repaint_after(Duration::from_millis(100));
+        }
+        if auto && update::can_replace_exe() {
+            self.start_update(ctx);
         }
     }
 
@@ -143,7 +256,11 @@ impl App {
         });
     }
 
-    fn start_update_download(&mut self, ctx: &egui::Context) {
+    /// 下载新版本，然后按装法接着做：Windows 记下等着换上，Linux 弹授权窗口装上。
+    fn start_update(&mut self, ctx: &egui::Context) {
+        if self.update.rx.is_some() {
+            return;
+        }
         let Some(release) = self.update.latest.clone() else {
             return;
         };
@@ -151,13 +268,19 @@ impl App {
             self.update.error = Some("这个系统没有现成的安装包，请到 GitHub 页面下载".into());
             return;
         };
+        let kind = self.update.kind;
+        if kind == Install::Exe && !update::can_replace_exe() {
+            self.update.error = Some("程序所在的文件夹不能写入，请到 GitHub 下载新版本".into());
+            return;
+        }
         self.update.error = None;
-        self.update.downloaded = None;
+        self.update.manual = None;
         self.update.activity = Some(Activity::new(
             format!("Cairn {}", release.version),
             "准备下载",
         ));
-        let dir = update::download_dir(&self.root.cache());
+        let cache = self.root.cache();
+        let dir = update::download_dir(&cache);
         let (tx, rx) = mpsc::channel();
         self.update.rx = Some(rx);
         let ctx = ctx.clone();
@@ -168,30 +291,78 @@ impl App {
                 let _ = progress.send(UpdateMsg::Progress(p));
                 repaint.request_repaint();
             });
-            let result = nailong_core::http::Http::new("official")
-                .and_then(|http| update::download(&http, &release, &asset, &dir, &sink))
-                .map_err(|e| e.to_string());
-            let _ = tx.send(UpdateMsg::Downloaded(result));
+            let downloaded = nailong_core::http::Http::new("official")
+                .and_then(|http| update::download(&http, &release, &asset, &dir, &sink));
+            let msg = match (downloaded, kind) {
+                (Err(e), _) => UpdateMsg::Failed(e.to_string()),
+                (Ok(path), Install::Exe) => match update::stage(&cache, &release.version, &path) {
+                    Ok(_) => UpdateMsg::Ready(release.version.clone()),
+                    Err(e) => UpdateMsg::Failed(e.to_string()),
+                },
+                (Ok(path), Install::AptRepo | Install::Deb) => {
+                    let _ = tx.send(UpdateMsg::Authorizing);
+                    ctx.request_repaint();
+                    match update::install_deb(&path) {
+                        Ok(()) => UpdateMsg::Ready(release.version.clone()),
+                        Err(e) => UpdateMsg::Manual(path, Some(e.to_string())),
+                    }
+                }
+                (Ok(path), Install::Other) => UpdateMsg::Manual(path, None),
+            };
+            let _ = tx.send(msg);
             ctx.request_repaint();
         });
+    }
+
+    /// 换成新版本并重新打开。
+    fn restart_to_new(&mut self) {
+        self.save_ui_config();
+        let result = match self.update.kind {
+            Install::Exe => update::apply_staged(&self.root.cache(), true).and_then(|applied| {
+                applied
+                    .map(|_| ())
+                    .ok_or_else(|| nailong_core::Error::Install("下载的新版本不见了".into()))
+            }),
+            _ => update::relaunch(),
+        };
+        match result {
+            Ok(()) => std::process::exit(0),
+            Err(e) => {
+                self.update.ready = None;
+                self.update.error = Some(format!("没能换到新版本：{e}"));
+            }
+        }
     }
 
     pub(crate) fn update_overlay(&mut self, ctx: &egui::Context) {
         if !self.update.open {
             return;
         }
-        let Some(release) = self.update.latest.clone() else {
+        // 就绪的版本优先；Linux 上系统在后台装好时，可能还没查到更新说明。
+        let Some(version) = self
+            .update
+            .ready
+            .clone()
+            .or_else(|| self.update.latest.as_ref().map(|r| r.version.clone()))
+        else {
             self.update.open = false;
             return;
         };
+        let notes = self
+            .update
+            .latest
+            .as_ref()
+            .filter(|release| release.version == version)
+            .map(|release| plain_notes(&release.notes));
+        let kind = self.update.kind;
+        let playing = matches!(self.busy, Some(Task::Launch));
         let mut close = false;
         let mut skip = false;
-        let mut download = false;
+        let mut start = false;
         let mut restart = false;
         let mut open_page = false;
         let mut reveal: Option<PathBuf> = None;
         let mut copy: Option<String> = None;
-        let windows = cfg!(windows);
         let modal = egui::Modal::new(egui::Id::unique("update_modal"))
             .backdrop_color(t::veil(1.0))
             .frame(
@@ -204,7 +375,7 @@ impl App {
             .show(ctx, |ui| {
                 ui.set_width(480.0);
                 ui.label(
-                    egui::RichText::new(format!("Cairn {}", release.version))
+                    egui::RichText::new(format!("Cairn {version}"))
                         .size(24.0)
                         .family(display_family()),
                 );
@@ -225,15 +396,22 @@ impl App {
                             .max_height(220.0)
                             .auto_shrink([false, true])
                             .show(ui, |ui| {
-                                let lines = plain_notes(&release.notes);
-                                if lines.iter().all(|l| l.trim().is_empty()) {
+                                let empty = match &notes {
+                                    Some(lines) => lines.iter().all(|l| l.trim().is_empty()),
+                                    None => true,
+                                };
+                                if empty {
                                     ui.label(
-                                        egui::RichText::new("这一版没有写更新说明")
-                                            .size(13.0)
-                                            .color(t::dim()),
+                                        egui::RichText::new(if notes.is_some() {
+                                            "这一版没有写更新说明"
+                                        } else {
+                                            "更新说明在 GitHub 上"
+                                        })
+                                        .size(13.0)
+                                        .color(t::dim()),
                                     );
                                 }
-                                for line in lines {
+                                for line in notes.iter().flatten() {
                                     ui.add(
                                         egui::Label::new(egui::RichText::new(line).size(13.0))
                                             .wrap(),
@@ -242,6 +420,11 @@ impl App {
                             });
                     });
                 ui.add_space(12.0);
+                let line = |ui: &mut egui::Ui, text: &str, color: egui::Color32| {
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(text).size(13.0).color(color)).wrap(),
+                    );
+                };
                 if let Some(activity) = &self.update.activity {
                     let p = &activity.progress;
                     motion::progress_bar(ui, p.fraction(), p.indeterminate, ui.input(|i| i.time));
@@ -256,75 +439,80 @@ impl App {
                     if let Some(source) = activity.source_label() {
                         parts.push(format!("来自 {source}"));
                     }
-                    ui.label(
-                        egui::RichText::new(parts.join(" · "))
-                            .size(13.0)
-                            .color(t::sub()),
+                    line(ui, &parts.join(" · "), t::sub());
+                } else if self.update.authorizing {
+                    line(ui, "在系统弹出的窗口里输入密码", t::sub());
+                } else if self.update.ready.is_some() {
+                    line(
+                        ui,
+                        if kind == Install::Exe {
+                            "已下载。关掉 Cairn 时自动换成新版本。"
+                        } else {
+                            "已装好。重启 Cairn 后生效。"
+                        },
+                        t::ok(),
                     );
-                } else if let Some(path) = &self.update.downloaded {
-                    if windows {
-                        ui.label(
-                            egui::RichText::new(
-                                "下载好了，校验通过。重启后就是新版本，数据和设置都不变。",
-                            )
-                            .size(13.0)
-                            .color(t::ok()),
-                        );
-                    } else {
-                        let command = update::install_command(path);
-                        ui.label(
-                            egui::RichText::new("下载好了，校验通过。在终端里运行这条命令安装：")
-                                .size(13.0)
-                                .color(t::ok()),
-                        );
-                        ui.add_space(4.0);
-                        ui.label(egui::RichText::new(&command).monospace().size(12.5));
-                        ui.horizontal(|ui| {
-                            if action_link(ui, "复制命令").clicked() {
-                                copy = Some(command.clone());
-                            }
-                            if action_link(ui, "在文件夹中显示").clicked() {
-                                reveal = Some(path.clone());
-                            }
-                        });
-                    }
+                } else if let Some(path) = &self.update.manual {
+                    let command = update::install_command(path);
+                    line(ui, "已下载，校验通过。在终端里运行：", t::sub());
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new(&command).monospace().size(12.5));
+                    ui.horizontal(|ui| {
+                        if action_link(ui, "复制命令").clicked() {
+                            copy = Some(command.clone());
+                        }
+                        if action_link(ui, "在文件夹中显示").clicked() {
+                            reveal = Some(path.clone());
+                        }
+                    });
+                } else if kind == Install::AptRepo {
+                    line(ui, "系统每天会自动更新，也可以现在更新。", t::dim());
                 }
                 if let Some(error) = &self.update.error {
-                    ui.label(egui::RichText::new(error).size(13.0).color(t::danger()));
+                    line(ui, error, t::danger());
                 }
                 ui.add_space(14.0);
                 ui.horizontal(|ui| {
                     if action_link(ui, "在 GitHub 上看").clicked() {
                         open_page = true;
                     }
-                    if action_link(ui, "跳过这个版本").clicked() {
+                    if self.update.ready.is_none() && action_link(ui, "跳过这个版本").clicked()
+                    {
                         skip = true;
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let busy = self.update.activity.is_some();
-                        match (&self.update.downloaded, windows) {
-                            (Some(_), true) => {
-                                if motion::primary_sized(
-                                    ui,
-                                    "重启到新版本",
-                                    true,
-                                    120.0,
-                                    32.0,
-                                    12.0,
-                                ) {
-                                    restart = true;
-                                }
+                        if self.update.ready.is_some() {
+                            let response = ui.scope(|ui| {
+                                motion::primary_sized(ui, "现在重启", !playing, 100.0, 32.0, 12.0)
+                            });
+                            if response.inner {
+                                restart = true;
                             }
-                            (Some(_), false) => {}
-                            (None, _) => {
-                                let label = if windows {
-                                    "下载并更新"
-                                } else {
-                                    "下载 deb"
-                                };
-                                if motion::primary_sized(ui, label, !busy, 110.0, 32.0, 12.0) {
-                                    download = true;
-                                }
+                            if playing {
+                                response
+                                    .response
+                                    .on_hover_text("游戏运行中，退出游戏后再重启");
+                            }
+                        } else if self.update.manual.is_none() || kind.can_install() {
+                            let label = match kind {
+                                Install::Exe => "下载并更新",
+                                Install::AptRepo | Install::Deb => "更新",
+                                Install::Other => "下载 deb",
+                            };
+                            let label = if self.update.manual.is_some() {
+                                "再试一次"
+                            } else {
+                                label
+                            };
+                            if motion::primary_sized(
+                                ui,
+                                label,
+                                !self.update.busy(),
+                                100.0,
+                                32.0,
+                                12.0,
+                            ) {
+                                start = true;
                             }
                         }
                         ui.add_space(6.0);
@@ -345,20 +533,16 @@ impl App {
             reveal_file(&path);
         }
         if open_page {
-            open_url(&release.page);
+            open_url(&update::release_page(&version));
         }
-        if download {
-            self.start_update_download(ctx);
+        if start {
+            self.start_update(ctx);
         }
-        if restart && let Some(path) = self.update.downloaded.clone() {
-            self.save_ui_config();
-            match update::replace_running_exe(&path) {
-                Ok(()) => std::process::exit(0),
-                Err(e) => self.update.error = Some(format!("没能换到新版本：{e}")),
-            }
+        if restart {
+            self.restart_to_new();
         }
         if skip {
-            self.prefs.update_skip = release.version.clone();
+            self.prefs.update_skip = version.clone();
             self.save_ui_config();
             close = true;
         }
@@ -368,12 +552,13 @@ impl App {
     }
 }
 
-/// 侧栏底部的「新版本」提示；返回是否被点了。
-pub(crate) fn update_pill(ui: &mut egui::Ui, version: &str, wide: bool) -> bool {
-    let text = if wide {
-        format!("新版本 {version}")
-    } else {
-        "新".to_string()
+/// 侧栏底部的更新提示：有新版本，或者新版本已就绪只差重启。返回是否被点了。
+pub(crate) fn update_pill(ui: &mut egui::Ui, version: &str, ready: bool, wide: bool) -> bool {
+    let text = match (wide, ready) {
+        (true, false) => format!("新版本 {version}"),
+        (true, true) => format!("重启更新到 {version}"),
+        // 窄侧栏放不下两个字，都用「新」，悬停时写清楚。
+        (false, _) => "新".to_string(),
     };
     let response = ui.add(
         egui::Button::new(egui::RichText::new(text).size(13.0).color(t::accent()))
@@ -386,7 +571,11 @@ pub(crate) fn update_pill(ui: &mut egui::Ui, version: &str, wide: bool) -> bool 
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     response
-        .on_hover_text(format!("Cairn {version} 可以更新了，点开看看改了什么"))
+        .on_hover_text(if ready {
+            format!("Cairn {version} 已就绪，重启后生效")
+        } else {
+            format!("Cairn {version} 可以更新了")
+        })
         .clicked()
 }
 
@@ -414,7 +603,13 @@ mod tests {
             }),
             ..Default::default()
         };
-        assert_eq!(state.badge(""), Some("9.9.9"));
+        assert_eq!(state.badge(""), Some(("9.9.9".into(), false)));
         assert_eq!(state.badge("9.9.9"), None);
+        // 已经就绪的版本不受「跳过」影响。
+        let state = UpdateState {
+            ready: Some("9.9.9".into()),
+            ..state
+        };
+        assert_eq!(state.badge("9.9.9"), Some(("9.9.9".into(), true)));
     }
 }

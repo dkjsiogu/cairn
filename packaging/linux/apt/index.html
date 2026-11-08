@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cairn apt 源</title>
+<style>
+  :root {
+    --bg: #f4f3f0; --surface: #ffffff; --ink: #1d1f22; --sub: #61656b;
+    --line: #dcdad5; --code: #eceae6; --accent: #3f7d5a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17191c; --surface: #1f2226; --ink: #e6e4df; --sub: #9a9ea4;
+      --line: #2e3237; --code: #26292e; --accent: #7fb594;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.6 system-ui, -apple-system, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 48px 16px; }
+  h1 { font-size: 28px; margin: 0 0 4px; font-weight: 600; }
+  h2 { font-size: 16px; margin: 32px 0 8px; font-weight: 600; }
+  p { margin: 0 0 8px; color: var(--sub); }
+  pre {
+    margin: 0; padding: 12px 14px; overflow-x: auto;
+    background: var(--code); border: 1px solid var(--line); border-radius: 4px;
+    font: 13px/1.6 ui-monospace, "JetBrains Mono", Consolas, monospace;
+  }
+  a { color: var(--accent); }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Cairn apt 源</h1>
+  <p>Debian 和 Ubuntu（amd64）。加上以后用 apt 安装，系统每天自动更新。</p>
+
+  <h2>安装</h2>
+  <div class="card">
+<pre>sudo wget -qO /usr/share/keyrings/cairn-archive-keyring.gpg https://dkjsiogu.github.io/cairn/apt/cairn-archive-keyring.gpg
+sudo wget -qO /etc/apt/sources.list.d/cairn.sources https://dkjsiogu.github.io/cairn/apt/cairn.sources
+sudo apt update && sudo apt install cairn</pre>
+  </div>
+
+  <h2>已经装了 deb</h2>
+  <p>0.41.0 起，deb 安装时会自动加上这个源，不用再做什么。</p>
+
+  <h2>关掉自动更新</h2>
+<pre>sudo rm /etc/apt/apt.conf.d/52cairn-auto-update</pre>
+  <p>之后用 <code>sudo apt upgrade</code> 手动更新。升级 Cairn 不会再把它加回来。</p>
+
+  <h2>签名密钥</h2>
+  <p>ed25519，指纹 <code>EA8E 4CE0 7C4F 56C9 9A4A BAC5 9CB5 F48B 25C9 C5C4</code></p>
+
+  <p style="margin-top:32px"><a href="https://github.com/dkjsiogu/cairn">GitHub</a> · <a href="https://github.com/dkjsiogu/cairn/releases/latest">Windows 版和 deb 下载</a></p>
+</main>
+</body>
+</html>

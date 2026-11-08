@@ -34,6 +34,10 @@ fn main() -> eframe::Result<()> {
         .nth(1)
         .map(|p| Root::new(PathBuf::from(p)))
         .unwrap_or_else(|| Root::new(Root::default_root()));
+    // 上次下载好的新版本没来得及换上（比如被强制结束）：现在换上，打开新版本。
+    if let Ok(Some(_)) = nailong_core::update::apply_staged(&root.cache(), true) {
+        return Ok(());
+    }
     #[cfg(debug_assertions)]
     let size = std::env::var("NAILONG_DEBUG_SIZE")
         .ok()

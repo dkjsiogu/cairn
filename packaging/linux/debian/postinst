@@ -1,0 +1,24 @@
+#!/bin/sh
+# Add the Cairn apt source and daily automatic updates.
+#
+# Only on a fresh install, or when upgrading from a version without them
+# (before 0.41.0). If the player deletes either file later, it stays deleted.
+set -e
+
+share=/usr/share/cairn/apt
+sources=/etc/apt/sources.list.d/cairn.sources
+auto=/etc/apt/apt.conf.d/52cairn-auto-update
+
+if [ "$1" = configure ]; then
+  if [ -z "$2" ] || dpkg --compare-versions "$2" lt 0.41.0; then
+    # Skip the source if the player already added the same repository.
+    if ! grep -rqsF 'dkjsiogu.github.io/cairn/apt' /etc/apt/sources.list /etc/apt/sources.list.d/; then
+      install -m 644 "$share/cairn.sources" "$sources"
+    fi
+    if [ ! -e "$auto" ]; then
+      install -m 644 "$share/52cairn-auto-update" "$auto"
+    fi
+  fi
+fi
+
+exit 0

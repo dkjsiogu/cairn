@@ -8,7 +8,7 @@ A small, native Minecraft: Java Edition launcher written in Rust. Renamed to **C
 
 [简体中文](README.md) | **English**
 
-> Current version: **0.40.1** (preview)
+> Current version: **0.41.0** (preview)
 >
 > Goals: small binaries, few dependencies, visible install progress, and a repair path after interruption. See [implementation status](docs/design/14-implementation-status.md) for exact boundaries.
 
@@ -26,6 +26,13 @@ A cairn is the pile of stones hikers leave by a trail: it does not walk for you,
 It is not a universal launcher, and it is not 1.0 yet. What works and what does not is laid out below.
 
 ## Interface
+
+0.41: automatic updates.
+
+- **Windows**: new versions download in the background and are swapped in when you close Cairn. You can turn this off in Settings.
+- **Linux**: the deb adds Cairn's apt repository, so the system updates Cairn daily. You can also `sudo apt install cairn` directly; see the install steps below.
+- To update right away, click the hint in the sidebar. On Linux the system asks for your password.
+- See [26 · Automatic updates](docs/design/26-auto-update.md).
 
 0.40: multiple accounts and a Screenshots page.
 
@@ -189,7 +196,7 @@ Drag a `.mrpack` or `.zip` into the window to start an import. A single mod `.ja
 | Platform | File | Size | Requirements |
 |---|---|---:|---|
 | Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | ~9 MB | Windows 10/11, Java 21 |
-| Linux x64 (deb) | [cairn_0.40.1_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.40.1_amd64.deb) | ~3.4 MB | Ubuntu 24.04+ / glibc ≥ 2.39, Java 21 |
+| Linux x64 (deb) | [cairn_0.41.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.41.0_amd64.deb) | ~3.4 MB | Ubuntu 24.04+ / glibc ≥ 2.39, Java 21 |
 
 Checksums: [SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS).
 
@@ -205,12 +212,27 @@ Java 21 must be installed. Cairn searches for it automatically and shows a warni
 
 ### Linux (Debian / Ubuntu)
 
+Install from the apt repository and get updates with the rest of the system:
+
 ```bash
-sudo apt install ./cairn_0.40.1_amd64.deb
-cairn
+sudo wget -qO /usr/share/keyrings/cairn-archive-keyring.gpg https://dkjsiogu.github.io/cairn/apt/cairn-archive-keyring.gpg
+sudo wget -qO /etc/apt/sources.list.d/cairn.sources https://dkjsiogu.github.io/cairn/apt/cairn.sources
+sudo apt update && sudo apt install cairn
+```
+
+Or install the deb; it adds the same apt repository:
+
+```bash
+sudo apt install ./cairn_0.41.0_amd64.deb
 ```
 
 You can also double-click the deb in a software center. After installation, **Cairn** appears in the application menu. An installed `nailong` package is replaced automatically.
+
+The system updates Cairn daily (unattended-upgrades). To turn that off:
+
+```bash
+sudo rm /etc/apt/apt.conf.d/52cairn-auto-update
+```
 
 Uninstall:
 

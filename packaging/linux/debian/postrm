@@ -1,0 +1,9 @@
+#!/bin/sh
+# Remove the apt source and the automatic update setting on purge.
+set -e
+
+if [ "$1" = purge ]; then
+  rm -f /etc/apt/sources.list.d/cairn.sources /etc/apt/apt.conf.d/52cairn-auto-update
+fi
+
+exit 0

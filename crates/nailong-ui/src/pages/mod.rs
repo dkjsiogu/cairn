@@ -161,7 +161,7 @@ impl App {
         let mut go: Option<Nav> = None;
         let mut account_clicked = false;
         let mut update_clicked = false;
-        let update_version = self.update.badge(&self.prefs.update_skip).map(String::from);
+        let update_badge = self.update.badge(&self.prefs.update_skip);
         let mut settings_clicked = false;
 
         egui::Panel::left("shell_nav")
@@ -207,7 +207,7 @@ impl App {
                 // 底部用显式留白定位：嵌套 bottom_up 在侧边栏里会缩成内容高度。
                 let playing = matches!(self.busy, Some(Task::Launch));
                 let locked = (busy && !playing) || login_busy;
-                let footer = if update_version.is_some() && !locked {
+                let footer = if update_badge.is_some() && !locked {
                     38.0
                 } else {
                     0.0
@@ -250,8 +250,8 @@ impl App {
                         }
                     });
                 } else {
-                    if let Some(version) = &update_version {
-                        if update_pill(ui, version, wide) {
+                    if let Some((version, ready)) = &update_badge {
+                        if update_pill(ui, version, *ready, wide) {
                             update_clicked = true;
                         }
                         ui.add_space(8.0);

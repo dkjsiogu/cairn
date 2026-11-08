@@ -8,7 +8,7 @@
 
 **简体中文** | [English](README.en.md)
 
-> 当前版本：**0.40.1**（预览版）
+> 当前版本：**0.41.0**（预览版）
 >
 > 目标：小体积、少依赖、安装过程可见、中断可补。功能边界见 [实现状态](docs/design/14-implementation-status.md)。
 
@@ -26,6 +26,13 @@ Cairn 是登山者叠在路边的石堆：它不帮你走路，只标出回去�
 它不是“万能启动器”，也还不是 1.0。能做和不能做的，下文列清楚了。
 
 ## 界面
+
+0.41：自动更新。
+
+- **Windows**：在后台下载新版本，关掉 Cairn 时换上。设置里可以关掉。
+- **Linux**：deb 装好后会加上 Cairn 的 apt 源，系统每天自动更新。也可以直接 `sudo apt install cairn`，见下面的安装说明。
+- 想马上更新：点侧栏的提示。Linux 上会弹出系统的授权窗口。
+- 详见 [26 · 自动更新](docs/design/26-auto-update.md)。
 
 0.40：多账户和截图页。
 
@@ -190,7 +197,7 @@ Cairn 是登山者叠在路边的石堆：它不帮你走路，只标出回去�
 | 平台 | 文件 | 大小 | 要求 |
 |---|---|---:|---|
 | Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | 约 9 MB | Windows 10/11，Java 21 |
-| Linux x64 (deb) | [cairn_0.40.1_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.40.1_amd64.deb) | 约 3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39，Java 21 |
+| Linux x64 (deb) | [cairn_0.41.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.41.0_amd64.deb) | 约 3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39，Java 21 |
 
 校验值：[SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS)。
 
@@ -206,12 +213,27 @@ Cairn 是登山者叠在路边的石堆：它不帮你走路，只标出回去�
 
 ### Linux（Debian / Ubuntu）
 
+用 apt 源安装，以后跟着系统更新：
+
 ```bash
-sudo apt install ./cairn_0.40.1_amd64.deb
-cairn
+sudo wget -qO /usr/share/keyrings/cairn-archive-keyring.gpg https://dkjsiogu.github.io/cairn/apt/cairn-archive-keyring.gpg
+sudo wget -qO /etc/apt/sources.list.d/cairn.sources https://dkjsiogu.github.io/cairn/apt/cairn.sources
+sudo apt update && sudo apt install cairn
+```
+
+或者下载 deb 安装，效果一样：deb 会自动加上这个 apt 源。
+
+```bash
+sudo apt install ./cairn_0.41.0_amd64.deb
 ```
 
 也可以双击 deb 用软件中心安装。安装后应用菜单里会有 **Cairn**。装过旧的 `nailong` 包也没关系，`cairn` 会替换它。
+
+系统每天自动更新 Cairn（unattended-upgrades）。不想自动更新：
+
+```bash
+sudo rm /etc/apt/apt.conf.d/52cairn-auto-update
+```
 
 卸载：
 

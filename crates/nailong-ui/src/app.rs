@@ -309,18 +309,9 @@ impl App {
                     }
                 }
                 "java" => app.start_java_download(17, None, None),
-                "update" => {
-                    app.update.latest = Some(nailong_core::update::Release {
-                        version: "0.39.0".into(),
-                        notes: "下载页显示正在下什么、从哪下、多快、还要多久\n\n\
-                                * 没有合适的 Java 时自动下载官方运行时，下完接着启动\n\
-                                * 启动器里提示新版本，一键更新\n\
-                                * 界面代码按页面和弹窗拆成模块"
-                            .into(),
-                        page: "https://github.com/dkjsiogu/cairn/releases".into(),
-                        assets: Vec::new(),
-                    });
-                    app.update.open = true;
+                screen if screen.starts_with("update") => {
+                    app.update.debug(screen);
+                    app.show_settings = screen.starts_with("update-settings");
                     // 别让启动时的自动检查把这个假版本冲掉。
                     app.prefs.update_checked = u64::MAX / 2;
                 }
@@ -782,6 +773,7 @@ impl App {
             "update_skip": self.prefs.update_skip,
             "source": self.prefs.source,
             "shots_embed": self.prefs.embed_shots,
+            "auto_update": self.prefs.auto_update,
         });
         if let Ok(bytes) = serde_json::to_vec_pretty(&value) {
             let _ = std::fs::write(self.root.dir().join("ui.json"), bytes);
@@ -886,6 +878,8 @@ pub(crate) struct UiPrefs {
     pub(crate) source: String,
     /// 截图时把地点和人物写进图片本身；关掉就只记在 `shots.json`。
     pub(crate) embed_shots: bool,
+    /// Windows：在后台下载新版本，关掉 Cairn 时换上。
+    pub(crate) auto_update: bool,
 }
 
 /// 玩家名、内存和外观存在数据目录的 `ui.json`，随设置弹窗关闭落盘。
@@ -939,6 +933,9 @@ pub(crate) fn load_ui_prefs(root: &Root) -> UiPrefs {
             _ => "official".into(),
         },
         embed_shots: get("shots_embed")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(true),
+        auto_update: get("auto_update")
             .and_then(|value| value.as_bool())
             .unwrap_or(true),
     }
@@ -1064,5 +1061,10 @@ impl eframe::App for App {
             }
         }
         motion::focus_ring(ui.ctx());
+    }
+
+    /// 关掉 Cairn 时，把下载好的新版本换上（Windows）。下次打开就是新版本。
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        let _ = nailong_core::update::apply_staged(&self.root.cache(), false);
     }
 }

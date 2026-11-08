@@ -48,6 +48,13 @@ install -Dm644 LICENSE "$stage/usr/share/doc/cairn/LICENSE"
 install -Dm644 THIRD_PARTY_NOTICES.md \
   "$stage/usr/share/doc/cairn/THIRD_PARTY_NOTICES.md"
 
+# apt source and daily automatic updates; postinst copies these into /etc.
+install -Dm644 packaging/linux/apt/cairn-archive-keyring.gpg \
+  "$stage/usr/share/keyrings/cairn-archive-keyring.gpg"
+install -Dm644 packaging/linux/apt/cairn.sources "$stage/usr/share/cairn/apt/cairn.sources"
+install -Dm644 packaging/linux/apt/52cairn-auto-update \
+  "$stage/usr/share/cairn/apt/52cairn-auto-update"
+
 for size in 16 24 32 48 64 128 256 512; do
   install -Dm644 "packaging/linux/icons/io.github.dkjsiogu.cairn-${size}.png" \
     "$stage/usr/share/icons/hicolor/${size}x${size}/apps/io.github.dkjsiogu.cairn.png"
@@ -88,6 +95,9 @@ Description: Lightweight Minecraft launcher
  download progress, repairs incomplete files, and launches offline.
  It needs a Java 21 runtime installed.
 EOF
+
+install -m755 packaging/linux/debian/postinst "$stage/DEBIAN/postinst"
+install -m755 packaging/linux/debian/postrm "$stage/DEBIAN/postrm"
 
 (cd "$stage" && find . -type f ! -path './DEBIAN/*' -printf '%P\n' | sort | xargs md5sum > DEBIAN/md5sums)
 
