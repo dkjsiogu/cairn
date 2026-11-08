@@ -48,7 +48,7 @@
 
 0.34.1 修复 26.x 无法安装和启动：版本文件 `default-user-jvm` 的首条没有 `rules`，解析失败；`${natives_directory}` 误指向 `java` 子目录，`java.library.path` 变成 `.../java/java`。实测 26.1、26.3 原版可安装并进入世界。调参在版本文件带官方默认时跟随官方（26.x 为 ZGC + 紧凑对象头 + 预先占用 + 字符串去重，初始堆 2 GB）。Java 选择改为够用里最低的大版本，同版本优先 64 位 OpenJDK。
 
-0.41.0 自动更新（见 [26](26-auto-update.md)）。core：`update::install_kind` 认出装法（Windows exe / deb + apt 源 / deb / 其他）；Windows 下载校验后记在 `update/staged.json`，关掉时（`on_exit`）或下次打开时换上，换前再校验；Linux 用 `pkexec apt-get install` 装下载好的 deb，失败给出原因和命令；`/proc/self/exe` 末尾出现 ` (deleted)` 说明系统已经换了新版本。界面：侧栏「新版本 X」/「重启更新到 X」；弹窗按状态显示进度、等授权、已就绪；设置里「自动更新」（Windows 开关，Linux 显示状态）；每 12 小时检查一次，不只是启动时。打包：deb 带上公钥、`cairn.sources` 和 `52cairn-auto-update`，`postinst` 在第一次安装或从 0.41 以前升级时写进 `/etc/apt`，`postrm purge` 删除；`scripts/build-apt-repo.sh` 建签名的 apt 源并用公钥验签；`release.yml` 新增 `apt` 任务，取最近 3 个版本的 deb 部署到 GitHub Pages。
+0.41.0 自动更新（见 [26](26-auto-update.md)）。core：`update::install_kind` 认出装法（Windows exe / deb + apt 源 / deb / 其他）；Windows 下载校验后记在 `update/staged.json`，关掉时（`on_exit`）或下次打开时换上，换前再校验；Linux 用 `pkexec apt-get install` 装下载好的 deb，失败给出原因和命令；`/proc/self/exe` 末尾出现 ` (deleted)` 说明系统已经换了新版本。界面：侧栏「新版本 X」/「重启更新到 X」；弹窗按状态显示进度、等授权、已就绪；设置里「自动更新」（Windows 开关，Linux 显示状态）；每 12 小时检查一次，不只是启动时。打包：deb 带上公钥、`cairn.sources` 和 `52cairn-auto-update`，`postinst` 在第一次安装或从 0.41 以前升级时写进 `/etc/apt`，`postrm purge` 删除；`scripts/build-apt-repo.sh` 建签名的 apt 源并用公钥验签；新的 `apt.yml` 在 Release 成功后运行，取最近 3 个版本的 deb 部署到 GitHub Pages。
 
 0.40.1 初始堆等于最大堆（`-Xms` = `-Xmx`）。以前空闲内存不多时初始堆取一半（例如 `-Xms3328m -Xmx6656m`），运行中要扩容，多出回收。现在总是相等；空闲内存不够时，自动选的 ZGC 这次改用 G1（ZGC 要一开始占满整个堆，不够会启动失败），手动选的 ZGC 照用并提示，官方默认的 `AlwaysPreTouch` 这次不加。见 [19](19-jvm-tuning.md)。
 

@@ -1,0 +1,73 @@
+name: Apt repository
+
+# apt 源：用最近 3 个正式版的 deb 建一个签好名的源，发布到 GitHub Pages
+# （https://dkjsiogu.github.io/cairn/apt）。deb 装好后会加上这个源，系统每天自动更新。
+# 签名私钥在 Secrets 的 APT_SIGNING_KEY；公钥是 packaging/linux/apt/cairn-archive-keyring.gpg。
+#
+# Release 流程成功后自动运行；也可以手动运行，重新部署。
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apt-pages
+  cancel-in-progress: false
+
+jobs:
+  apt:
+    name: Publish apt repository
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends apt-utils gnupg
+
+      - name: Import signing key
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          if [ -z "$APT_SIGNING_KEY" ]; then
+            echo "没有配置 APT_SIGNING_KEY" >&2
+            exit 1
+          fi
+          printf '%s\n' "$APT_SIGNING_KEY" | gpg --batch --import
+
+      - name: Download recent debs
+        run: |
+          mkdir debs
+          gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases \
+            --limit 3 --json tagName --jq '.[].tagName' |
+          while read -r tag; do
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern '*.deb' --dir debs
+          done
+          ls -l debs
+
+      - name: Build apt repository
+        run: ./scripts/build-apt-repo.sh site debs/*.deb
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

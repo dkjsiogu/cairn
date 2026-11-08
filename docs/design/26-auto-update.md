@@ -51,7 +51,8 @@
   - 私钥存在仓库 Secrets 的 `APT_SIGNING_KEY`，本机备份在 `~/.local/share/cairn-release/`。
   - 建源脚本最后用这把公钥验签。签错了，发版就失败。
 - Release 文件：`Origin: Cairn`、`Label: Cairn`、`Suite: stable`。
-- 发版：`release.yml` 的 `apt` 任务。发完 GitHub Release 后，下载最近 3 个版本的 deb，建源，签名，部署到 Pages。
+- 发版：`apt.yml`。Release 流程成功后自动运行，也可以手动运行。它下载最近 3 个版本的 deb，建源，签名，部署到 Pages。
+  - 没放在 `release.yml` 里：签名任务没配置时状态是「跳过」，排在后面的任务会跟着被跳过。
 - Pages 首页（`packaging/linux/apt/index.html`）写着安装命令。
 
 ### 4.2 deb 自带源
