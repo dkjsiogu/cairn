@@ -8,7 +8,7 @@ A small, native Minecraft: Java Edition launcher written in Rust. Renamed to **C
 
 [简体中文](README.md) | **English**
 
-> Current version: **0.42.0** (preview)
+> Current version: **0.42.1** (preview)
 >
 > Goals: small binaries, few dependencies, visible install progress, and a repair path after interruption. See [implementation status](docs/design/14-implementation-status.md) for exact boundaries.
 
@@ -156,7 +156,7 @@ Six formats are detected automatically:
 |---|---|---|
 | Modrinth | `.mrpack` | Direct URLs plus SHA1 |
 | CurseForge | zip with `manifest.json` | Resolve project/file IDs; official builds include a key for SHA1 checks |
-| Prism / MultiMC | `mmc-pack.json` | Components and overrides |
+| Prism / MultiMC | `mmc-pack.json` (may sit inside one folder) | Components and overrides; instances with component patches (`patches/`) are built from those patches, including the instance's own libraries |
 | MCBBS | `mcbbs.packmeta` | addons + files + overrides |
 | HMCL | `modpack.json` + `minecraft/pack.json` | Embedded manifest becomes a profile |
 | ATLauncher | `instance.json` | Embedded manifest becomes a profile |
@@ -205,7 +205,7 @@ Drag a `.mrpack` or `.zip` into the window to start an import. A single mod `.ja
 | Platform | File | Size | Requirements |
 |---|---|---:|---|
 | Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | ~9 MB | Windows 10/11, Java 21 |
-| Linux x64 (deb) | [cairn_0.42.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.42.0_amd64.deb) | ~3.4 MB | Ubuntu 24.04+ / glibc ≥ 2.39, Java 21 |
+| Linux x64 (deb) | [cairn_0.42.1_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.42.1_amd64.deb) | ~3.4 MB | Ubuntu 24.04+ / glibc ≥ 2.39, Java 21 |
 
 Checksums: [SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS).
 
@@ -232,7 +232,7 @@ sudo apt update && sudo apt install cairn
 Or install the deb; it adds the same apt repository:
 
 ```bash
-sudo apt install ./cairn_0.42.0_amd64.deb
+sudo apt install ./cairn_0.42.1_amd64.deb
 ```
 
 You can also double-click the deb in a software center. After installation, **Cairn** appears in the application menu. An installed `nailong` package is replaced automatically.

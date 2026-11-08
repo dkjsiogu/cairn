@@ -28,6 +28,11 @@
   <url type="bugtracker">https://github.com/dkjsiogu/cairn/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.42.1" date="2026-11-08">
+      <description>
+        <p>Imports Prism Launcher and MultiMC instance exports that sit inside one folder or carry their own component patches and libraries. Old version files now get the native library path at launch, and automatic memory tuning recognizes loaders from the libraries when a pack uses its own main class.</p>
+      </description>
+    </release>
     <release version="0.42.0" date="2026-11-08">
       <description>
         <p>One folder per version. Each version is a single folder with a complete version file and its own mods, worlds and config, so deleting one never breaks another. Name versions when installing and rename them later; the same loader can be installed several times. Deleting moves the folder to the trash. Modpacks install as a version folder too. Settings can clean up libraries and assets no version uses.</p>

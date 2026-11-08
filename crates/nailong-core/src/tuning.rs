@@ -205,6 +205,30 @@ impl Loader {
             Self::Vanilla
         }
     }
+
+    /// 先看主类；主类是自定义的启动器（整合包常这样）时，再看库里有没有加载器。
+    pub fn detect(resolved: &Resolved) -> Self {
+        let by_main = Self::from_main_class(&resolved.main_class);
+        if by_main != Self::Vanilla {
+            return by_main;
+        }
+        let has = |prefix: &str| {
+            resolved
+                .libraries
+                .iter()
+                .any(|l| l.name.starts_with(prefix))
+        };
+        if has("net.fabricmc:fabric-loader:") || has("org.quiltmc:quilt-loader:") {
+            Self::Fabric
+        } else if has("net.minecraftforge:forge:")
+            || has("net.minecraftforge:fmlloader:")
+            || has("net.neoforged:")
+        {
+            Self::Forge
+        } else {
+            Self::Vanilla
+        }
+    }
 }
 
 /// 这次启动要跑的东西。
@@ -223,7 +247,7 @@ pub struct Workload {
 
 impl Workload {
     pub fn new(java: &JavaRuntime, resolved: &Resolved, game_dir: &Path) -> Self {
-        let loader = Loader::from_main_class(&resolved.main_class);
+        let loader = Loader::detect(resolved);
         let mods = if loader == Loader::Vanilla {
             0
         } else {
@@ -1364,6 +1388,43 @@ mod tests {
         );
         assert_eq!(
             Loader::from_main_class("net.minecraft.client.main.Main"),
+            Loader::Vanilla
+        );
+    }
+
+    #[test]
+    fn a_custom_main_class_falls_back_to_the_libraries() {
+        let resolved = |main: &str, libs: &[&str]| crate::manifest::Resolved {
+            id: "pack".into(),
+            main_class: main.into(),
+            client_jar: std::path::PathBuf::new(),
+            client_jar_id: "pack".into(),
+            asset_index: None,
+            libraries: libs
+                .iter()
+                .map(|name| serde_json::from_value(serde_json::json!({ "name": name })).unwrap())
+                .collect(),
+            arguments: Default::default(),
+            legacy_arguments: None,
+            java_major: None,
+            java_component: None,
+            logging: None,
+            chain: vec!["pack".into()],
+        };
+        let custom = "com.example.bootstrap.Main";
+        assert_eq!(
+            Loader::detect(&resolved(
+                custom,
+                &["net.minecraftforge:forge:1.7.10-10.13.4.1614-1.7.10:universal"]
+            )),
+            Loader::Forge
+        );
+        assert_eq!(
+            Loader::detect(&resolved(custom, &["net.fabricmc:fabric-loader:0.16.10"])),
+            Loader::Fabric
+        );
+        assert_eq!(
+            Loader::detect(&resolved(custom, &["org.lwjgl:lwjgl:3.3.3"])),
             Loader::Vanilla
         );
     }

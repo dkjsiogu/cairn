@@ -357,6 +357,12 @@ fn build(root: &Root, profile: &str, opts: &LaunchOptions, write: bool) -> Resul
     let mut jvm = expand_args(&resolved.arguments.jvm, &ctx);
     // 去掉 manifest 里的 -cp/classpath，由我们统一追加
     remove_classpath_args(&mut jvm);
+    // 老版本的版本文件（只有 minecraftArguments）不写这个，LWJGL2 会找不到 native 库。
+    push_default(
+        &mut jvm,
+        "-Djava.library.path=",
+        &format!("-Djava.library.path={}", natives.display()),
+    );
     push_default(&mut jvm, "-Dfile.encoding=", "-Dfile.encoding=UTF-8");
     push_default(
         &mut jvm,

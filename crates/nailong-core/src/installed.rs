@@ -497,7 +497,12 @@ pub fn classify(path: &Path) -> Dropped {
             entry.name().ok().map(|name| name.to_string())
         })
         .collect();
-    // 整合包：Modrinth、MCBBS、CurseForge、Prism/MultiMC 的清单都在根目录。
+    // 整合包：Modrinth、MCBBS、CurseForge、Prism/MultiMC 的清单都在根目录；
+    // Prism/MultiMC 的实例导出包也可能套一层文件夹。
+    let nested = |name: &str, file: &str| {
+        name.split_once('/')
+            .is_some_and(|(dir, rest)| !dir.is_empty() && rest == file)
+    };
     if names.iter().any(|name| {
         matches!(
             name.as_str(),
@@ -506,7 +511,7 @@ pub fn classify(path: &Path) -> Dropped {
                 | "manifest.json"
                 | "mmc-pack.json"
                 | "instance.cfg"
-        )
+        ) || nested(name, "mmc-pack.json")
     }) {
         return Dropped::Modpack;
     }
@@ -671,6 +676,14 @@ mod tests {
             Dropped::Modpack
         );
         assert_eq!(classify(&zip_with("d.zip", "readme.txt")), Dropped::Archive);
+        assert_eq!(
+            classify(&zip_with("e.zip", "My Pack 2.9/mmc-pack.json")),
+            Dropped::Modpack
+        );
+        assert_eq!(
+            classify(&zip_with("f.zip", "a/b/mmc-pack.json")),
+            Dropped::Archive
+        );
         assert_eq!(
             classify(&dir.join("x.jar")),
             Dropped::Content(ContentKind::Mod)

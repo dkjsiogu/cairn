@@ -1,7 +1,7 @@
-# 14 · 原型实现状态（0.1 → 0.42.0）
+# 14 · 原型实现状态（0.1 → 0.42.1）
 
 > 日期：2026-11-07
-> 对应发布：GitHub Release `v0.42.0` 的 `cairn.exe`、`cairn_0.42.0_amd64.deb`，以及 apt 源 `https://dkjsiogu.github.io/cairn/apt`（0.37 起改名 Cairn）
+> 对应发布：GitHub Release `v0.42.1` 的 `cairn.exe`、`cairn_0.42.1_amd64.deb`，以及 apt 源 `https://dkjsiogu.github.io/cairn/apt`（0.37 起改名 Cairn）
 > 目的：把「设计稿」和「已经跑起来的代码」分开记账，避免把计划当成已完成。
 
 ## 1. 一句话结论
@@ -47,6 +47,8 @@
 0.34.0 加入 JVM 自动调参（`tuning.rs`，规范见 `docs/design/19-jvm-tuning.md`）：内存默认自动，按物理内存、逻辑处理器、Java 版本、加载器和 Mod 数量算出堆大小，配官方启动器那套 G1 参数并按堆放大 Region；Java 25 加紧凑对象头；大整合包配强机器时自动换分代 ZGC。设置里显示结果、依据和完整参数，可手动指定内存、回收器或追加 JVM 参数；CLI 增加 `--gc`、`--jvm-arg`，`--dry-run` 打印计算过程。生成的参数在本机 OpenJDK 11/17/21/25 和 GraalVM 21 上逐一启动验证。顺带修复 CLI 传相对 `--game-dir` 时游戏目录被解析两次的问题。
 
 0.34.1 修复 26.x 无法安装和启动：版本文件 `default-user-jvm` 的首条没有 `rules`，解析失败；`${natives_directory}` 误指向 `java` 子目录，`java.library.path` 变成 `.../java/java`。实测 26.1、26.3 原版可安装并进入世界。调参在版本文件带官方默认时跟随官方（26.x 为 ZGC + 紧凑对象头 + 预先占用 + 字符串去重，初始堆 2 GB）。Java 选择改为够用里最低的大版本，同版本优先 64 位 OpenJDK。
+
+0.42.1 支持带组件补丁的 Prism/MultiMC 实例整合包。`install::prism` 按 Prism 的规则把 `mmc-pack.json` 的组件依次叠起来（主类、参数、游戏本体、资源索引后者覆盖；tweaker、JVM 参数、agent 追加；同名库替换；Java 取兼容列表里最小的），组件优先用包里的 `patches/<uid>.json`，没有就取 Prism 元数据；`MMC-hint: local` 的库从包里的 `libraries/` 放进去；需要 ForgeWrapper、jarMods、mavenFiles 的组件明确报不支持。实例导出包可以套一层文件夹（导入和拖入都认）。另外：Prism 写法里没写路径的 native classifier 补上路径；只有 `minecraftArguments` 的老版本启动时补 `-Djava.library.path`；自动调参在主类是自定义启动类时从库认加载器。实测一个 1.7.10 + LWJGL3 的大型实例包（323 个 Mod）导入后进到主菜单。
 
 0.42.0 一个版本一个文件夹（见 [27](27-version-folders.md)）。core：新的 `versions` 模块——`install` 先把原版和加载器装进 `cache/cairn/profiles/`（`Root::store()` 视图，安装代码不用改），再合并成没有 `inheritsFrom` 的完整 JSON 写进 `versions/<名字>/`，带 `cairn` 记录（MC、加载器、profile、整合包），客户端 jar 硬链接进去；`remove` 移到回收站，`rename` 连启动参数一起改，`plan_cleanup`/`run_cleanup` 清理没人用的 profile、资源、运行库和内容库（processor 生成的目录不动）；`detect` 从启动参数和库认出加载器。游戏目录一律是版本文件夹；整合包也装成版本文件夹，不再用 `instances/`；natives 目录名有非 ASCII 时加哈希。界面：版本页去掉「显示基础版本」「被依赖」「被使用」和「隔离」，标题是版本名，可以改名，删除改成移到回收站并写明有几个世界；安装页可以起名；设置里「不用的运行库和资源」先算再清。CLI：`install --name`、`remove`、`rename`、`clean`。
 
@@ -157,7 +159,7 @@
 | 大文件分段下载 | `core::http` | 完成 | client jar 4 段并行、段续传、源回退 |
 | 重复安装快速路径 | `core::install::forge` / `neoforge` | 完成 | health 通过则 0 下载、0 processor |
 | Windows 交叉编译 | `x86_64-pc-windows-gnu` | 通过 | 无 MinGW DLL 依赖，仅系统 DLL |
-| 发布包 | GitHub Release `v0.42.0` | 完成（CI 构建） | 单 exe 约 8 MB / deb 约 4 MB |
+| 发布包 | GitHub Release `v0.42.1` | 完成（CI 构建） | 单 exe 约 8 MB / deb 约 4 MB |
 | apt 源 | GitHub Pages `dkjsiogu.github.io/cairn/apt` | 完成（CI 部署） | 最近 3 个版本；ed25519 签名；系统每天自动更新 |
 
 ### 2.1 实测记录

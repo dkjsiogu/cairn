@@ -2,7 +2,7 @@ use crate::builtin;
 use crate::cancel;
 use crate::error::{Error, Result};
 use crate::http::{FileSpec, Http};
-use crate::install::{fabric, forge, neoforge, vanilla};
+use crate::install::{fabric, forge, neoforge, prism, vanilla};
 use crate::manifest::{Context, VersionJson, library_specs_for};
 use crate::paths::{Root, write_atomic};
 use crate::progress::{Progress, Sink};
@@ -159,7 +159,33 @@ struct MmcPack {
 #[derive(Debug, Deserialize)]
 struct MmcComponent {
     uid: String,
+    /// 有的组件只写了 `cachedVersion`（比如只加参数的小组件）。
+    #[serde(default)]
     version: String,
+    #[serde(default, rename = "cachedVersion")]
+    cached_version: String,
+}
+
+impl MmcComponent {
+    fn version(&self) -> String {
+        let version = self.version.trim();
+        if version.is_empty() {
+            self.cached_version.trim().to_string()
+        } else {
+            version.to_string()
+        }
+    }
+}
+
+/// 实例导出包可能套了一层文件夹（`<名字>/mmc-pack.json`）：返回这层前缀，没套就是空串。
+fn pack_base(names: &[String], file: &str) -> Option<String> {
+    names.iter().find_map(|name| {
+        if name == file {
+            return Some(String::new());
+        }
+        let (dir, rest) = name.split_once('/')?;
+        (rest == file && !dir.is_empty()).then(|| format!("{dir}/"))
+    })
 }
 
 pub fn import_pack(
@@ -197,7 +223,7 @@ fn detect_format(archive: &Path) -> Result<PackFormat> {
         }
         return Ok(PackFormat::CurseForge);
     }
-    if names.iter().any(|name| name == "mmc-pack.json") {
+    if pack_base(&names, "mmc-pack.json").is_some() {
         return Ok(PackFormat::Prism);
     }
     if names.iter().any(|name| name == "modpack.json")
@@ -346,38 +372,52 @@ fn import_prism(
 ) -> Result<ImportedInstance> {
     root.ensure()?;
     let mut zip = open_zip(archive)?;
-    let pack: MmcPack = serde_json::from_slice(&read_zip_entry(&mut zip, "mmc-pack.json")?)
-        .map_err(|e| Error::Install(format!("mmc-pack.json 解析失败: {e}")))?;
+    let names = zip_names(&mut zip);
+    let base = pack_base(&names, "mmc-pack.json").unwrap_or_default();
+    let pack: MmcPack =
+        serde_json::from_slice(&read_zip_entry(&mut zip, &format!("{base}mmc-pack.json"))?)
+            .map_err(|e| Error::Install(format!("mmc-pack.json 解析失败: {e}")))?;
     let mc = pack
         .components
         .iter()
         .find(|component| component.uid == "net.minecraft")
-        .map(|component| component.version.trim().to_string())
+        .map(MmcComponent::version)
         .filter(|version| !version.is_empty())
         .ok_or_else(|| Error::Install("Prism/MultiMC 整合包没有声明 Minecraft 版本".into()))?;
+    let name = instance_cfg_name(&mut zip, &base).unwrap_or_else(|| archive_stem(archive));
+    // 自带组件补丁（patches/<uid>.json）的实例：按 Prism 的规则把组件叠起来。
+    // 没带的：只看组件的版本号，用我们自己的安装器装加载器。
+    let patched = names
+        .iter()
+        .any(|n| n.starts_with(&format!("{base}patches/")) && n.ends_with(".json"));
     (sink)(Progress::stage("安装整合包加载器"));
-    let profile = install_prism_loader(&root.store(), &mc, &pack.components, mirror, sink)?;
-    let name = instance_cfg_name(&mut zip).unwrap_or_else(|| archive_stem(archive));
+    let (profile, known) = if patched {
+        let (profile, known) =
+            install_prism_components(root, &mut zip, &base, &pack, &name, mirror, sink)?;
+        (profile, Some(known))
+    } else {
+        let profile = install_prism_loader(&root.store(), &mc, &pack.components, mirror, sink)?;
+        (profile, None)
+    };
     let (id, instance_dir, game_dir) = create_instance(root, &name, &profile, "prism", archive)?;
 
-    let names = zip_names(&mut zip);
-    let prefix = if names.iter().any(|name| name.starts_with(".minecraft/")) {
-        ".minecraft/"
-    } else if names.iter().any(|name| name.starts_with("minecraft/")) {
-        "minecraft/"
-    } else {
+    let prefix = [".minecraft/", "minecraft/"]
+        .iter()
+        .map(|dir| format!("{base}{dir}"))
+        .find(|prefix| names.iter().any(|name| name.starts_with(prefix.as_str())));
+    let Some(prefix) = prefix else {
         let _ = std::fs::remove_dir_all(&instance_dir);
         return Err(Error::Install(
             "Prism/MultiMC 整合包缺少 .minecraft/ 目录".into(),
         ));
     };
-    let result = extract_prefixes(&mut zip, &game_dir, &[prefix.to_string()], sink);
+    let result = extract_prefixes(&mut zip, &game_dir, &[prefix], sink);
     if let Err(e) = result {
         let _ = std::fs::remove_dir_all(&instance_dir);
         return Err(e);
     }
 
-    finish_instance(
+    finish_instance_as(
         root,
         &id,
         &name,
@@ -386,8 +426,80 @@ fn import_prism(
         archive,
         game_dir,
         instance_dir,
+        known,
         sink,
     )
+}
+
+/// 带组件补丁的 Prism/MultiMC 实例：合成版本 JSON 放进缓存，下好游戏本体、运行库和资源，
+/// 把实例自带的库放进 `libraries/`。返回 profile 名和（MC 版本、加载器、加载器版本）。
+#[allow(clippy::type_complexity)]
+fn install_prism_components(
+    root: &Root,
+    zip: &mut zip::ZipArchive<File>,
+    base: &str,
+    pack: &MmcPack,
+    name: &str,
+    mirror: &str,
+    sink: &Sink,
+) -> Result<(String, (String, versions::Loader, Option<String>))> {
+    let store = root.store();
+    let http = Http::new(mirror)?;
+    let profile = unique_loader_id(&store, "prism", name);
+    (sink)(Progress::stage("读取整合包组件"));
+    let components: Vec<(String, String)> = pack
+        .components
+        .iter()
+        .map(|c| (c.uid.clone(), c.version()))
+        .collect();
+    let built = {
+        let patch = |uid: &str| {
+            read_zip_entry(zip, &format!("{base}patches/{uid}.json"))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        };
+        prism::build(&profile, &components, patch, |uid, version| {
+            prism::fetch(&http, uid, version)
+        })?
+    };
+    for (file, relative) in &built.local {
+        let bytes = read_zip_entry(zip, &format!("{base}libraries/{file}"))
+            .map_err(|_| Error::Install(format!("整合包里缺少 libraries/{file}")))?;
+        write_atomic(&root.libraries().join(relative), &bytes)?;
+    }
+    let text = serde_json::to_vec_pretty(&built.json).map_err(|e| Error::Install(e.to_string()))?;
+    write_atomic(&store.version_json(&profile), &text)?;
+    let version: VersionJson = serde_json::from_slice(&text)
+        .map_err(|e| Error::Install(format!("合成的版本文件读不懂: {e}")))?;
+
+    let client = version
+        .downloads
+        .client
+        .clone()
+        .ok_or_else(|| Error::Install("组件里没有游戏本体".into()))?;
+    (sink)(Progress::stage("下载客户端"));
+    crate::blob::download_specs(
+        root,
+        &http,
+        vec![FileSpec {
+            url: client.url,
+            dest: store.client_jar(&profile),
+            sha1: client.sha1,
+            size: client.size,
+            verify_existing: true,
+            label: None,
+        }],
+        "下载客户端",
+        sink,
+    )?;
+    let specs: Vec<FileSpec> = library_specs_for(root, &version.libraries, &Context::current())
+        .into_iter()
+        .filter(|spec| !spec.url.is_empty())
+        .collect();
+    (sink)(Progress::stage("下载整合包运行库"));
+    crate::blob::download_specs(root, &http, specs, "下载整合包运行库", sink)?;
+    vanilla::install_assets_with(&store, &profile, mirror, sink)?;
+    Ok((profile, (built.mc, built.loader, built.loader_version)))
 }
 
 fn import_mcbbs(
@@ -821,7 +933,7 @@ fn install_prism_loader(
         components
             .iter()
             .find(|component| component.uid == uid)
-            .map(|component| component.version.trim().to_string())
+            .map(MmcComponent::version)
             .filter(|version| !version.is_empty())
     };
     if let Some(version) = find("net.fabricmc.fabric-loader") {
@@ -1154,9 +1266,9 @@ fn extract_prefixes(
     Ok(())
 }
 
-fn instance_cfg_name(zip: &mut zip::ZipArchive<File>) -> Option<String> {
+fn instance_cfg_name(zip: &mut zip::ZipArchive<File>, base: &str) -> Option<String> {
     let mut bytes = Vec::new();
-    zip.by_name("instance.cfg")
+    zip.by_name(&format!("{base}instance.cfg"))
         .ok()?
         .read_to_end(&mut bytes)
         .ok()?;
@@ -1200,7 +1312,36 @@ fn finish_instance(
     instance_dir: PathBuf,
     sink: &Sink,
 ) -> Result<ImportedInstance> {
-    let (mc, loader, loader_version) = versions::detect(&root.store(), profile);
+    finish_instance_as(
+        root,
+        id,
+        name,
+        profile,
+        format,
+        archive,
+        game_dir,
+        instance_dir,
+        None,
+        sink,
+    )
+}
+
+/// 写好版本 JSON。`known` 是已经知道的（MC 版本、加载器、加载器版本）；不知道就从 profile 认。
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn finish_instance_as(
+    root: &Root,
+    id: &str,
+    name: &str,
+    profile: &str,
+    format: &str,
+    archive: &Path,
+    game_dir: PathBuf,
+    instance_dir: PathBuf,
+    known: Option<(String, versions::Loader, Option<String>)>,
+    sink: &Sink,
+) -> Result<ImportedInstance> {
+    let (mc, loader, loader_version) =
+        known.unwrap_or_else(|| versions::detect(&root.store(), profile));
     let meta = versions::Meta {
         mc,
         loader,
@@ -1382,5 +1523,28 @@ mod tests {
         .unwrap();
         assert_eq!(pack.components.len(), 2);
         assert_eq!(pack.components[1].uid, "net.neoforged");
+        // 只写了 cachedVersion 的组件。
+        let pack: MmcPack = serde_json::from_str(
+            r#"{"components":[{"uid":"example.args","cachedVersion":"3.0.42"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(pack.components[0].version(), "3.0.42");
+    }
+
+    #[test]
+    fn instance_exports_can_sit_in_one_folder() {
+        let names: Vec<String> = ["Pack 2.9/mmc-pack.json", "Pack 2.9/.minecraft/mods/a.jar"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            pack_base(&names, "mmc-pack.json").as_deref(),
+            Some("Pack 2.9/")
+        );
+        let flat = vec!["mmc-pack.json".to_string()];
+        assert_eq!(pack_base(&flat, "mmc-pack.json").as_deref(), Some(""));
+        // 再深一层的不算（比如整合包的 overrides 里碰巧有一个）。
+        let deep = vec!["overrides/x/mmc-pack.json".to_string()];
+        assert_eq!(pack_base(&deep, "mmc-pack.json"), None);
     }
 }

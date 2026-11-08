@@ -7,6 +7,7 @@ pub mod forge;
 pub mod health;
 pub mod modpack;
 pub mod neoforge;
+pub mod prism;
 pub mod processors;
 pub mod reuse;
 pub mod slim;
