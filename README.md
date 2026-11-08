@@ -8,7 +8,7 @@
 
 **简体中文** | [English](README.en.md)
 
-> 当前版本：**0.40.0**（预览版）
+> 当前版本：**0.40.1**（预览版）
 >
 > 目标：小体积、少依赖、安装过程可见、中断可补。功能边界见 [实现状态](docs/design/14-implementation-status.md)。
 
@@ -190,7 +190,7 @@ Cairn 是登山者叠在路边的石堆：它不帮你走路，只标出回去�
 | 平台 | 文件 | 大小 | 要求 |
 |---|---|---:|---|
 | Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | 约 9 MB | Windows 10/11，Java 21 |
-| Linux x64 (deb) | [cairn_0.40.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.40.0_amd64.deb) | 约 3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39，Java 21 |
+| Linux x64 (deb) | [cairn_0.40.1_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.40.1_amd64.deb) | 约 3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39，Java 21 |
 
 校验值：[SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS)。
 
@@ -207,7 +207,7 @@ Cairn 是登山者叠在路边的石堆：它不帮你走路，只标出回去�
 ### Linux（Debian / Ubuntu）
 
 ```bash
-sudo apt install ./cairn_0.40.0_amd64.deb
+sudo apt install ./cairn_0.40.1_amd64.deb
 cairn
 ```
 

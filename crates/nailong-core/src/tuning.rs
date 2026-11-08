@@ -245,31 +245,6 @@ impl Workload {
     fn official_has(&self, flag: &str) -> bool {
         self.official.iter().any(|arg| arg == flag)
     }
-
-    /// 官方默认里的初始堆，例如 `-Xms2G` 得到 2048。
-    fn official_xms(&self) -> Option<u32> {
-        self.official
-            .iter()
-            .find_map(|arg| arg.strip_prefix("-Xms"))
-            .and_then(parse_size_mb)
-    }
-}
-
-/// `2G`、`512m`、`1024` 这类 JVM 内存写法换算成 MB。
-fn parse_size_mb(text: &str) -> Option<u32> {
-    let lower = text.to_ascii_lowercase();
-    let (digits, scale) = match lower.chars().last()? {
-        'g' => (&lower[..lower.len() - 1], 1024),
-        'm' => (&lower[..lower.len() - 1], 1),
-        'k' => {
-            return lower[..lower.len() - 1]
-                .parse::<u32>()
-                .ok()
-                .map(|k| k / 1024);
-        }
-        _ => return lower.parse::<u64>().ok().map(|b| (b / 1024 / 1024) as u32),
-    };
-    digits.parse::<u32>().ok().map(|n| n * scale)
 }
 
 /// 按启动时会选中的 Java 读出负载，界面用它预览参数。
@@ -622,7 +597,7 @@ pub fn plan(machine: &Machine, work: &Workload, settings: &Settings) -> Plan {
             };
             (pick, label, bench.age.as_str())
         });
-    let collector = match (settings.gc, bench) {
+    let mut collector = match (settings.gc, bench) {
         (GcChoice::Auto, Some((pick, label, age))) => {
             steps.push(match (pick, official_zgc) {
                 (Collector::Zgc, true) => {
@@ -707,108 +682,122 @@ pub fn plan(machine: &Machine, work: &Workload, settings: &Settings) -> Plan {
     };
 
     let auto_memory = settings.memory_mb.is_none();
-    let heap = match settings.memory_mb {
-        Some(manual) => {
-            let mut heap = manual.max(MIN_HEAP_MB);
-            if !work.java_64bit && heap > MAX_32BIT_MB {
-                warnings.push(format!(
-                    "32 位 Java 最多 {}，已按这个值启动",
-                    gb(MAX_32BIT_MB)
-                ));
-                heap = MAX_32BIT_MB;
-            } else if let Some(cap) = cap
-                && heap > cap
-            {
-                warnings.push(format!(
-                    "手动设置的 {} 超过建议上限 {}，可能挤占系统内存",
-                    gb(heap),
-                    gb(cap)
-                ));
-            }
-            steps.push(format!("最大堆 {}：手动设置", gb(heap)));
-            heap
-        }
-        None => {
-            let learned = settings.learned.as_ref();
-            let sessions = learned.map_or(0, |learned| learned.sessions);
-            let mut want = match (live, collector) {
-                (Some(live), Collector::G1) => {
-                    let heap = g1_heap_for(live);
-                    steps.push(format!(
-                        "最近 {sessions} 局游戏里存活数据最多 {}，G1 要给新生代和预留留出 40%：{}",
-                        gb(live),
-                        gb(heap)
+    // 堆多大和回收器有关（ZGC 要多留空间给并发回收），所以按回收器算。
+    let size_heap = |collector: Collector| -> (u32, Vec<String>, Vec<String>) {
+        let mut heap_steps: Vec<String> = Vec::new();
+        let mut heap_warnings: Vec<String> = Vec::new();
+        let heap = match settings.memory_mb {
+            Some(manual) => {
+                let mut heap = manual.max(MIN_HEAP_MB);
+                if !work.java_64bit && heap > MAX_32BIT_MB {
+                    heap_warnings.push(format!(
+                        "32 位 Java 最多 {}，已按这个值启动",
+                        gb(MAX_32BIT_MB)
                     ));
-                    heap
-                }
-                (Some(live), Collector::Zgc) => {
-                    let heap = zgc_heap_for(live);
-                    steps.push(format!(
-                        "最近 {sessions} 局游戏里存活数据最多 {}，ZGC 并发回收要留一半：{}",
-                        gb(live),
-                        gb(heap)
-                    ));
-                    heap
-                }
-                // ZGC 回收时不暂停，但要多留空间给并发回收，所以多给 1/4。
-                (None, Collector::Zgc) => ceil_to(need + need / 4, 512),
-                (None, Collector::G1) => need,
-            };
-            if let Some(floor) = learned.and_then(|learned| learned.floor_mb)
-                && floor > want
-            {
-                steps.push(format!(
-                    "最近的游戏里出现过整堆回收或晋升失败，至少给 {}",
-                    gb(floor)
-                ));
-                want = floor;
-            }
-            let limit = cap.unwrap_or(UNKNOWN_MACHINE_MB);
-            let heap = want.min(limit).max(MIN_HEAP_MB);
-            if heap < want {
-                steps.push(format!("最大堆 {}：受电脑内存限制", gb(heap)));
-                if heap < need {
-                    warnings.push(format!(
-                        "电脑内存偏少，这个版本建议 {}，现在只能给 {}",
-                        gb(need),
-                        gb(heap)
+                    heap = MAX_32BIT_MB;
+                } else if let Some(cap) = cap
+                    && heap > cap
+                {
+                    heap_warnings.push(format!(
+                        "手动设置的 {} 超过建议上限 {}，可能挤占系统内存",
+                        gb(heap),
+                        gb(cap)
                     ));
                 }
-            } else {
-                steps.push(format!("最大堆 {}", gb(heap)));
+                heap_steps.push(format!("最大堆 {}：手动设置", gb(heap)));
+                heap
             }
-            heap
-        }
+            None => {
+                let learned = settings.learned.as_ref();
+                let sessions = learned.map_or(0, |learned| learned.sessions);
+                let mut want = match (live, collector) {
+                    (Some(live), Collector::G1) => {
+                        let heap = g1_heap_for(live);
+                        heap_steps.push(format!(
+                            "最近 {sessions} 局游戏里存活数据最多 {}，G1 要给新生代和预留留出 40%：{}",
+                            gb(live),
+                            gb(heap)
+                        ));
+                        heap
+                    }
+                    (Some(live), Collector::Zgc) => {
+                        let heap = zgc_heap_for(live);
+                        heap_steps.push(format!(
+                            "最近 {sessions} 局游戏里存活数据最多 {}，ZGC 并发回收要留一半：{}",
+                            gb(live),
+                            gb(heap)
+                        ));
+                        heap
+                    }
+                    // ZGC 回收时不暂停，但要多留空间给并发回收，所以多给 1/4。
+                    (None, Collector::Zgc) => ceil_to(need + need / 4, 512),
+                    (None, Collector::G1) => need,
+                };
+                if let Some(floor) = learned.and_then(|learned| learned.floor_mb)
+                    && floor > want
+                {
+                    heap_steps.push(format!(
+                        "最近的游戏里出现过整堆回收或晋升失败，至少给 {}",
+                        gb(floor)
+                    ));
+                    want = floor;
+                }
+                let limit = cap.unwrap_or(UNKNOWN_MACHINE_MB);
+                let heap = want.min(limit).max(MIN_HEAP_MB);
+                if heap < want {
+                    heap_steps.push(format!("最大堆 {}：受电脑内存限制", gb(heap)));
+                    if heap < need {
+                        heap_warnings.push(format!(
+                            "电脑内存偏少，这个版本建议 {}，现在只能给 {}",
+                            gb(need),
+                            gb(heap)
+                        ));
+                    }
+                } else {
+                    heap_steps.push(format!("最大堆 {}", gb(heap)));
+                }
+                heap
+            }
+        };
+        (heap, heap_steps, heap_warnings)
     };
+    // 初始堆等于最大堆，一开始就要占住整个堆。ZGC 会立刻向系统要实打实的内存，
+    // 不够就直接启动失败，所以看此刻空闲的内存，而不是总内存。
+    let roomy = |heap: u32| match (machine.available_mb, machine.total_mb) {
+        (Some(available), _) => available >= heap + nonheap + 1024,
+        (None, Some(total)) => total >= heap + nonheap + reserve(total) + 2048,
+        (None, None) => false,
+    };
+    let (mut heap, mut heap_steps, mut heap_warnings) = size_heap(collector);
+    let mut tight = !roomy(heap);
+    let mut zgc_warned = false;
+    if tight && collector == Collector::Zgc {
+        if settings.gc == GcChoice::Auto {
+            let (g1_heap, g1_steps, g1_warnings) = size_heap(Collector::G1);
+            steps.push("这次改用 G1：空闲内存不够 ZGC 占满整个堆".into());
+            collector = Collector::G1;
+            heap = g1_heap;
+            heap_steps = g1_steps;
+            heap_warnings = g1_warnings;
+            tight = !roomy(heap);
+        } else {
+            warnings.push("空闲内存不足，ZGC 可能无法启动".into());
+            zgc_warned = true;
+        }
+    }
+    steps.extend(heap_steps);
+    warnings.extend(heap_warnings);
 
     let min_heap = match settings.min_memory_mb {
         Some(min) => min.clamp(MIN_HEAP_MB.min(heap), heap),
-        // 官方默认用 AlwaysPreTouch 在启动时把初始堆写一遍，初始堆太大会拖慢启动，
-        // 所以沿用官方的初始堆。
-        None if work.official_has("-XX:+AlwaysPreTouch") => {
-            let xms = work.official_xms().unwrap_or(2048).min(heap);
-            steps.push(format!("初始堆 {}：沿用官方默认，启动时预先占好", gb(xms)));
-            xms
-        }
         None => {
-            // 初始堆在启动时就要占住；ZGC 还会立刻向系统要实打实的内存，
-            // 不够就直接启动失败。所以看的是此刻空闲的内存，而不是总内存。
-            let roomy = match (machine.available_mb, machine.total_mb) {
-                (Some(available), _) => available >= heap + nonheap + 1024,
-                (None, Some(total)) => total >= heap + nonheap + reserve(total) + 2048,
-                (None, None) => false,
-            };
-            if roomy {
-                steps.push("初始堆 = 最大堆：内存宽裕，运行中不用扩容".into());
-                heap
-            } else {
-                steps.push("初始堆取一半：现在空闲内存不多，用多少占多少".into());
-                floor_to(heap / 2, 256).clamp(MIN_HEAP_MB.min(heap), heap)
-            }
+            steps.push("初始堆 = 最大堆，运行中不扩容".into());
+            heap
         }
     };
 
     if let Some(available) = machine.available_mb
+        && !zgc_warned
         && available < heap + nonheap
     {
         warnings.push(format!(
@@ -860,9 +849,14 @@ pub fn plan(machine: &Machine, work: &Workload, settings: &Settings) -> Plan {
     }
     // 官方默认里与回收器无关的参数（紧凑对象头、预先占用、字符串去重）照用；
     // 堆大小和回收器由上面算出来。
+    let skip_pretouch = tight && work.official_has("-XX:+AlwaysPreTouch");
+    if skip_pretouch {
+        steps.push("这次不预先占用堆：空闲内存不多".into());
+    }
     for arg in &work.official {
         let name = flag_name(arg);
         let skip = arg.starts_with("-Xm")
+            || (skip_pretouch && arg == "-XX:+AlwaysPreTouch")
             || selects_gc(arg)
             || name.is_some_and(|name| {
                 name.starts_with("G1")
@@ -1007,7 +1001,7 @@ mod tests {
         let plan = auto(&machine(16, 8), &work(17, Loader::Forge, 430));
         // 16 GB − 3.2 GB 预留 − 1.6 GB 非堆 = 11.2 GB，向下取整到 11 GB。
         assert_eq!(plan.heap_mb, 11264);
-        assert!(plan.min_heap_mb < plan.heap_mb);
+        assert_eq!(plan.min_heap_mb, plan.heap_mb);
         assert!(
             plan.args()
                 .contains(&"-XX:G1HeapRegionSize=32M".to_string())
@@ -1020,7 +1014,7 @@ mod tests {
     fn small_machines_keep_room_for_the_system() {
         let plan = auto(&machine(8, 4), &work(21, Loader::Forge, 87));
         assert_eq!(plan.heap_mb, 5120);
-        assert_eq!(plan.min_heap_mb, 2560);
+        assert_eq!(plan.min_heap_mb, 5120);
         let plan = auto(&machine(4, 4), &work(21, Loader::Vanilla, 0));
         assert_eq!(plan.heap_mb, 1536);
         assert!(!plan.warnings.is_empty());
@@ -1034,7 +1028,7 @@ mod tests {
         assert_eq!(plan.collector, Collector::Zgc);
         // 原版需要 3 GB，ZGC 多给 1/4，正好是官方的 4 GB。
         assert_eq!(plan.heap_mb, 4096);
-        assert_eq!(plan.min_heap_mb, 2048);
+        assert_eq!(plan.min_heap_mb, 4096);
         let args = plan.args();
         for flag in [
             "-XX:+UseZGC",
@@ -1064,23 +1058,39 @@ mod tests {
     }
 
     #[test]
-    fn parses_jvm_sizes() {
-        assert_eq!(parse_size_mb("2G"), Some(2048));
-        assert_eq!(parse_size_mb("512m"), Some(512));
-        assert_eq!(parse_size_mb("1048576k"), Some(1024));
-        assert_eq!(parse_size_mb("x"), None);
-    }
-
-    #[test]
-    fn initial_heap_follows_free_memory() {
+    fn initial_heap_equals_max_heap() {
         let mut pc = machine(32, 16);
         let huge = work(21, Loader::Forge, 300);
-        assert_eq!(auto(&pc, &huge).min_heap_mb, AUTO_MAX_MB);
-        // 总内存够，但此刻只剩 6 GB：ZGC 要是一开始就占 12 GB 会直接启动失败。
+        let roomy = auto(&pc, &huge);
+        assert_eq!(roomy.collector, Collector::Zgc);
+        assert_eq!(roomy.min_heap_mb, AUTO_MAX_MB);
+        assert_eq!(roomy.min_heap_mb, roomy.heap_mb);
+        // 总内存够，但此刻只剩 6 GB：ZGC 一开始就要占满整个堆，会启动失败，这次改用 G1。
         pc.available_mb = Some(6 * 1024);
-        let plan = auto(&pc, &huge);
-        assert_eq!(plan.collector, Collector::Zgc);
-        assert_eq!(plan.min_heap_mb, AUTO_MAX_MB / 2);
+        let tight = auto(&pc, &huge);
+        assert_eq!(tight.collector, Collector::G1);
+        assert_eq!(tight.min_heap_mb, tight.heap_mb);
+        assert!(tight.steps.iter().any(|s| s.contains("这次改用 G1")));
+        // 手动选了 ZGC 就照用，只提醒一句。
+        let forced = plan_for_gc(&pc, &huge, GcChoice::Zgc);
+        assert_eq!(forced.collector, Collector::Zgc);
+        assert!(
+            forced
+                .warnings
+                .iter()
+                .any(|w| w.contains("ZGC 可能无法启动"))
+        );
+        // 官方默认的预先占用，空闲内存紧时这次不用。
+        let mut vanilla = work(25, Loader::Vanilla, 0);
+        vanilla.official = official_26();
+        let mut small = machine(16, 8);
+        small.available_mb = Some(3 * 1024);
+        let args = auto(&small, &vanilla).args();
+        assert!(!args.contains(&"-XX:+AlwaysPreTouch".to_string()));
+        assert!(args.contains(&"-XX:+UseCompactObjectHeaders".to_string()));
+        let xms = args.iter().find(|a| a.starts_with("-Xms")).unwrap();
+        let xmx = args.iter().find(|a| a.starts_with("-Xmx")).unwrap();
+        assert_eq!(xms[4..], xmx[4..]);
     }
 
     #[test]
@@ -1147,7 +1157,9 @@ mod tests {
             bench: Some(verdict(Collector::G1, Collector::Zgc)),
             ..Default::default()
         };
-        let pc = machine(16, 8);
+        let mut pc = machine(16, 8);
+        // 空闲内存够 ZGC 占满整个堆。
+        pc.available_mb = Some(14 * 1024);
         // 原版要 3 GB：看常规档，G1。
         assert_eq!(
             plan(&pc, &work(21, Loader::Vanilla, 0), &settings).collector,

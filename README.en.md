@@ -8,7 +8,7 @@ A small, native Minecraft: Java Edition launcher written in Rust. Renamed to **C
 
 [简体中文](README.md) | **English**
 
-> Current version: **0.40.0** (preview)
+> Current version: **0.40.1** (preview)
 >
 > Goals: small binaries, few dependencies, visible install progress, and a repair path after interruption. See [implementation status](docs/design/14-implementation-status.md) for exact boundaries.
 
@@ -189,7 +189,7 @@ Drag a `.mrpack` or `.zip` into the window to start an import. A single mod `.ja
 | Platform | File | Size | Requirements |
 |---|---|---:|---|
 | Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | ~9 MB | Windows 10/11, Java 21 |
-| Linux x64 (deb) | [cairn_0.40.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.40.0_amd64.deb) | ~3.4 MB | Ubuntu 24.04+ / glibc ≥ 2.39, Java 21 |
+| Linux x64 (deb) | [cairn_0.40.1_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.40.1_amd64.deb) | ~3.4 MB | Ubuntu 24.04+ / glibc ≥ 2.39, Java 21 |
 
 Checksums: [SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS).
 
@@ -206,7 +206,7 @@ Java 21 must be installed. Cairn searches for it automatically and shows a warni
 ### Linux (Debian / Ubuntu)
 
 ```bash
-sudo apt install ./cairn_0.40.0_amd64.deb
+sudo apt install ./cairn_0.40.1_amd64.deb
 cairn
 ```
 

@@ -1,7 +1,7 @@
-# 14 · 原型实现状态（0.1 → 0.40.0）
+# 14 · 原型实现状态（0.1 → 0.40.1）
 
 > 日期：2026-11-07
-> 对应发布：GitHub Release `v0.40.0` 的 `cairn.exe`、`cairn_0.40.0_amd64.deb`（0.37 起改名 Cairn）
+> 对应发布：GitHub Release `v0.40.1` 的 `cairn.exe`、`cairn_0.40.1_amd64.deb`（0.37 起改名 Cairn）
 > 目的：把「设计稿」和「已经跑起来的代码」分开记账，避免把计划当成已完成。
 
 ## 1. 一句话结论
@@ -47,6 +47,8 @@
 0.34.0 加入 JVM 自动调参（`tuning.rs`，规范见 `docs/design/19-jvm-tuning.md`）：内存默认自动，按物理内存、逻辑处理器、Java 版本、加载器和 Mod 数量算出堆大小，配官方启动器那套 G1 参数并按堆放大 Region；Java 25 加紧凑对象头；大整合包配强机器时自动换分代 ZGC。设置里显示结果、依据和完整参数，可手动指定内存、回收器或追加 JVM 参数；CLI 增加 `--gc`、`--jvm-arg`，`--dry-run` 打印计算过程。生成的参数在本机 OpenJDK 11/17/21/25 和 GraalVM 21 上逐一启动验证。顺带修复 CLI 传相对 `--game-dir` 时游戏目录被解析两次的问题。
 
 0.34.1 修复 26.x 无法安装和启动：版本文件 `default-user-jvm` 的首条没有 `rules`，解析失败；`${natives_directory}` 误指向 `java` 子目录，`java.library.path` 变成 `.../java/java`。实测 26.1、26.3 原版可安装并进入世界。调参在版本文件带官方默认时跟随官方（26.x 为 ZGC + 紧凑对象头 + 预先占用 + 字符串去重，初始堆 2 GB）。Java 选择改为够用里最低的大版本，同版本优先 64 位 OpenJDK。
+
+0.40.1 初始堆等于最大堆（`-Xms` = `-Xmx`）。以前空闲内存不多时初始堆取一半（例如 `-Xms3328m -Xmx6656m`），运行中要扩容，多出回收。现在总是相等；空闲内存不够时，自动选的 ZGC 这次改用 G1（ZGC 要一开始占满整个堆，不够会启动失败），手动选的 ZGC 照用并提示，官方默认的 `AlwaysPreTouch` 这次不加。见 [19](19-jvm-tuning.md)。
 
 0.40.0 多账户和截图（见 `docs/design/25-accounts-and-shots.md`）。core：新的 `accounts`（`accounts.json`，Unix 0600；微软 / 外置 / 离线三种，按「同一个人」去重，启动前 `ready()` 刷新凭证或要求重新登录；首次读取时迁移 0.40 之前的 `account.json`）、`yggdrasil`（authlib-injector 规范：ALI、元数据、authenticate / refresh / validate、多角色绑定、皮肤地址、粘贴的服务器链接、`injector_jar` 下载并按 SHA-256 校验，官方连不上走 BMCLAPI 的 `/mirrors/authlib-injector`）、`shots`（PNG iTXt 关键字 `Cairn` 的读写，原子替换、保留修改时间；文件名时间；`Watcher` 跟着游戏输出在截图那一刻记下世界（看 `session.lock`）、服务器和账户；从 `logs/*.log.gz` 推断以前的截图，结果和关掉写入时的实时记录都在 `shots.json`；`servers.dat` 服务器名）。`launch` 多了 `user_type`、`injector`（在 JVM 参数最前面挂 `-javaagent` 和预取元数据，元数据在命令预览里折叠）、`shots`。`paths::to_trash`（Linux `gio trash`，Windows `SHFileOperationW` 回收站）。新增 `Error::Login`，登录问题不再显示成「安装失败」。界面：左下角账户列表（点一下换、`⋯`/右键菜单、需要重新登录的黄点）、添加账户（Microsoft / 外置登录 / 离线，多角色选择，重新登录时只要输密码）、皮肤脸头像；截图页（侧栏第 5 项：总览 / 时间 / 地点 / 人物、筛选标签、搜索、时间视图只画看得见的行、Ctrl+滚轮调大小）；看大图重写（以鼠标为中心缩放、双击原尺寸、拖动、底部缩略图、在当前这一组里翻页、设为世界图标、两次确认移到回收站）；启动台截图一排和存档页的「N 张截图 ›」都通到截图页；设置里账户卡片换成多账户，去掉「玩家名」，加「截图写入地点和人物」开关。实测：LittleSkin 的 ALI 和登录错误、authlib-injector 官方下载；生成 35 张带信息的截图逐页截图核对深浅两套主题。
 
@@ -151,7 +153,7 @@
 | 大文件分段下载 | `core::http` | 完成 | client jar 4 段并行、段续传、源回退 |
 | 重复安装快速路径 | `core::install::forge` / `neoforge` | 完成 | health 通过则 0 下载、0 processor |
 | Windows 交叉编译 | `x86_64-pc-windows-gnu` | 通过 | 无 MinGW DLL 依赖，仅系统 DLL |
-| 发布包 | GitHub Release `v0.40.0` | 完成（CI 构建） | 单 exe 约 8 MB / deb 约 3.4 MB |
+| 发布包 | GitHub Release `v0.40.1` | 完成（CI 构建） | 单 exe 约 8 MB / deb 约 3.4 MB |
 
 ### 2.1 实测记录
 
