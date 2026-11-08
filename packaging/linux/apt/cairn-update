@@ -1,5 +1,6 @@
 #!/bin/sh
-# Upgrade Cairn from its own apt repository. Run as root by cairn-update.timer.
+# Upgrade Cairn from its own apt repository. Run as root by cairn-update.service,
+# which the launcher starts when it finds a new version on open.
 #
 # Only touches the Cairn source and the cairn package. Does nothing when the
 # player removed the source or turned automatic updates off by deleting

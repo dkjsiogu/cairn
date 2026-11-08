@@ -1,0 +1,11 @@
+// Cairn: let the person at this computer start cairn-update.service without a
+// password. The service only upgrades the cairn package from Cairn's own apt
+// repository; the launcher starts it when it finds a new version on open.
+polkit.addRule(function (action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "cairn-update.service" &&
+        action.lookup("verb") == "start" &&
+        subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});

@@ -893,7 +893,8 @@ pub(crate) fn memory_stepper(ui: &mut egui::Ui, memory: &mut Option<u32>, auto_m
 }
 
 impl App {
-    /// 「自动更新」这一行。Windows 由启动器自己更新，可以关；Linux 由系统通过 apt 源更新。
+    /// 「自动更新」这一行。Windows 由启动器自己下载替换；Linux（有 apt 源）由启动器在后台
+    /// 启动系统的更新服务。都可以关，关掉后只提示新版本。
     fn auto_update_row(&mut self, ui: &mut egui::Ui) {
         use nailong_core::update::Install;
         let kind = self.update.kind;
@@ -903,14 +904,14 @@ impl App {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             let on = match kind {
-                Install::Exe => {
+                Install::Exe | Install::AptRepo => {
                     if toggle_switch(ui, self.prefs.auto_update).clicked() {
                         self.prefs.auto_update = !self.prefs.auto_update;
                         self.save_ui_config();
                     }
                     self.prefs.auto_update
                 }
-                _ => kind == Install::AptRepo,
+                _ => false,
             };
             ui.label(egui::RichText::new("自动更新").size(13.0).color(if on {
                 t::ink()
@@ -919,9 +920,9 @@ impl App {
             }));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let hint = match kind {
-                    Install::Exe if on => "后台下载，关掉时换上",
-                    Install::Exe => "只提示新版本",
-                    Install::AptRepo => "由系统每小时更新",
+                    Install::Exe if on => "打开时检查，关掉时换上",
+                    Install::AptRepo if on => "打开时检查，在后台装好",
+                    Install::Exe | Install::AptRepo => "只提示新版本",
                     _ => "没有 apt 源，需手动更新",
                 };
                 ui.label(egui::RichText::new(hint).size(13.0).color(t::sub()));

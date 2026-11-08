@@ -257,6 +257,24 @@ pub fn installed_version() -> Option<String> {
     (out.status.success() && !version.is_empty()).then_some(version)
 }
 
+/// Linux：在后台启动 `cairn-update.service`，从 apt 源升级 Cairn，不弹窗。deb 带的 polkit
+/// 规则允许本机当前登录的用户启动这一个服务；授权不了（比如老系统）就返回 false，
+/// 调用方改用 `install_deb`。服务在后台跑，装好后 `replaced_on_disk` 会变成 true。
+pub fn start_system_update() -> bool {
+    cfg!(target_os = "linux")
+        && std::process::Command::new("systemctl")
+            .args([
+                "start",
+                "--no-block",
+                "--no-ask-password",
+                "cairn-update.service",
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+}
+
 /// Linux：用 pkexec 弹出系统的授权窗口，装下载好的 deb。会一直等到玩家输完密码、装完。
 pub fn install_deb(deb: &Path) -> Result<()> {
     let out = std::process::Command::new("pkexec")

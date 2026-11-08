@@ -1,5 +1,6 @@
 [Unit]
 Description=Update Cairn from its apt repository
+# Started by the launcher when it finds a new version on open (see 50-cairn-update.rules).
 Documentation=https://github.com/dkjsiogu/cairn/blob/main/docs/design/26-auto-update.md
 ConditionPathExists=/etc/apt/apt.conf.d/52cairn-auto-update
 ConditionPathExists=/etc/apt/sources.list.d/cairn.sources

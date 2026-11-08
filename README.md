@@ -8,7 +8,7 @@
 
 **简体中文** | [English](README.en.md)
 
-> 当前版本：**0.42.2**（预览版）
+> 当前版本：**0.42.3**（预览版）
 >
 > 目标：小体积、少依赖、安装过程可见、中断可补。功能边界见 [实现状态](docs/design/14-implementation-status.md)。
 
@@ -39,7 +39,7 @@ Cairn 是登山者叠在路边的石堆：它不帮你走路，只标出回去�
 0.41：自动更新。
 
 - **Windows**：在后台下载新版本，关掉 Cairn 时换上。设置里可以关掉。
-- **Linux**：deb 装好后会加上 Cairn 的 apt 源，每小时自动检查并更新。也可以直接 `sudo apt install cairn`，见下面的安装说明。
+- **Linux**：deb 装好后会加上 Cairn 的 apt 源。打开 Cairn 时发现新版本，就在后台装好，不用输密码。也可以直接 `sudo apt install cairn`，见下面的安装说明。
 - 想马上更新：点侧栏的提示。Linux 上会弹出系统的授权窗口。
 - 详见 [26 · 自动更新](docs/design/26-auto-update.md)。
 
@@ -62,7 +62,7 @@ Cairn 是登山者叠在路边的石堆：它不帮你走路，只标出回去�
 
 - **看得见在下什么**：下载页列出做完了哪几步、各用了多久，正在做哪一步，刚下载的几个文件（资源文件显示真名），来自 Mojang 官方还是 BMCLAPI 镜像，速度和剩余时间。
 - **Java 自动下载**：点「开始游戏」时如果没有合适的 Java，直接下载 Mojang 官方的运行时，下完接着启动，不用自己去找、也不改系统。优先下压缩版（约三分之一大小），每个文件都校验。设置、首次引导和启动参数里也能手动下。
-- **启动器更新**：每次打开时安静地查一次，开着时每 2 小时再查，有新版本时侧栏出现小提示；点开能看更新说明，下载后按 SHA256SUMS 校验。Windows 一键重启到新版本，Linux 给出能复制的安装命令。设置里也能手动「检查更新」。
+- **启动器更新**：只在打开时安静地查一次，有新版本时侧栏出现小提示；点开能看更新说明，下载后按 SHA256SUMS 校验。Windows 一键重启到新版本，Linux 给出能复制的安装命令。设置里也能手动「检查更新」。
 - **界面代码的框架**：12000 多行的 `main.rs` 拆成按页面和弹窗划分的模块，状态按功能分组，后台任务统一用一套进度模型。见 [23 · 界面代码的框架](docs/design/23-ui-framework.md)。
 - 顺带修了存档页的版本名太长时会压住按钮。
 
@@ -206,7 +206,7 @@ Cairn 是登山者叠在路边的石堆：它不帮你走路，只标出回去�
 | 平台 | 文件 | 大小 | 要求 |
 |---|---|---:|---|
 | Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | 约 9 MB | Windows 10/11，Java 21 |
-| Linux x64 (deb) | [cairn_0.42.2_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.42.2_amd64.deb) | 约 3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39，Java 21 |
+| Linux x64 (deb) | [cairn_0.42.3_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.42.3_amd64.deb) | 约 3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39，Java 21 |
 
 校验值：[SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS)。
 
@@ -233,12 +233,12 @@ sudo apt update && sudo apt install cairn
 或者下载 deb 安装，效果一样：deb 会自动加上这个 apt 源。
 
 ```bash
-sudo apt install ./cairn_0.42.2_amd64.deb
+sudo apt install ./cairn_0.42.3_amd64.deb
 ```
 
 也可以双击 deb 用软件中心安装。安装后应用菜单里会有 **Cairn**。装过旧的 `nailong` 包也没关系，`cairn` 会替换它。
 
-系统每小时检查一次 Cairn 的更新（`cairn-update.timer`），只升级 Cairn 这一个包。不想自动更新：
+打开 Cairn 时发现新版本，会在后台启动 `cairn-update.service`，只升级 Cairn 这一个包。设置里可以关掉；想彻底不让系统自动更新 Cairn：
 
 ```bash
 sudo rm /etc/apt/apt.conf.d/52cairn-auto-update

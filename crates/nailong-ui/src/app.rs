@@ -818,7 +818,7 @@ pub(crate) struct UiPrefs {
     pub(crate) source: String,
     /// 截图时把地点和人物写进图片本身；关掉就只记在 `shots.json`。
     pub(crate) embed_shots: bool,
-    /// Windows：在后台下载新版本，关掉 Cairn 时换上。
+    /// 打开时发现新版本就自动装：Windows 后台下载、关掉时换上；Linux 后台启动系统的更新服务。
     pub(crate) auto_update: bool,
 }
 

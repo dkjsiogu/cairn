@@ -1,16 +1,13 @@
-//! 启动器自己的更新。每次打开时安静地查一次（10 分钟内查过就不查），开着时每 2 小时再查，
-//! 有新版本时侧栏出现一个小提示。
+//! 启动器自己的更新。只在打开时安静地查一次（10 分钟内查过就不查），有新版本时侧栏出现
+//! 一个小提示。打开了「自动更新」时：
 //!
-//! - Windows：打开了「自动更新」就在后台下载、校验，关掉 Cairn 时换成新版本；
-//!   侧栏提示变成「重启更新」，也可以马上重启。
-//! - Linux（deb 装的）：deb 带的定时器每小时从 apt 源更新 Cairn，启动器发现程序被换掉后提示重启。
-//!   想马上更新时，点「更新」弹出系统的授权窗口；装不上就给出一条能复制的命令。
+//! - Windows：在后台下载、校验，关掉 Cairn 时换成新版本；侧栏提示变成「重启更新」。
+//! - Linux（deb + apt 源）：在后台启动 `cairn-update.service` 从 apt 源升级，不弹窗；
+//!   程序被换掉后提示重启。授权不了时，点「更新」弹出系统的授权窗口，装不上就给出能复制的命令。
 
 use crate::prelude::*;
 use nailong_core::update::{self, Install, Release};
 
-/// 开着时两次自动检查之间隔多久。
-const CHECK_EVERY_SECS: u64 = 2 * 60 * 60;
 /// 打开时，离上次检查不到这么久就不查（反复重启时不用每次都问 GitHub）。
 const CHECK_ON_START_AFTER_SECS: u64 = 10 * 60;
 
@@ -47,8 +44,10 @@ pub(crate) struct UpdateState {
     manual: Option<PathBuf>,
     error: Option<String>,
     started: bool,
-    /// 上次做定时检查的时间。
+    /// 上次看程序有没有被换掉的时间。
     tick: Option<Instant>,
+    /// Linux：已经在后台启动了系统的更新服务。
+    system: bool,
 }
 
 impl UpdateState {
@@ -138,8 +137,8 @@ fn plain_notes(notes: &str) -> Vec<String> {
 }
 
 impl App {
-    /// 每帧调用：第一次时清理上次更新留下的文件；每分钟看一次要不要检查新版本、
-    /// 程序有没有被系统换掉；收后台结果。
+    /// 每帧调用：第一次时清理上次更新留下的文件、检查新版本；之后每分钟（后台在装时每
+    /// 10 秒）看一次程序有没有被系统换掉；收后台结果。
     pub(crate) fn poll_update(&mut self, ctx: &egui::Context) {
         let cache = self.root.cache();
         let mut starting = false;
@@ -151,22 +150,17 @@ impl App {
             // 上次关掉时没换成（比如被强制结束）：重启就换上。
             self.update.ready = update::staged(&cache).map(|staged| staged.version);
         }
-        let due = self
-            .update
-            .tick
-            .is_none_or(|tick| tick.elapsed() >= Duration::from_secs(60));
+        if starting
+            && self.update.rx.is_none()
+            && now().saturating_sub(self.prefs.update_checked) > CHECK_ON_START_AFTER_SECS
+        {
+            self.check_update(ctx, false);
+        }
+        let every = Duration::from_secs(if self.update.system { 10 } else { 60 });
+        let due = self.update.tick.is_none_or(|tick| tick.elapsed() >= every);
         if due {
             self.update.tick = Some(Instant::now());
-            ctx.request_repaint_after(Duration::from_secs(61));
-            let since = now().saturating_sub(self.prefs.update_checked);
-            let interval = if starting {
-                CHECK_ON_START_AFTER_SECS
-            } else {
-                CHECK_EVERY_SECS
-            };
-            if self.update.rx.is_none() && since > interval {
-                self.check_update(ctx, false);
-            }
+            ctx.request_repaint_after(every + Duration::from_secs(1));
             if self.update.ready.is_none()
                 && matches!(self.update.kind, Install::AptRepo | Install::Deb)
                 && update::replaced_on_disk()
@@ -190,8 +184,7 @@ impl App {
                     match result {
                         Ok(release) if update::is_newer(&release.version, update::current()) => {
                             self.update.status = None;
-                            auto = self.update.kind == Install::Exe
-                                && self.prefs.auto_update
+                            auto = self.prefs.auto_update
                                 && release.version != self.prefs.update_skip
                                 && self.update.ready.as_deref() != Some(release.version.as_str());
                             self.update.latest = Some(release);
@@ -239,8 +232,15 @@ impl App {
         } else {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
-        if auto && update::can_replace_exe() {
-            self.start_update(ctx);
+        if auto {
+            match self.update.kind {
+                Install::Exe if update::can_replace_exe() => self.start_update(ctx),
+                Install::AptRepo if !self.update.system => {
+                    // 不弹窗；授权不了就留着侧栏提示，玩家点「更新」时再输密码。
+                    self.update.system = update::start_system_update();
+                }
+                _ => {}
+            }
         }
     }
 
@@ -474,8 +474,8 @@ impl App {
                             reveal = Some(path.clone());
                         }
                     });
-                } else if kind == Install::AptRepo {
-                    line(ui, "系统每小时会自动更新，也可以现在更新。", t::dim());
+                } else if self.update.system {
+                    line(ui, "正在后台安装，装好后提示重启。", t::sub());
                 }
                 if let Some(error) = &self.update.error {
                     line(ui, error, t::danger());

@@ -1,0 +1,11 @@
+#!/bin/sh
+# 0.42.2 shipped an hourly cairn-update.timer. Later versions check only when
+# the launcher opens, so stop and disable the timer before its unit file goes.
+set -e
+
+if [ "$1" = upgrade ] && [ -n "$2" ] && dpkg --compare-versions "$2" lt 0.42.3 \
+  && [ -d /run/systemd/system ]; then
+  systemctl disable --now cairn-update.timer >/dev/null 2>&1 || true
+fi
+
+exit 0
