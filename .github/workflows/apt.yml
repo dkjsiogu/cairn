@@ -56,7 +56,18 @@ jobs:
           gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases \
             --limit 3 --json tagName --jq '.[].tagName' |
           while read -r tag; do
-            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern '*.deb' --dir debs
+            # GitHub 的下载偶尔会断：每个版本最多试 3 次。
+            for try in 1 2 3; do
+              if gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern '*.deb' \
+                --dir debs --clobber; then
+                break
+              fi
+              if [ "$try" = 3 ]; then
+                echo "下载 $tag 的 deb 失败" >&2
+                exit 1
+              fi
+              sleep 5
+            done
           done
           ls -l debs
 
