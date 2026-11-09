@@ -147,6 +147,8 @@ impl App {
             delete_confirm: None,
             renaming: None,
             delete_failed: None,
+            progress_open: false,
+            progress_seen: None,
             cleanup: Default::default(),
             window_focused: true,
             busy: None,
@@ -332,10 +334,19 @@ impl App {
                     app.busy = Some(Task::Launch);
                     app.play.started = Some(Instant::now());
                 }
-                "progress" => {
+                "progress" | "progress-bg" => {
                     app.busy = Some(Task::Install);
-                    let mut activity = Activity::new("1.21.1 · NeoForge 21.1.264", "解析版本");
-                    activity.update(Progress::stage("下载依赖库"));
+                    let mut activity = Activity::new("1.21.1 · NeoForge 21.1.264", "读取版本信息")
+                        .expect(crate::activity::plan::FORGE);
+                    // 资源和 processor 同时进行，两边交替报。
+                    activity.update(Progress {
+                        stage: "下载运行库".into(),
+                        files_done: 64,
+                        files_total: 64,
+                        bytes_done: 48_000_000,
+                        bytes_total: 48_000_000,
+                        ..Default::default()
+                    });
                     for (i, name) in [
                         "minecraft/sounds/block/stone/step3.ogg",
                         "minecraft/textures/block/deepslate_bricks.png",
@@ -356,8 +367,19 @@ impl App {
                             source: Some("resources.download.minecraft.net".into()),
                             ..Default::default()
                         });
+                        activity.update(Progress {
+                            stage: "运行 NeoForge 处理器".into(),
+                            files_done: 3,
+                            files_total: 9,
+                            ..Default::default()
+                        });
                     }
                     app.activity = Some(activity);
+                    if screen == "progress-bg" {
+                        // 已经点侧栏离开了进度页：任务在后台继续。
+                        app.progress_seen = app.busy;
+                        app.progress_open = false;
+                    }
                 }
                 _ => {}
             }
@@ -452,14 +474,16 @@ impl App {
     }
 
     /// 安装和下载会占住进度页；游戏运行不会，玩的时候照样能看内容和存档。
+    /// 整个界面锁住、只能等的时候：登录中、测这台电脑时。下载和安装不锁，可以照常浏览。
     pub(crate) fn page_locked(&self) -> bool {
-        self.busy.is_some_and(Task::shows_progress) || self.login.busy
+        self.login.busy || matches!(self.busy, Some(Task::Bench))
     }
 
     /// 现在不能改这个版本的原因；`None` 表示可以改。
     pub(crate) fn write_block(&self, row_id: Option<&str>) -> Option<&'static str> {
         match self.busy {
             Some(Task::Install) | Some(Task::Mods) => Some("正在安装，完成后再试"),
+            Some(Task::Files) => Some("正在整理内容，完成后再试"),
             Some(Task::Bench) => Some("正在测试这台电脑，完成后再试"),
             Some(Task::Java) => Some("正在下载 Java，完成后再试"),
             Some(Task::Launch)
@@ -744,6 +768,10 @@ pub(crate) struct App {
     pub(crate) renaming: Option<(String, String)>,
     /// 移不到回收站的版本：问玩家要不要直接删。
     pub(crate) delete_failed: Option<String>,
+    /// 有任务时是否整页显示进度。离开（点侧栏）后任务在后台继续，点侧栏的进度卡回来。
+    pub(crate) progress_open: bool,
+    /// 上一帧的任务，用来发现「刚开始了一个任务」。
+    pub(crate) progress_seen: Option<Task>,
     /// 设置里的「清理不用的文件」。
     pub(crate) cleanup: crate::dialogs::settings::CleanupState,
     /// 当前页面的编号，变了就放一次切页动效。
@@ -954,12 +982,23 @@ impl eframe::App for App {
         if std::env::var_os("NAILONG_DEBUG_HOVER_CYCLE").is_some() {
             ui.ctx().request_repaint_after(Duration::from_millis(33));
         }
+        // 刚开始一个任务：安装、下载 Java 先整页显示进度；内容页装 Mod 留在原页，只在侧栏显示。
+        if self.busy != self.progress_seen {
+            if let Some(task) = self.busy
+                && task.shows_progress()
+            {
+                self.progress_open = task != Task::Mods;
+            }
+            self.progress_seen = self.busy;
+        }
         self.sidebar(ui);
         egui::CentralPanel::no_frame()
             .frame(egui::Frame::new().fill(t::bg()))
             .show(ui, |ui| {
                 ui.add_space((1.0 - eased) * 6.0);
-                if self.busy.is_some_and(Task::shows_progress) {
+                if self.busy.is_some_and(Task::shows_progress)
+                    && (self.progress_open || self.page_locked())
+                {
                     self.progress_view(ui);
                 } else if self.show_gallery {
                     self.gallery_page(ui);

@@ -24,20 +24,37 @@ impl App {
         let width = (ui.available_width() - 48.0).clamp(360.0, 640.0);
         let pad = ((ui.available_width() - width) / 2.0).max(24.0);
         let now = ui.input(|input| input.time);
+        // 总进度：几步同时进行时加在一起算，不会每一步都从 0 开始。
+        let overall = activity.overall();
+        let indeterminate = overall.is_none();
         let shown = ui.ctx().animate_value_with_time(
             egui::Id::unique("progress_value"),
-            p.fraction(),
+            overall.unwrap_or(0.0),
             0.30,
         );
         let ring_h: f32 = if compact_h { 140.0 } else { 190.0 };
-        let counts = if p.files_total > 0 {
-            format!("{} / {} 个文件", p.files_done, p.files_total)
+        let (files_done, files_total) = activity.files();
+        let counts = if files_total > 0 {
+            format!("{files_done} / {files_total} 个文件")
         } else {
             String::new()
         };
+        let active = activity.active();
+        let stage_line = if active.is_empty() {
+            p.stage.clone()
+        } else {
+            active
+                .iter()
+                .rev()
+                .take(2)
+                .rev()
+                .copied()
+                .collect::<Vec<_>>()
+                .join(" · ")
+        };
         let data = rings::Data {
             state: rings::State::Installing,
-            fraction: if p.indeterminate { 0.0 } else { shown },
+            fraction: if indeterminate { 0.0 } else { shown },
             missing: 0,
             progress_detail: counts.clone(),
             mods: self
@@ -84,9 +101,9 @@ impl App {
                             )
                             .truncate(),
                         );
-                        ui.label(egui::RichText::new(&p.stage).size(13.0).color(t::sub()));
+                        ui.label(egui::RichText::new(&stage_line).size(13.0).color(t::sub()));
                     });
-                    if !p.indeterminate {
+                    if !indeterminate {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(
                                 egui::RichText::new(format!("{:.0}%", shown * 100.0))
@@ -97,7 +114,7 @@ impl App {
                     }
                 });
                 ui.add_space(8.0);
-                motion::progress_bar(ui, shown, p.indeterminate, now);
+                motion::progress_bar(ui, shown, indeterminate, now);
                 ui.add_space(8.0);
 
                 // 数量和速度。
@@ -106,8 +123,9 @@ impl App {
                     if !counts.is_empty() {
                         left.push(counts.clone());
                     }
-                    if p.bytes_total > 0 {
-                        left.push(progress_detail(p));
+                    let (bytes_done, bytes_total) = activity.bytes();
+                    if bytes_total > 0 {
+                        left.push(format!("{} / {}", bytes(bytes_done), bytes(bytes_total)));
                     }
                     let left = if bench {
                         "后台跑模拟负载，不开游戏窗口；期间电脑会比较忙".to_string()
@@ -183,14 +201,17 @@ impl App {
                                         t::ink()
                                     },
                                 ));
-                                if let Some(d) = step.took {
+                                // 做完的写用了多久，进行中的写它自己的进度。
+                                let right = match step.took {
+                                    Some(d) => Some((took(d), t::dim())),
+                                    None => step.detail().map(|d| (d, t::sub())),
+                                };
+                                if let Some((text, color)) = right {
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
                                             ui.label(
-                                                egui::RichText::new(took(d))
-                                                    .size(12.0)
-                                                    .color(t::dim()),
+                                                egui::RichText::new(text).size(12.0).color(color),
                                             );
                                         },
                                     );

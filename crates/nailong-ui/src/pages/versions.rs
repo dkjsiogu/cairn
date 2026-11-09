@@ -84,7 +84,9 @@ impl App {
         cancel::reset();
         self.cancel_requested = false;
         self.busy = Some(Task::Install);
-        self.activity = Some(Activity::new(name.clone(), "准备导入整合包"));
+        self.activity = Some(
+            Activity::new(name.clone(), "准备导入整合包").expect(crate::activity::plan::MODPACK),
+        );
         self.install.repair_target = Some(RepairTarget::Modpack(path.clone()));
         self.log.push(format!("导入整合包 {name}"));
 
@@ -148,7 +150,12 @@ impl App {
         cancel::reset();
         self.cancel_requested = false;
         self.busy = Some(Task::Install);
-        self.activity = Some(Activity::new(name.clone(), "准备安装"));
+        self.activity = Some(
+            Activity::new(name.clone(), "准备安装").expect(match loader {
+                LoaderKind::Forge | LoaderKind::NeoForge => crate::activity::plan::FORGE,
+                LoaderKind::Vanilla | LoaderKind::Fabric => crate::activity::plan::VANILLA,
+            }),
+        );
         self.install.repair_target = Some(RepairTarget::Loader {
             mc: mc.clone(),
             loader,

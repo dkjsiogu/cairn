@@ -32,6 +32,8 @@ impl App {
         if self.page_locked() {
             return;
         }
+        // 下载、安装时点侧栏：离开进度页，任务在后台继续。
+        self.progress_open = false;
         if self.nav_active() == nav {
             // 再点一次当前入口：只做“回到这个入口的默认视图”，不重置数据。
             match nav {
@@ -149,7 +151,6 @@ impl App {
         let current = self.current_account().cloned();
         let face = self.face(ui.ctx(), current.as_ref().and_then(|a| a.skin.as_deref()));
         let mut account_rect = None;
-        let busy = self.busy.is_some();
         let login_busy = self.login.busy;
         let enabled = !self.page_locked();
         let mut go: Option<Nav> = None;
@@ -157,6 +158,7 @@ impl App {
         let mut update_clicked = false;
         let update_badge = self.update.badge(&self.prefs.update_skip);
         let mut settings_clicked = false;
+        let mut open_progress = false;
 
         egui::Panel::left("shell_nav")
             .resizable(false)
@@ -200,7 +202,12 @@ impl App {
 
                 // 底部用显式留白定位：嵌套 bottom_up 在侧边栏里会缩成内容高度。
                 let playing = matches!(self.busy, Some(Task::Launch));
-                let locked = (busy && !playing) || login_busy;
+                // 下载、安装在后台进行：底部一张进度卡，点它回到进度页。
+                let task_card = self
+                    .busy
+                    .filter(|task| task.shows_progress() && *task != Task::Bench)
+                    .filter(|_| !self.progress_open);
+                let locked = login_busy || matches!(self.busy, Some(Task::Bench));
                 let footer = if update_badge.is_some() && !locked {
                     38.0
                 } else {
@@ -209,6 +216,8 @@ impl App {
                     40.0
                 } else if playing {
                     112.0
+                } else if task_card.is_some() {
+                    78.0 + if wide { 62.0 } else { 44.0 }
                 } else {
                     78.0
                 };
@@ -236,7 +245,7 @@ impl App {
                                 egui::RichText::new(if login_busy {
                                     "正在登录…"
                                 } else {
-                                    "任务进行中"
+                                    "正在测试"
                                 })
                                 .size(13.0)
                                 .color(t::sub()),
@@ -244,6 +253,35 @@ impl App {
                         }
                     });
                 } else {
+                    if let Some(task) = task_card {
+                        let verb = match task {
+                            Task::Mods => "正在下载内容",
+                            Task::Java => "正在下载 Java",
+                            _ => "正在安装",
+                        };
+                        let (fraction, detail, hover) = match &self.activity {
+                            Some(activity) => (
+                                activity.overall(),
+                                activity
+                                    .eta()
+                                    .map(remaining)
+                                    .or_else(|| activity.active().last().map(|s| s.to_string()))
+                                    .unwrap_or_default(),
+                                activity.title.clone(),
+                            ),
+                            None => (None, String::new(), String::new()),
+                        };
+                        let response = task_card_widget(ui, verb, fraction, &detail, wide);
+                        let response = if hover.is_empty() {
+                            response
+                        } else {
+                            response.on_hover_text(format!("{verb} · {hover}\n点开看详细进度"))
+                        };
+                        if response.clicked() {
+                            open_progress = true;
+                        }
+                        ui.add_space(8.0);
+                    }
                     if let Some((version, ready)) = &update_badge {
                         if update_pill(ui, version, *ready, wide) {
                             update_clicked = true;
@@ -264,6 +302,9 @@ impl App {
         if let Some(nav) = go {
             self.nav_go(nav);
         }
+        if open_progress {
+            self.progress_open = true;
+        }
         if account_rect.is_some() {
             self.login.anchor = account_rect;
         }
@@ -278,6 +319,84 @@ impl App {
             self.show_settings = true;
         }
     }
+}
+
+/// 侧栏底部的进度卡：下载、安装在后台进行时显示。宽侧栏两行（在做什么 · 百分比，剩余时间），
+/// 下面一条细进度条；窄侧栏只有百分比和进度条。
+fn task_card_widget(
+    ui: &mut egui::Ui,
+    verb: &str,
+    fraction: Option<f32>,
+    detail: &str,
+    wide: bool,
+) -> egui::Response {
+    let height = if wide { 54.0 } else { 36.0 };
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), height),
+        egui::Sense::click(),
+    );
+    let hover = motion::hover_amount(ui, response.id.with("hover"), response.hovered());
+    ui.painter().rect_filled(
+        rect,
+        motion::R,
+        motion::mix(t::tint(t::wash(), 0.6), t::wash(), hover),
+    );
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let inner = rect.shrink2(egui::vec2(if wide { 12.0 } else { 6.0 }, 8.0));
+    let percent = fraction.map(|f| format!("{:.0}%", f * 100.0));
+    let painter = ui.painter();
+    if wide {
+        painter.text(
+            inner.left_top(),
+            egui::Align2::LEFT_TOP,
+            verb,
+            egui::FontId::proportional(13.0),
+            t::ink(),
+        );
+        if let Some(percent) = &percent {
+            painter.text(
+                inner.right_top(),
+                egui::Align2::RIGHT_TOP,
+                percent,
+                egui::FontId::proportional(13.0),
+                t::ink(),
+            );
+        }
+        let detail = elide_middle(ui, detail, &egui::FontId::proportional(12.0), inner.width());
+        ui.painter().text(
+            inner.left_top() + egui::vec2(0.0, 18.0),
+            egui::Align2::LEFT_TOP,
+            detail,
+            egui::FontId::proportional(12.0),
+            t::sub(),
+        );
+    } else {
+        painter.text(
+            egui::pos2(inner.center().x, inner.top()),
+            egui::Align2::CENTER_TOP,
+            percent.as_deref().unwrap_or("…"),
+            egui::FontId::proportional(12.0),
+            t::ink(),
+        );
+    }
+    let bar = egui::Rect::from_min_max(
+        egui::pos2(inner.left(), inner.bottom() - 3.0),
+        inner.right_bottom(),
+    );
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(bar));
+    motion::progress_bar(
+        &mut child,
+        fraction.unwrap_or(0.0),
+        fraction.is_none(),
+        ui.input(|i| i.time),
+    );
+    if fraction.is_none() && !motion::reduced() {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(33));
+    }
+    response
 }
 
 /// 侧边栏的一级入口：宽窗口带文字，窄窗口只有图标。

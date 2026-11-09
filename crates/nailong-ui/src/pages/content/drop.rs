@@ -2,6 +2,9 @@
 
 use crate::prelude::*;
 
+/// 拖进来的一个文件和它的类别。
+type DropItem = (PathBuf, mods::ContentKind);
+
 impl App {
     /// 拖进来的内容装到哪：在内容页就是上面选的目标，其他页面是当前版本。
     pub(crate) fn drop_target(&self) -> Option<(Row, PathBuf)> {
@@ -101,12 +104,13 @@ impl App {
     }
 
     /// 导入一批拖进来或选中的文件：整批只留一个恢复点，已经装过的跳过。
+    /// 建恢复点要读整个 mods/config，可能要几秒，放到后台做，界面不卡。
     pub(crate) fn import_dropped(&mut self, plan: DropPlan) {
         let on_content = self.show_mods;
-        let mut imported: Vec<mods::ContentKind> = Vec::new();
-        let mut names: Vec<String> = Vec::new();
         let mut skipped: Vec<String> = Vec::new();
         let mut problems: Vec<String> = Vec::new();
+        // 要真正导入的：版本、游戏目录、还没装过的文件。
+        let mut work: Option<(Row, PathBuf, Vec<DropItem>)> = None;
         if !plan.items.is_empty() {
             let (reason, ok) = self.describe_drop(&DropPlan {
                 target: plan.target.clone(),
@@ -115,7 +119,7 @@ impl App {
             });
             match (&plan.target, ok) {
                 (Some((row, game_dir)), true) => {
-                    let fresh: Vec<&(PathBuf, mods::ContentKind)> = plan
+                    let fresh: Vec<DropItem> = plan
                         .items
                         .iter()
                         .filter(|(path, kind)| {
@@ -129,26 +133,10 @@ impl App {
                             }
                             !known
                         })
+                        .cloned()
                         .collect();
                     if !fresh.is_empty() {
-                        let loader = loader_state_files(&self.root, row, game_dir);
-                        if problems.is_empty() {
-                            if let Err(e) = rollback::backup_extra(game_dir, "导入内容前", &loader)
-                            {
-                                problems.push(format!("无法创建恢复点: {e}"));
-                            } else {
-                                for (path, kind) in fresh {
-                                    match installed::import_local(game_dir, *kind, path) {
-                                        Ok(entry) => {
-                                            self.content.recent.insert(entry.file.clone());
-                                            names.push(entry.name);
-                                            imported.push(*kind);
-                                        }
-                                        Err(e) => problems.push(e.to_string()),
-                                    }
-                                }
-                            }
-                        }
+                        work = Some((row.clone(), game_dir.clone(), fresh));
                     }
                 }
                 _ => problems.push(reason),
@@ -171,29 +159,6 @@ impl App {
         if !plan.packs.is_empty() && !lone_pack {
             problems.push("整合包要单独拖进来，一次一个".into());
         }
-
-        let mut notice = None;
-        if !imported.is_empty() {
-            let mut text = format!(
-                "已导入 {}：{}",
-                count_kinds(imported.iter().copied()),
-                short_text(&names.join("、"), 60)
-            );
-            if !skipped.is_empty() {
-                text.push_str(&format!("；{} 个已经装过，跳过", skipped.len()));
-            }
-            notice = Some(text);
-        } else if !skipped.is_empty() {
-            notice = Some(format!("{} 个文件已经装过，没有重复导入", skipped.len()));
-        }
-        let error = (!problems.is_empty()).then(|| problems.join("；"));
-        if on_content {
-            self.content.notice = notice;
-            self.content.error = error;
-        } else {
-            self.notice = notice;
-            self.error = error;
-        }
         if lone_pack {
             if self.busy.is_none() {
                 self.start_modpack(plan.packs[0].clone());
@@ -202,24 +167,127 @@ impl App {
             }
             return;
         }
-        if imported.is_empty() {
+        let Some((row, game_dir, fresh)) = work else {
+            // 没有要真正导入的：直接告诉玩家跳过了什么、哪里不对。
+            self.finish_content(ContentDone {
+                on_content,
+                skipped,
+                problems,
+                ..Default::default()
+            });
+            return;
+        };
+        if self.busy.is_some() {
+            let reason = self.busy_reason().to_string();
+            self.finish_content(ContentDone {
+                on_content,
+                problems: vec![reason],
+                ..Default::default()
+            });
             return;
         }
+        let loader = loader_state_files(&self.root, &row, &game_dir);
+        let count = fresh.len();
+        cancel::reset();
+        self.cancel_requested = false;
+        self.busy = Some(Task::Files);
+        self.activity = Some(Activity::new(format!("导入 {count} 个文件"), "创建恢复点"));
+        let working = format!("正在导入 {count} 个文件…");
         if on_content {
-            // 新导入的要看得见：清掉筛选；全是另一类时切到那一类。
-            self.content.status = StatusFilter::All;
-            self.content.filter.clear();
-            if let Some(&kind) = imported.first()
-                && imported.iter().all(|k| *k == kind)
-                && kind != self.content.kind
-            {
-                self.content.kind = kind;
-            }
-            self.start_mods_scan();
+            self.content.notice = Some(working);
+            self.content.error = None;
         } else {
+            self.notice = Some(working);
+            self.error = None;
+        }
+        let (tx, rx) = mpsc::channel();
+        self.rx = Some(rx);
+        std::thread::spawn(move || {
+            let mut done = ContentDone {
+                on_content,
+                skipped,
+                problems,
+                ..Default::default()
+            };
+            match rollback::backup_extra(&game_dir, "导入内容前", &loader) {
+                Err(e) => done.problems.push(format!("无法创建恢复点: {e}")),
+                Ok(_) => {
+                    for (index, (path, kind)) in fresh.iter().enumerate() {
+                        let _ = tx.send(Msg::Progress(Progress {
+                            stage: "复制文件".into(),
+                            files_done: index as u64,
+                            files_total: count as u64,
+                            bytes_done: index as u64,
+                            bytes_total: count as u64,
+                            indeterminate: false,
+                            current: path.file_name().map(|f| f.to_string_lossy().to_string()),
+                            source: None,
+                        }));
+                        match installed::import_local(&game_dir, *kind, path) {
+                            Ok(entry) => {
+                                done.recent.push(entry.file.clone());
+                                done.names.push(entry.name);
+                                done.kinds.push(*kind);
+                            }
+                            Err(e) => done.problems.push(e.to_string()),
+                        }
+                    }
+                }
+            }
+            let _ = tx.send(Msg::ContentDone(done));
+        });
+    }
+
+    /// 后台导入或删除做完以后：写提示，刷新列表；导入的东西要看得见。
+    pub(crate) fn finish_content(&mut self, done: ContentDone) {
+        let mut notice = None;
+        if !done.kinds.is_empty() {
+            let mut text = format!(
+                "已导入 {}：{}",
+                count_kinds(done.kinds.iter().copied()),
+                short_text(&done.names.join("、"), 60)
+            );
+            if !done.skipped.is_empty() {
+                text.push_str(&format!("；{} 个已经装过，跳过", done.skipped.len()));
+            }
+            notice = Some(text);
+        } else if let Some(removed) = &done.removed {
+            notice = Some(removed.clone());
+        } else if !done.skipped.is_empty() {
+            notice = Some(format!(
+                "{} 个文件已经装过，没有重复导入",
+                done.skipped.len()
+            ));
+        }
+        let error = (!done.problems.is_empty()).then(|| done.problems.join("；"));
+        self.content.recent.extend(done.recent.iter().cloned());
+        if done.on_content {
+            self.content.notice = notice;
+            self.content.error = error;
+            if !done.kinds.is_empty() {
+                // 新导入的要看得见：清掉筛选；全是另一类时切到那一类。
+                self.content.status = StatusFilter::All;
+                self.content.filter.clear();
+                if let Some(&kind) = done.kinds.first()
+                    && done.kinds.iter().all(|k| *k == kind)
+                    && kind != self.content.kind
+                {
+                    self.content.kind = kind;
+                }
+            }
+            if !done.kinds.is_empty() || done.removed.is_some() {
+                self.content.delete_confirm = None;
+                self.start_mods_scan();
+            }
+        } else {
+            self.notice = notice;
+            self.error = error;
+        }
+        if !done.kinds.is_empty() || done.removed.is_some() {
             self.home.cache = None;
             self.home.verified = None;
             self.play.tuning_cache.clear();
+            self.version_cache = None;
         }
     }
 

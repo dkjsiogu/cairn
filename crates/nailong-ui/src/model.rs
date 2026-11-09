@@ -145,6 +145,8 @@ pub(crate) enum Task {
     Bench,
     /// 下载这个版本需要的 Java，下完接着启动。
     Java,
+    /// 导入或删除本地的内容文件（先建恢复点）。不占整页，页面照常能看。
+    Files,
 }
 
 impl Task {
@@ -194,6 +196,21 @@ pub(crate) struct LaunchEdit {
 }
 
 /// 拖进来的文件分好类之后要做的事。
+/// 后台导入或删除内容的结果。
+#[derive(Default)]
+pub(crate) struct ContentDone {
+    /// 是在内容页上做的（提示写在内容页）。
+    pub(crate) on_content: bool,
+    pub(crate) names: Vec<String>,
+    pub(crate) kinds: Vec<mods::ContentKind>,
+    /// 新导入的文件名，列表里标「新」。
+    pub(crate) recent: Vec<String>,
+    pub(crate) skipped: Vec<String>,
+    pub(crate) problems: Vec<String>,
+    /// 删除完成时的提示。
+    pub(crate) removed: Option<String>,
+}
+
 #[derive(Default)]
 pub(crate) struct DropPlan {
     /// 导入到哪个版本、哪个游戏目录。

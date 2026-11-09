@@ -380,7 +380,19 @@ pub fn check_update(
     let (Some(source), Some(project_id)) = (entry.source, entry.project_id.as_deref()) else {
         return Ok(None);
     };
-    let project = mods::project(source, project_id, entry.kind)?;
+    // 查版本只要来源和项目 id，不用先把项目信息取回来：每个 Mod 少一个请求。
+    let project = mods::Project {
+        source,
+        kind: entry.kind,
+        id: project_id.to_string(),
+        slug: String::new(),
+        name: entry.name.clone(),
+        summary: String::new(),
+        author: String::new(),
+        downloads: 0,
+        icon_url: None,
+        categories: Vec::new(),
+    };
     let latest = mods::versions(&project, mc, loader)?.into_iter().next();
     Ok(latest.and_then(|latest| {
         if entry.version_id.as_deref() == Some(latest.id.as_str()) {
@@ -392,6 +404,41 @@ pub fn check_update(
             })
         }
     }))
+}
+
+/// 一批内容一起查更新：最多 16 个同时查，几百个 Mod 也只要几秒。查不到的跳过。
+pub fn check_updates(entries: &[InstalledEntry], mc: &str, loader: Loader) -> Vec<UpdateCandidate> {
+    use rayon::prelude::*;
+    let check = || {
+        entries
+            .par_iter()
+            .filter_map(|entry| check_update(entry, mc, loader).ok().flatten())
+            .collect()
+    };
+    match rayon::ThreadPoolBuilder::new().num_threads(16).build() {
+        Ok(pool) => pool.install(check),
+        Err(_) => check(),
+    }
+}
+
+/// 一批更新各自要装的东西（新版本加上它的必需前置），同时解析。有一个解析不了就整批不装。
+pub fn plan_updates(
+    candidates: &[UpdateCandidate],
+    mc: &str,
+    loader: Loader,
+) -> Result<Vec<Vec<mods::Version>>> {
+    use rayon::prelude::*;
+    let empty = std::collections::BTreeSet::new();
+    let plan = || {
+        candidates
+            .par_iter()
+            .map(|candidate| mods::plan(&candidate.latest, mc, loader, &empty))
+            .collect()
+    };
+    match rayon::ThreadPoolBuilder::new().num_threads(16).build() {
+        Ok(pool) => pool.install(plan),
+        Err(_) => plan(),
+    }
 }
 
 pub fn set_enabled(game_dir: &Path, entry: &mut InstalledEntry, enabled: bool) -> Result<()> {

@@ -55,12 +55,7 @@ impl App {
         self.content.scan_rx = Some(rx);
         let mc = row.mc.clone();
         std::thread::spawn(move || {
-            let mut updates = Vec::new();
-            for entry in entries {
-                if let Ok(Some(candidate)) = installed::check_update(&entry, &mc, loader) {
-                    updates.push(candidate);
-                }
-            }
+            let updates = installed::check_updates(&entries, &mc, loader);
             let _ = tx.send(Msg::ModsUpdates(Ok(updates)));
         });
     }
@@ -83,10 +78,10 @@ impl App {
         cancel::reset();
         self.cancel_requested = false;
         self.busy = Some(Task::Mods);
-        self.activity = Some(Activity::new(
-            format!("{} 个更新", candidates.len()),
-            "更新内容",
-        ));
+        self.activity = Some(
+            Activity::new(format!("{} 个更新", candidates.len()), "更新内容")
+                .expect(crate::activity::plan::CONTENT),
+        );
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
         let tx = Arc::new(Mutex::new(tx));
@@ -106,33 +101,53 @@ impl App {
                 return;
             }
             let old_entries = installed::load(&game_dir).entries;
-            let empty = BTreeSet::new();
             let mut updated = 0usize;
             let mut error = None;
-            for candidate in candidates {
-                if cancel::is_cancelled() {
-                    error = Some(Error::Cancelled);
-                    break;
-                }
-                let plan = match mods::plan(&candidate.latest, &mc, loader, &empty) {
-                    Ok(plan) => plan,
-                    Err(e) => {
-                        error = Some(e);
-                        break;
+            // 1. 先把每个更新的前置都解析好（同时进行）。
+            if let Ok(sender) = tx.lock() {
+                let _ = sender.send(Msg::Progress(Progress::stage("解析前置")));
+            }
+            let plans = match installed::plan_updates(&candidates, &mc, loader) {
+                Ok(plans) => plans,
+                Err(e) => {
+                    let msg = match e {
+                        Error::Cancelled => Msg::ModsCancelled,
+                        e => Msg::ModsFailed(e.to_string()),
+                    };
+                    if let Ok(tx) = tx.lock() {
+                        let _ = tx.send(msg);
                     }
-                };
-                if mods::download_plan(&dir, &plan, true, &sink).is_err() {
-                    error = Some(Error::Install("下载更新失败".into()));
+                    return;
+                }
+            };
+            // 2. 所有文件放进一批一起下，并发才跑得满。
+            let mut all: Vec<mods::Version> = Vec::new();
+            for plan in &plans {
+                for version in plan {
+                    if !all.iter().any(|v| v.file_name == version.file_name) {
+                        all.push(version.clone());
+                    }
+                }
+            }
+            if let Err(e) = mods::download_plan(&dir, &all, true, &sink) {
+                error = Some(match e {
+                    Error::Cancelled => Error::Cancelled,
+                    _ => Error::Install("下载更新失败".into()),
+                });
+            }
+            // 3. 逐个写进内容索引，换掉旧文件。
+            for (candidate, plan) in candidates.iter().zip(&plans) {
+                if error.is_some() {
                     break;
                 }
-                if installed::record_versions(&game_dir, kind, &plan).is_err() {
+                if installed::record_versions(&game_dir, kind, plan).is_err() {
                     error = Some(Error::Install("写入内容索引失败".into()));
                     break;
                 }
                 // 更新一个被禁用的项目时保持禁用，不因为换了新文件就悄悄启用。
                 if !candidate.entry.enabled {
                     let index = installed::load(&game_dir);
-                    for version in &plan {
+                    for version in plan {
                         if version.source == candidate.latest.source
                             && version.project_id == candidate.latest.project_id
                             && let Some(entry) = index.entries.iter().find(|entry| {
@@ -145,7 +160,7 @@ impl App {
                         }
                     }
                 }
-                for version in &plan {
+                for version in plan {
                     for entry in old_entries.iter().filter(|entry| {
                         entry.source == Some(version.source)
                             && entry.project_id.as_deref() == Some(version.project_id.as_str())
@@ -657,20 +672,8 @@ impl App {
                 Err(e) => self.content.error = Some(e.to_string()),
             }
         }
-        for entry in deletes {
-            if let Err(e) = rollback::backup_extra(&game_dir, "删除内容前", &loader_files) {
-                self.content.error = Some(format!("无法创建恢复点: {e}"));
-                break;
-            }
-            match installed::remove(&game_dir, &entry) {
-                Ok(()) => {
-                    self.content.notice = Some(format!("已删除 {}", entry.name));
-                    self.content.error = None;
-                    self.content.delete_confirm = None;
-                    self.start_mods_scan();
-                }
-                Err(e) => self.content.error = Some(e.to_string()),
-            }
+        if !deletes.is_empty() {
+            self.start_content_delete(game_dir.clone(), loader_files.clone(), deletes);
         }
         if let Some(candidates) = update_all {
             self.review_update(candidates);
@@ -683,6 +686,56 @@ impl App {
         if open_rollback {
             self.open_rollback();
         }
+    }
+}
+
+impl App {
+    /// 删除内容：先留一个恢复点（整批一个），再删。都在后台做，界面不卡。
+    fn start_content_delete(
+        &mut self,
+        game_dir: PathBuf,
+        loader_files: Vec<String>,
+        deletes: Vec<installed::InstalledEntry>,
+    ) {
+        if self.busy.is_some() {
+            self.content.error = Some(self.busy_reason().into());
+            return;
+        }
+        cancel::reset();
+        self.cancel_requested = false;
+        self.busy = Some(Task::Files);
+        let label = match deletes.as_slice() {
+            [one] => format!("删除 {}", one.name),
+            many => format!("删除 {} 个文件", many.len()),
+        };
+        self.content.notice = Some(format!("正在{label}…"));
+        self.content.error = None;
+        self.activity = Some(Activity::new(label, "创建恢复点"));
+        let (tx, rx) = mpsc::channel();
+        self.rx = Some(rx);
+        std::thread::spawn(move || {
+            let mut done = ContentDone {
+                on_content: true,
+                ..Default::default()
+            };
+            match rollback::backup_extra(&game_dir, "删除内容前", &loader_files) {
+                Err(e) => done.problems.push(format!("无法创建恢复点: {e}")),
+                Ok(_) => {
+                    let mut names = Vec::new();
+                    for entry in &deletes {
+                        match installed::remove(&game_dir, entry) {
+                            Ok(()) => names.push(entry.name.clone()),
+                            Err(e) => done.problems.push(e.to_string()),
+                        }
+                    }
+                    if !names.is_empty() {
+                        done.removed =
+                            Some(format!("已删除 {}", short_text(&names.join("、"), 60)));
+                    }
+                }
+            }
+            let _ = tx.send(Msg::ContentDone(done));
+        });
     }
 }
 

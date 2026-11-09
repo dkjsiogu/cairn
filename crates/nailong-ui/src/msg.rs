@@ -74,7 +74,8 @@ impl App {
                     if self.busy.is_some_and(Task::shows_progress)
                         && let Some(activity) = &mut self.activity
                     {
-                        if activity.progress.stage != p.stage {
+                        // 几步同时进行时会交替报，只在第一次出现时记一笔。
+                        if !activity.has_step(&p.stage) {
                             self.log.push(p.stage.clone());
                         }
                         activity.update(p);
@@ -234,6 +235,14 @@ impl App {
                     self.rx = None;
                     self.content.quick = None;
                     self.content.error = Some(content_error(e));
+                }
+                Msg::ContentDone(done) => {
+                    self.busy = None;
+                    self.cancel_requested = false;
+                    cancel::reset();
+                    self.activity = None;
+                    self.rx = None;
+                    self.finish_content(done);
                 }
                 Msg::ModsCancelled => {
                     self.busy = None;
@@ -530,6 +539,8 @@ pub(crate) enum Msg {
     ModsDone(String),
     ModsFailed(String),
     ModsCancelled,
+    /// 拖入导入或删除内容在后台做完了。
+    ContentDone(ContentDone),
     ModsInstalled(Result<Vec<installed::InstalledEntry>, String>),
     ModsUpdates(Result<Vec<installed::UpdateCandidate>, String>),
     Browse {

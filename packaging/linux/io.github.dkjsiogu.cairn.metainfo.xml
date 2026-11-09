@@ -28,6 +28,11 @@
   <url type="bugtracker">https://github.com/dkjsiogu/cairn/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.42.4" date="2026-11-09">
+      <description>
+        <p>Faster mod downloads: one shared connection pool, dependencies resolved in parallel, update checks run in parallel, and up to 32 files download at once. Downloads and installs no longer lock the launcher; a card in the sidebar shows progress. The progress page shows one overall percentage and total time left. Dropping files in no longer freezes the window: restore points run in the background and skip unchanged files.</p>
+      </description>
+    </release>
     <release version="0.42.3" date="2026-11-08">
       <description>
         <p>Cairn checks for updates only when it opens; nothing runs on a schedule. On Linux, when a new version is found, it is installed in the background from Cairn's apt repository without a password prompt. The hourly timer added in 0.42.2 is removed on upgrade.</p>

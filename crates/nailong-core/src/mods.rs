@@ -11,7 +11,7 @@ use crate::http::{FileSpec, Http};
 use crate::progress::{Progress, Sink};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeSet, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Component, Path};
 
 const MODRINTH_API: &str = "https://api.modrinth.com/v2";
@@ -1110,30 +1110,34 @@ fn resolve_dependency(
     loader: Loader,
 ) -> Result<Option<(Option<Project>, Option<Version>)>> {
     cancel::check()?;
-    let project = project(dependency.source, &dependency.project_id, ContentKind::Mod).ok();
-    let version = if let Some(version_id) = &dependency.version_id {
-        version_from_id(
-            dependency.source,
-            &dependency.project_id,
-            version_id,
-            ContentKind::Mod,
-        )?
-    } else {
-        let project_ref = project.clone().unwrap_or(Project {
-            source: dependency.source,
-            kind: ContentKind::Mod,
-            id: dependency.project_id.clone(),
-            slug: String::new(),
-            name: dependency.name.clone().unwrap_or_default(),
-            summary: String::new(),
-            author: String::new(),
-            downloads: 0,
-            icon_url: None,
-            categories: Vec::new(),
-        });
-        versions(&project_ref, mc, loader)?.into_iter().next()
+    // 项目信息（名字、图标）和版本列表互不依赖：同时取，少等一个来回。
+    let project_ref = Project {
+        source: dependency.source,
+        kind: ContentKind::Mod,
+        id: dependency.project_id.clone(),
+        slug: String::new(),
+        name: dependency.name.clone().unwrap_or_default(),
+        summary: String::new(),
+        author: String::new(),
+        downloads: 0,
+        icon_url: None,
+        categories: Vec::new(),
     };
-    Ok(Some((project, version)))
+    let (project, version) = rayon::join(
+        || project(dependency.source, &dependency.project_id, ContentKind::Mod).ok(),
+        || -> Result<Option<Version>> {
+            match &dependency.version_id {
+                Some(version_id) => version_from_id(
+                    dependency.source,
+                    &dependency.project_id,
+                    version_id,
+                    ContentKind::Mod,
+                ),
+                None => Ok(versions(&project_ref, mc, loader)?.into_iter().next()),
+            }
+        },
+    );
+    Ok(Some((project, version?)))
 }
 
 pub fn dependency_choices(
@@ -1141,23 +1145,27 @@ pub fn dependency_choices(
     mc: &str,
     loader: Loader,
 ) -> Result<Vec<DependencyChoice>> {
-    let mut choices = Vec::new();
-    for dependency in &version.dependencies {
-        if matches!(
-            dependency.kind,
-            DependencyKind::Embedded | DependencyKind::Tool
-        ) {
-            continue;
-        }
-        let (project, resolved) =
-            resolve_dependency(dependency, mc, loader)?.unwrap_or((None, None));
-        choices.push(DependencyChoice {
-            dependency: dependency.clone(),
-            project,
-            version: resolved,
-        });
-    }
-    Ok(choices)
+    use rayon::prelude::*;
+    // 每个前置各自去取，同时进行。
+    version
+        .dependencies
+        .par_iter()
+        .filter(|dependency| {
+            !matches!(
+                dependency.kind,
+                DependencyKind::Embedded | DependencyKind::Tool
+            )
+        })
+        .map(|dependency| {
+            let (project, resolved) =
+                resolve_dependency(dependency, mc, loader)?.unwrap_or((None, None));
+            Ok(DependencyChoice {
+                dependency: dependency.clone(),
+                project,
+                version: resolved,
+            })
+        })
+        .collect()
 }
 
 pub type DependencyKey = (Source, String);
@@ -1168,43 +1176,57 @@ pub fn plan(
     loader: Loader,
     optional: &BTreeSet<DependencyKey>,
 ) -> Result<Vec<Version>> {
+    use rayon::prelude::*;
     cancel::check()?;
     let mut out = vec![version.clone()];
     let mut seen = HashSet::new();
     seen.insert((version.source, version.project_id.clone()));
-    let mut queue = VecDeque::from([version.clone()]);
+    // 一层一层解析：同一层的前置同时去取，不再一个接一个等。
+    let mut frontier = vec![version.clone()];
     let mut steps = 0usize;
-    while let Some(current) = queue.pop_front() {
+    while !frontier.is_empty() {
         cancel::check()?;
-        steps += 1;
+        let mut wanted: Vec<Dependency> = Vec::new();
+        for current in &frontier {
+            for dependency in &current.dependencies {
+                if matches!(
+                    dependency.kind,
+                    DependencyKind::Embedded | DependencyKind::Tool
+                ) {
+                    continue;
+                }
+                if dependency.kind == DependencyKind::Incompatible {
+                    return Err(Error::Install(format!(
+                        "{} 与当前 Mod 不兼容",
+                        dependency
+                            .name
+                            .clone()
+                            .unwrap_or_else(|| format!("项目 {}", dependency.project_id))
+                    )));
+                }
+                let key = (dependency.source, dependency.project_id.clone());
+                if dependency.kind == DependencyKind::Optional && !optional.contains(&key) {
+                    continue;
+                }
+                if seen.insert(key) {
+                    wanted.push(dependency.clone());
+                }
+            }
+        }
+        steps += wanted.len();
         if steps > 128 {
             return Err(Error::Install("前置依赖过多，已停止解析".into()));
         }
-        for dependency in &current.dependencies {
-            if matches!(
-                dependency.kind,
-                DependencyKind::Embedded | DependencyKind::Tool
-            ) {
-                continue;
-            }
-            if dependency.kind == DependencyKind::Incompatible {
-                return Err(Error::Install(format!(
-                    "{} 与当前 Mod 不兼容",
-                    dependency
-                        .name
-                        .clone()
-                        .unwrap_or_else(|| format!("项目 {}", dependency.project_id))
-                )));
-            }
-            let key = (dependency.source, dependency.project_id.clone());
-            if dependency.kind == DependencyKind::Optional && !optional.contains(&key) {
-                continue;
-            }
-            if !seen.insert(key) {
-                continue;
-            }
-            let (project, resolved) = resolve_dependency(dependency, mc, loader)?
-                .ok_or_else(|| Error::Install("前置依赖解析失败".into()))?;
+        let resolved: Vec<Result<(Option<Project>, Option<Version>)>> = wanted
+            .par_iter()
+            .map(|dependency| {
+                resolve_dependency(dependency, mc, loader)?
+                    .ok_or_else(|| Error::Install("前置依赖解析失败".into()))
+            })
+            .collect();
+        frontier = Vec::new();
+        for (dependency, result) in wanted.iter().zip(resolved) {
+            let (project, resolved) = result?;
             let Some(resolved) = resolved else {
                 return Err(Error::Install(format!(
                     "找不到兼容的前置: {}",
@@ -1216,7 +1238,7 @@ pub fn plan(
                 )));
             };
             out.push(resolved.clone());
-            queue.push_back(resolved);
+            frontier.push(resolved);
         }
     }
     Ok(out)
@@ -1333,6 +1355,26 @@ pub fn install_project(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 连外网：解析一个有前置的 Mod，量一下要多久。
+    #[test]
+    #[ignore = "连外网"]
+    fn live_plan_resolves_dependencies() {
+        let project = project(Source::Modrinth, "create", ContentKind::Mod).unwrap();
+        let start = std::time::Instant::now();
+        let versions = versions(&project, "1.21.1", Loader::NeoForge).unwrap();
+        let plan = plan(&versions[0], "1.21.1", Loader::NeoForge, &BTreeSet::new()).unwrap();
+        println!(
+            "{} 个文件，用时 {:.2} 秒：{}",
+            plan.len(),
+            start.elapsed().as_secs_f64(),
+            plan.iter()
+                .map(|v| v.file_name.as_str())
+                .collect::<Vec<_>>()
+                .join("、")
+        );
+        assert!(!plan.is_empty());
+    }
 
     #[test]
     fn category_tables_are_unique_and_nonempty() {

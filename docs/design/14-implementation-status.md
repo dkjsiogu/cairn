@@ -1,7 +1,7 @@
-# 14 · 原型实现状态（0.1 → 0.42.3）
+# 14 · 原型实现状态（0.1 → 0.42.4）
 
 > 日期：2026-11-07
-> 对应发布：GitHub Release `v0.42.3` 的 `cairn.exe`、`cairn_0.42.3_amd64.deb`，以及 apt 源 `https://dkjsiogu.github.io/cairn/apt`（0.37 起改名 Cairn）
+> 对应发布：GitHub Release `v0.42.4` 的 `cairn.exe`、`cairn_0.42.4_amd64.deb`，以及 apt 源 `https://dkjsiogu.github.io/cairn/apt`（0.37 起改名 Cairn）
 > 目的：把「设计稿」和「已经跑起来的代码」分开记账，避免把计划当成已完成。
 
 ## 1. 一句话结论
@@ -47,6 +47,8 @@
 0.34.0 加入 JVM 自动调参（`tuning.rs`，规范见 `docs/design/19-jvm-tuning.md`）：内存默认自动，按物理内存、逻辑处理器、Java 版本、加载器和 Mod 数量算出堆大小，配官方启动器那套 G1 参数并按堆放大 Region；Java 25 加紧凑对象头；大整合包配强机器时自动换分代 ZGC。设置里显示结果、依据和完整参数，可手动指定内存、回收器或追加 JVM 参数；CLI 增加 `--gc`、`--jvm-arg`，`--dry-run` 打印计算过程。生成的参数在本机 OpenJDK 11/17/21/25 和 GraalVM 21 上逐一启动验证。顺带修复 CLI 传相对 `--game-dir` 时游戏目录被解析两次的问题。
 
 0.34.1 修复 26.x 无法安装和启动：版本文件 `default-user-jvm` 的首条没有 `rules`，解析失败；`${natives_directory}` 误指向 `java` 子目录，`java.library.path` 变成 `.../java/java`。实测 26.1、26.3 原版可安装并进入世界。调参在版本文件带官方默认时跟随官方（26.x 为 ZGC + 紧凑对象头 + 预先占用 + 字符串去重，初始堆 2 GB）。Java 选择改为够用里最低的大版本，同版本优先 64 位 OpenJDK。
+
+0.42.4 下载更快、不锁界面、进度看得懂；拖入不卡。core：`Http::new` 共用一个 reqwest 客户端（以前每个请求都新建，几百个请求全在握手），下载并发 16 → 32；`mods::plan` 按层并行解析前置，`resolve_dependency` 同时取项目信息和版本列表；`installed::check_updates` 16 个一起查且不再先取项目信息，`plan_updates` 并行解析全部更新后一批下载；processor 进度合成一个步骤「运行 X 处理器」用 3/9 表示；`rollback` 记住每个文件的大小和修改时间，没变的不重算 SHA-1（1 GB 的版本第二次 0.11 秒）。界面：下载、安装时侧栏照常能点（`page_locked` 只管登录和测电脑），离开进度页后侧栏底部有进度卡，点它回来；安装版本、导入整合包先整页显示，内容页装 Mod 留在原页；`Activity` 分步骤记进度，按每种任务预计的步骤和权重算总进度（只增不减），剩余时间按整体进度推算，步骤列表写各自的进度；拖入导入和删除内容改到后台（新任务 `Files`，不占整页），删除多个只建一个恢复点。
 
 0.42.3 只在打开时检查更新（见 [26](26-auto-update.md)）。去掉开着时每 2 小时的检查和 0.42.2 的每小时定时器（`preinst` 在从 0.42.2 及以前升级时停掉并取消启用它）。Linux 打开时发现新版本，`update::start_system_update` 用 `systemctl start --no-block --no-ask-password` 在后台启动 `cairn-update.service`；deb 带 polkit 规则 `50-cairn-update.rules`，只放行本机当前用户启动这一个服务。授权不了时不弹窗，退回到侧栏提示和手动「更新」。设置里的「自动更新」开关 Linux 也能用。
 
@@ -163,7 +165,7 @@
 | 大文件分段下载 | `core::http` | 完成 | client jar 4 段并行、段续传、源回退 |
 | 重复安装快速路径 | `core::install::forge` / `neoforge` | 完成 | health 通过则 0 下载、0 processor |
 | Windows 交叉编译 | `x86_64-pc-windows-gnu` | 通过 | 无 MinGW DLL 依赖，仅系统 DLL |
-| 发布包 | GitHub Release `v0.42.3` | 完成（CI 构建） | 单 exe 约 8 MB / deb 约 4 MB |
+| 发布包 | GitHub Release `v0.42.4` | 完成（CI 构建） | 单 exe 约 8 MB / deb 约 4 MB |
 | apt 源 | GitHub Pages `dkjsiogu.github.io/cairn/apt` | 完成（CI 部署） | 最近 3 个版本；ed25519 签名；系统每天自动更新 |
 
 ### 2.1 实测记录

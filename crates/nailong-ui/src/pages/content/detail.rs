@@ -31,10 +31,10 @@ impl App {
         self.busy = Some(Task::Mods);
         self.content.error = None;
         self.content.notice = None;
-        self.activity = Some(Activity::new(
-            project.name.clone(),
-            format!("安装 {}", project.name),
-        ));
+        self.activity = Some(
+            Activity::new(project.name.clone(), format!("安装 {}", project.name))
+                .expect(crate::activity::plan::CONTENT),
+        );
         let mc = row.mc.clone();
         let loader_files = loader_state_files(&self.root, &row, &game_dir);
         let (tx, rx) = mpsc::channel();
@@ -190,10 +190,13 @@ impl App {
         self.busy = Some(Task::Mods);
         self.content.error = None;
         self.content.notice = None;
-        self.activity = Some(Activity::new(
-            version.file_name.clone(),
-            format!("解析{}依赖", self.content.kind.label()),
-        ));
+        self.activity = Some(
+            Activity::new(
+                version.file_name.clone(),
+                format!("解析{}依赖", self.content.kind.label()),
+            )
+            .expect(crate::activity::plan::CONTENT),
+        );
         let optional = self.content.optional.clone();
         let mc = row.mc.clone();
         let (tx, rx) = mpsc::channel();

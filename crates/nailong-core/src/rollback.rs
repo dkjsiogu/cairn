@@ -50,6 +50,40 @@ fn snapshots_dir(game_dir: &Path) -> PathBuf {
     instance_dir(game_dir).join("snapshots")
 }
 
+/// 上次建恢复点时每个文件的大小、修改时间和 SHA-1。大小和修改时间都没变的文件直接用
+/// 记下的哈希，不再读一遍（和 git 的做法一样）。几百 MB 的 mods 第二次只要一眨眼。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct HashCache {
+    files: std::collections::HashMap<String, Cached>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Cached {
+    size: u64,
+    /// 修改时间，纳秒。
+    modified: u128,
+    hash: String,
+}
+
+fn hash_cache_path(game_dir: &Path) -> PathBuf {
+    instance_dir(game_dir).join("hashes.json")
+}
+
+fn load_hash_cache(game_dir: &Path) -> HashCache {
+    fs::read(hash_cache_path(game_dir))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+fn modified_nanos(meta: &fs::Metadata) -> u128 {
+    meta.modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
+}
+
 fn safe_relative(path: &str) -> Result<PathBuf> {
     let mut out = PathBuf::new();
     for component in Path::new(path).components() {
@@ -143,6 +177,8 @@ pub fn backup(game_dir: &Path, reason: &str) -> Result<Snapshot> {
 pub fn backup_extra(game_dir: &Path, reason: &str, extra: &[String]) -> Result<Snapshot> {
     let objects = objects_dir(game_dir);
     fs::create_dir_all(&objects).map_err(|e| crate::error::io(&objects, e))?;
+    let old_cache = load_hash_cache(game_dir);
+    let mut new_cache = HashCache::default();
     let mut files: Vec<Entry> = Vec::new();
     let mut bytes = 0u64;
     let mut add = |relative: &Path, path: &Path| -> Result<()> {
@@ -150,8 +186,30 @@ pub fn backup_extra(game_dir: &Path, reason: &str, extra: &[String]) -> Result<S
         if files.iter().any(|entry| entry.path == relative) {
             return Ok(());
         }
-        let (hash, size) = hash_file(path)?;
-        store_object(game_dir, path, &hash)?;
+        let meta = fs::metadata(path).map_err(|e| crate::error::io(path, e))?;
+        let modified = modified_nanos(&meta);
+        let known = old_cache.files.get(&relative).filter(|c| {
+            c.size == meta.len()
+                && c.modified == modified
+                && modified != 0
+                && object_path(game_dir, &c.hash).is_ok_and(|p| p.is_file())
+        });
+        let (hash, size) = match known {
+            Some(c) => (c.hash.clone(), c.size),
+            None => {
+                let (hash, size) = hash_file(path)?;
+                store_object(game_dir, path, &hash)?;
+                (hash, size)
+            }
+        };
+        new_cache.files.insert(
+            relative.clone(),
+            Cached {
+                size,
+                modified,
+                hash: hash.clone(),
+            },
+        );
         bytes += size;
         files.push(Entry {
             path: relative,
@@ -210,6 +268,9 @@ pub fn backup_extra(game_dir: &Path, reason: &str, extra: &[String]) -> Result<S
     let data = serde_json::to_vec(&snapshot)
         .map_err(|e| Error::Install(format!("恢复点序列化失败: {e}")))?;
     crate::paths::write_atomic(&path, &data)?;
+    if let Ok(cache) = serde_json::to_vec(&new_cache) {
+        let _ = crate::paths::write_atomic(&hash_cache_path(game_dir), &cache);
+    }
     let _ = prune(game_dir, KEEP);
     Ok(snapshot)
 }
@@ -466,6 +527,72 @@ mod tests {
         let (second_count, _) = stats(&game);
         assert_eq!(first_count, 1);
         assert_eq!(second_count, 2);
+    }
+
+    /// 用真实的版本目录量一下：`CAIRN_BACKUP_BENCH=<游戏目录> cargo test … -- --ignored`。
+    #[test]
+    #[ignore = "需要一个真实的游戏目录"]
+    fn time_backups_of_a_real_dir() {
+        let Ok(dir) = std::env::var("CAIRN_BACKUP_BENCH") else {
+            return;
+        };
+        let game = PathBuf::from(dir);
+        for round in ["第一次", "第二次"] {
+            let start = std::time::Instant::now();
+            let point = backup(&game, round).unwrap();
+            println!(
+                "{round}：{} 个文件，{} MB，用时 {:.2} 秒",
+                point.files.len(),
+                point.bytes / 1024 / 1024,
+                start.elapsed().as_secs_f64()
+            );
+        }
+    }
+
+    #[test]
+    fn unchanged_files_are_not_hashed_again_but_changes_are_caught() {
+        let game = temp_game("hash-cache");
+        fs::create_dir_all(game.join("mods")).unwrap();
+        fs::create_dir_all(game.join("config")).unwrap();
+        fs::write(game.join("mods/a.jar"), b"aaaa").unwrap();
+        fs::write(game.join("config/a.toml"), b"x=1").unwrap();
+        let first = backup(&game, "first").unwrap();
+        assert!(hash_cache_path(&game).is_file());
+
+        // 改了内容（修改时间跟着变）：要重新算。
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::write(game.join("config/a.toml"), b"x=2").unwrap();
+        // 对象被删了（比如清理过）：缓存不能当真，要重新存。
+        let jar_hash = first
+            .files
+            .iter()
+            .find(|f| f.path == "mods/a.jar")
+            .unwrap()
+            .hash
+            .clone();
+        fs::remove_file(object_path(&game, &jar_hash).unwrap()).unwrap();
+        let second = backup(&game, "second").unwrap();
+        let hash_of = |snap: &Snapshot, path: &str| {
+            snap.files
+                .iter()
+                .find(|f| f.path == path)
+                .unwrap()
+                .hash
+                .clone()
+        };
+        assert_ne!(
+            hash_of(&first, "config/a.toml"),
+            hash_of(&second, "config/a.toml")
+        );
+        assert_eq!(hash_of(&second, "mods/a.jar"), jar_hash);
+        assert!(object_path(&game, &jar_hash).unwrap().is_file());
+
+        // 两个点都能恢复成当时的样子。
+        restore(&game, &first.id).unwrap();
+        assert_eq!(fs::read(game.join("config/a.toml")).unwrap(), b"x=1");
+        restore(&game, &second.id).unwrap();
+        assert_eq!(fs::read(game.join("config/a.toml")).unwrap(), b"x=2");
+        let _ = fs::remove_dir_all(game);
     }
 
     #[test]

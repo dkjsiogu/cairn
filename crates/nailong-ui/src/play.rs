@@ -308,10 +308,10 @@ impl App {
         self.cancel_requested = false;
         cancel::reset();
         self.play.launch_after_java = then_launch;
-        self.activity = Some(Activity::new(
-            format!("Java {required} · 官方运行时"),
-            "查找官方的 Java",
-        ));
+        self.activity = Some(
+            Activity::new(format!("Java {required} · 官方运行时"), "查找官方的 Java")
+                .expect(crate::activity::plan::JAVA),
+        );
         self.log.push(format!("下载 Java {required}"));
         let root = self.root.clone();
         let source = self.prefs.source.clone();

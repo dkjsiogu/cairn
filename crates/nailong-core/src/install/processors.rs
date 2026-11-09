@@ -201,8 +201,9 @@ pub fn install_client(
             args.push(expanded);
         }
 
+        // 一个步骤「运行 X 处理器」，用 3/9 表示进度；每个处理器不单独算一步。
         (sink)(Progress {
-            stage: format!("运行 {label} 处理器 {}/{}", index + 1, total),
+            stage: format!("运行 {label} 处理器"),
             files_done: index as u64,
             files_total: total as u64,
             bytes_done: 0,
@@ -268,7 +269,7 @@ pub fn install_client(
         }
         check_outputs(processor, &vars, root, mc)?;
         (sink)(Progress {
-            stage: format!("运行 {label} 处理器 {}/{}", index + 1, total),
+            stage: format!("运行 {label} 处理器"),
             files_done: (index + 1) as u64,
             files_total: total as u64,
             bytes_done: 0,

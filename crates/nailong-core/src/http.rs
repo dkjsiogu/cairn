@@ -28,6 +28,32 @@ pub struct Http {
     mirror: String,
 }
 
+/// 同时下载的文件数。资源文件都很小，并发多了才跑得满带宽。
+const MAX_PARALLEL: usize = 32;
+
+fn build_client() -> Result<reqwest::blocking::Client> {
+    // reqwest 0.13 使用 rustls-no-provider；显式安装 ring provider，
+    // 避免 Windows 构建时引入 aws-lc-sys 的 C/汇编工具链。
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+    reqwest::blocking::Client::builder()
+        .user_agent(format!(
+            "cairn/{} (+https://github.com/dkjsiogu/cairn)",
+            env!("CARGO_PKG_VERSION")
+        ))
+        .timeout(Duration::from_secs(180))
+        .connect_timeout(Duration::from_secs(15))
+        .pool_max_idle_per_host(MAX_PARALLEL)
+        .pool_idle_timeout(Duration::from_secs(90))
+        .build()
+        .map_err(|e| Error::Net {
+            url: "client".into(),
+            source: e,
+        })
+}
+
 const SEGMENT_THRESHOLD: u64 = 8 * 1024 * 1024;
 const SEGMENT_COUNT: u64 = 4;
 
@@ -38,25 +64,17 @@ pub struct RangeResponse {
 }
 
 impl Http {
+    /// 整个程序共用一个 HTTP 客户端：连接留着复用，同一个主机的请求不用每次都重新建
+    /// TCP 和 TLS 连接（以前每次都新建，解析前置、检查更新时几百个请求全在握手）。
     pub fn new(mirror: &str) -> Result<Self> {
-        // reqwest 0.13 使用 rustls-no-provider；显式安装 ring provider，
-        // 避免 Windows 构建时引入 aws-lc-sys 的 C/汇编工具链。
-        static INIT: std::sync::Once = std::sync::Once::new();
-        INIT.call_once(|| {
-            let _ = rustls::crypto::ring::default_provider().install_default();
-        });
-        let client = reqwest::blocking::Client::builder()
-            .user_agent(format!(
-                "cairn/{} (+https://github.com/dkjsiogu/cairn)",
-                env!("CARGO_PKG_VERSION")
-            ))
-            .timeout(Duration::from_secs(180))
-            .connect_timeout(Duration::from_secs(15))
-            .build()
-            .map_err(|e| Error::Net {
-                url: "client".into(),
-                source: e,
-            })?;
+        static CLIENT: std::sync::OnceLock<reqwest::blocking::Client> = std::sync::OnceLock::new();
+        let client = match CLIENT.get() {
+            Some(client) => client.clone(),
+            None => {
+                let client = build_client()?;
+                CLIENT.get_or_init(|| client).clone()
+            }
+        };
         Ok(Self {
             client,
             mirror: mirror.to_string(),
@@ -740,7 +758,7 @@ impl Http {
             current: std::sync::Mutex::new((None, None)),
         };
         batch.emit(true);
-        let workers = specs.len().clamp(1, 16);
+        let workers = specs.len().clamp(1, MAX_PARALLEL);
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(workers)
             .build()
