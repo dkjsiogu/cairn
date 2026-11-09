@@ -70,6 +70,24 @@ pub fn hover_amount(ui: &egui::Ui, id: egui::Id, hovered: bool) -> f32 {
     ui.ctx().animate_bool_with_time(id, hovered, 0.12)
 }
 
+/// 指着能点的东西时变成手形。自己画的行、卡片、图标按钮不用各自设置：每帧最后看一眼
+/// 指针下面的控件，能点、没禁用、又不是拖动用的，就换成手形。已经设了别的光标
+/// （输入框的竖线、拖动时的手掌）就不动。
+pub fn pointer_on_clickables(ctx: &egui::Context) {
+    if ctx.output(|o| o.cursor_icon) != egui::CursorIcon::Default {
+        return;
+    }
+    let hovered: Vec<egui::Id> = ctx.interaction_snapshot(|s| s.hovered.iter().copied().collect());
+    let clickable = hovered.into_iter().any(|id| {
+        ctx.read_response(id).is_some_and(|response| {
+            response.enabled() && response.sense.senses_click() && !response.sense.senses_drag()
+        })
+    });
+    if clickable {
+        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+}
+
 /// 键盘聚焦的外框。每帧统一画一次，所有控件都能用上。
 pub fn focus_ring(ctx: &egui::Context) {
     let Some(id) = ctx.memory(|memory| memory.focused()) else {
@@ -235,7 +253,11 @@ pub fn secondary_sized(
     };
     let (rect, response) = ui.allocate_exact_size(vec2(width.max(48.0), height.max(32.0)), sense);
     let hover = hover_amount(ui, response.id.with("hover"), enabled && response.hovered());
-    if hover > 0.0 {
+    if enabled && response.is_pointer_button_down_on() {
+        // 按下时比悬停再深一点。
+        ui.painter()
+            .rect_filled(rect, R, mix(t::wash(), t::control(), 0.35));
+    } else if hover > 0.0 {
         ui.painter().rect_filled(rect, R, t::tint(t::wash(), hover));
     }
     ui.painter().rect_stroke(

@@ -656,7 +656,7 @@ fn java_row(
 ) -> bool {
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 40.0), egui::Sense::click());
-    list_row_fill(ui, rect, selected, response.hovered());
+    list_row_fill(ui, rect, selected, &response);
     let painter = ui.painter();
     let dot = egui::pos2(rect.left() + 16.0, rect.center().y);
     painter.circle_stroke(

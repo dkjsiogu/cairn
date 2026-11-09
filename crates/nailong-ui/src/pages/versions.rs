@@ -290,10 +290,36 @@ impl App {
         {
             self.selected = Some(first.id.clone());
         }
+        // ↑ ↓ 在版本之间切换；正在输入（改名之类）时不抢键。
+        let step = ui.ctx().input(|i| {
+            if i.key_pressed(egui::Key::ArrowDown) {
+                1
+            } else if i.key_pressed(egui::Key::ArrowUp) {
+                -1
+            } else {
+                0
+            }
+        });
+        if step != 0
+            && !ui.ctx().egui_wants_keyboard_input()
+            && let Some(index) = rows
+                .iter()
+                .position(|row| Some(&row.id) == self.selected.as_ref())
+        {
+            let next = (index as i32 + step).clamp(0, rows.len() as i32 - 1) as usize;
+            if next != index {
+                self.selected = Some(rows[next].id.clone());
+                self.delete_confirm = None;
+                self.delete_failed = None;
+                self.renaming = None;
+            }
+        }
         let selected = self.selected_row();
         let mut chosen: Option<Row> = None;
         let mut go_install = false;
         let mut delete_target: Option<(Row, bool)> = None;
+        let mut row_menu: Option<(Row, RowAction)> = None;
+        let busy = self.busy.is_some();
         let mut open_dir: Option<PathBuf> = None;
 
         egui::Panel::left("manage_versions")
@@ -342,9 +368,36 @@ impl App {
                     .show(ui, |ui| {
                         for row in &rows {
                             let active = selected.as_ref().is_some_and(|item| item.id == row.id);
-                            if version_row(ui, row, active).clicked() {
+                            let response = version_row(ui, row, active);
+                            if response.clicked() {
                                 chosen = Some(row.clone());
                             }
+                            // 右键：常用的几件事不用先选中再去右边找。
+                            response.context_menu(|ui| {
+                                ui.set_min_width(160.0);
+                                let mut pick = |action| row_menu = Some((row.clone(), action));
+                                if ui.add_enabled(!busy, egui::Button::new("启动")).clicked() {
+                                    pick(RowAction::Launch);
+                                }
+                                if ui.button("打开文件夹").clicked() {
+                                    pick(RowAction::OpenFolder);
+                                }
+                                if ui.add_enabled(!busy, egui::Button::new("改名")).clicked() {
+                                    pick(RowAction::Rename);
+                                }
+                                ui.separator();
+                                if ui
+                                    .add_enabled(
+                                        !busy,
+                                        egui::Button::new(
+                                            egui::RichText::new("移到回收站").color(t::danger()),
+                                        ),
+                                    )
+                                    .clicked()
+                                {
+                                    pick(RowAction::Delete);
+                                }
+                            });
                         }
                     });
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
@@ -679,6 +732,22 @@ impl App {
             self.delete_confirm = None;
             self.delete_failed = None;
             self.renaming = None;
+        }
+        if let Some((row, action)) = row_menu {
+            self.selected = Some(row.id.clone());
+            self.delete_failed = None;
+            match action {
+                RowAction::Launch => self.start_launch(),
+                RowAction::OpenFolder => open_dir = Some(row.game_dir.clone()),
+                RowAction::Rename => {
+                    self.delete_confirm = None;
+                    self.renaming = Some((row.id.clone(), row.id.clone()));
+                }
+                RowAction::Delete => {
+                    self.renaming = None;
+                    self.delete_confirm = Some(row.id.clone());
+                }
+            }
         }
         if let Some(dir) = open_dir {
             open_folder(&dir);
@@ -1338,7 +1407,13 @@ pub(crate) fn loader_tile(
     enabled: bool,
     width: f32,
 ) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 58.0), egui::Sense::click());
+    // 不可用的不响应点击，也不会变成手形光标。
+    let sense = if enabled {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 58.0), sense);
     let hover = motion::hover_amount(ui, response.id.with("hover"), enabled && response.hovered());
     ui.painter().rect(
         rect,
@@ -1375,10 +1450,19 @@ pub(crate) fn loader_tile(
     response
 }
 
+/// 版本行的右键菜单。
+#[derive(Clone, Copy)]
+enum RowAction {
+    Launch,
+    OpenFolder,
+    Rename,
+    Delete,
+}
+
 pub(crate) fn version_row(ui: &mut egui::Ui, row: &Row, active: bool) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 54.0), egui::Sense::click());
-    list_row_fill(ui, rect, active, response.hovered());
+    list_row_fill(ui, rect, active, &response);
     let inner = rect.shrink2(egui::vec2(12.0, 8.0));
     let mut child = ui.new_child(
         egui::UiBuilder::new()

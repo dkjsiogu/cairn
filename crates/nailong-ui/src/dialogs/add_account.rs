@@ -246,7 +246,7 @@ impl App {
                             egui::vec2(ui.available_width(), 40.0),
                             egui::Sense::click(),
                         );
-                        list_row_fill(ui, rect, false, response.hovered());
+                        list_row_fill(ui, rect, false, &response);
                         let icon = egui::Rect::from_min_size(
                             egui::pos2(rect.left() + 8.0, rect.center().y - 12.0),
                             egui::vec2(24.0, 24.0),

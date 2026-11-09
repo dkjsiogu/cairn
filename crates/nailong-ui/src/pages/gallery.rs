@@ -536,7 +536,7 @@ impl App {
                                 egui::Id::unique(("overview_cell", i)),
                                 egui::Sense::click(),
                             );
-                            list_row_fill(ui, rect.shrink(2.0), false, response.hovered());
+                            list_row_fill(ui, rect.shrink(2.0), false, &response);
                             if i > 0 {
                                 ui.painter().vline(
                                     rect.left(),
@@ -908,7 +908,7 @@ impl App {
                                 });
                             let (head, response) = ui
                                 .allocate_exact_size(egui::vec2(width, 56.0), egui::Sense::click());
-                            list_row_fill(ui, head, false, response.hovered());
+                            list_row_fill(ui, head, false, &response);
                             let avatar = egui::Rect::from_min_size(
                                 head.left_center() + egui::vec2(8.0, -20.0),
                                 egui::vec2(40.0, 40.0),

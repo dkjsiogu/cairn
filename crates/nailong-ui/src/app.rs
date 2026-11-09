@@ -495,6 +495,44 @@ impl App {
         }
     }
 
+    /// 页面最底下一条细边，右边是版本号。单独占一条，不会压住列表、卡片和按钮。
+    /// 点版本号打开设置（那里能检查更新）。
+    pub(crate) fn version_line(&mut self, ui: &mut egui::Ui) {
+        let mut open = false;
+        egui::Panel::bottom("version_line")
+            .resizable(false)
+            .show_separator_line(false)
+            .exact_size(18.0)
+            .frame(egui::Frame::new().fill(t::bg()).inner_margin(egui::Margin {
+                left: 12,
+                right: 12,
+                top: 0,
+                bottom: 4,
+            }))
+            .show(ui, |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let version = env!("CARGO_PKG_VERSION");
+                    let response = ui
+                        .add(
+                            egui::Label::new(
+                                egui::RichText::new(format!("v{version}"))
+                                    .size(11.0)
+                                    .color(t::dim()),
+                            )
+                            .sense(egui::Sense::click()),
+                        )
+                        .on_hover_text(format!("Cairn {version} · 点开设置检查更新"));
+                    if response.clicked() {
+                        open = true;
+                    }
+                });
+            });
+        if open {
+            self.login.open = false;
+            self.show_settings = true;
+        }
+    }
+
     /// 页面底部的一行提示：错误、完成通知，以及“查看日志”。
     pub(crate) fn message_bar(&mut self, ui: &mut egui::Ui) {
         let (text, color, is_error) = match (&self.error, &self.notice) {
@@ -514,12 +552,13 @@ impl App {
         );
         let mut close = false;
         let mut show_log = false;
+        let mut copy = false;
         let mut child = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(bar.shrink2(egui::vec2(24.0, 0.0)))
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
-        child.add(egui::Label::new(egui::RichText::new(text).size(13.0).color(color)).truncate());
+        child.add(egui::Label::new(egui::RichText::new(&text).size(13.0).color(color)).truncate());
         child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
                 .add(egui::Button::new(egui::RichText::new("×").size(15.0)).frame(false))
@@ -540,7 +579,21 @@ impl App {
             {
                 show_log = true;
             }
+            if is_error
+                && ui
+                    .add(
+                        egui::Button::new(egui::RichText::new("复制").size(13.0).color(t::sub()))
+                            .frame(false),
+                    )
+                    .on_hover_text("复制这条错误")
+                    .clicked()
+            {
+                copy = true;
+            }
         });
+        if copy {
+            ui.ctx().copy_text(text.clone());
+        }
         if close {
             self.error = None;
             self.notice = None;
@@ -995,6 +1048,7 @@ impl eframe::App for App {
         egui::CentralPanel::no_frame()
             .frame(egui::Frame::new().fill(t::bg()))
             .show(ui, |ui| {
+                self.version_line(ui);
                 ui.add_space((1.0 - eased) * 6.0);
                 if self.busy.is_some_and(Task::shows_progress)
                     && (self.progress_open || self.page_locked())
@@ -1040,6 +1094,7 @@ impl eframe::App for App {
             }
         }
         motion::focus_ring(ui.ctx());
+        motion::pointer_on_clickables(ui.ctx());
     }
 
     /// 关掉 Cairn 时，把下载好的新版本换上（Windows）。下次打开就是新版本。

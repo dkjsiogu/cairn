@@ -312,7 +312,7 @@ impl App {
                             egui::vec2(ui.available_width(), 42.0),
                             egui::Sense::click(),
                         );
-                        list_row_fill(ui, rect, false, response.hovered());
+                        list_row_fill(ui, rect, false, &response);
                         let icon = egui::Rect::from_min_size(
                             egui::pos2(rect.left() + 10.0, rect.center().y - 14.0),
                             egui::vec2(28.0, 28.0),
@@ -676,7 +676,7 @@ fn account_row(
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 48.0), egui::Sense::click());
     let hovered = response.hovered() || response.context_menu_opened();
-    list_row_fill(ui, rect, false, hovered);
+    list_row_fill(ui, rect, false, &response);
     let icon = egui::Rect::from_min_size(
         egui::pos2(rect.left() + 10.0, rect.center().y - 14.0),
         egui::vec2(28.0, 28.0),

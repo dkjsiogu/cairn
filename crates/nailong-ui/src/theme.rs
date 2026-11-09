@@ -251,6 +251,11 @@ pub fn install(ctx: &egui::Context) {
         ]
         .into();
         style.spacing.scroll = egui::style::ScrollStyle::solid();
+        // 文字默认不能选中：整行、整块可点的地方，点在字上也算点到它（以前会被选字吃掉）。
+        // 要复制的地方（日志、错误提示）单独打开。
+        style.interaction.selectable_labels = false;
+        // egui 自带的按钮也和我们自己画的一样，悬停时变成手形。
+        style.visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
         ctx.set_style_of(theme, style);
     }
 }

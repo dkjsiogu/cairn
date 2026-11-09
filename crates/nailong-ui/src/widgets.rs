@@ -149,13 +149,26 @@ pub(crate) fn info_line(ui: &mut egui::Ui, label: &str, value: &str) {
 }
 
 /// 列表行的背景：当前项和悬停项都填 `wash`，不加色条。
-pub(crate) fn list_row_fill(ui: &egui::Ui, rect: egui::Rect, active: bool, hovered: bool) {
-    if active {
-        ui.painter().rect_filled(rect, motion::R, t::wash());
-    } else if hovered {
-        ui.painter()
-            .rect_filled(rect, motion::R, t::tint(t::wash(), 0.7));
-    }
+/// 列表行的背景：当前项填 `wash`；悬停时渐渐浅浅地填上，按下时再深一点，松手前就看得出点到了。
+/// 右键菜单开着时也算悬停，看得出菜单是哪一行的。不加色条。
+pub(crate) fn list_row_fill(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    active: bool,
+    response: &egui::Response,
+) {
+    let hovered = response.hovered() || response.context_menu_opened();
+    let hover = motion::hover_amount(ui, response.id.with("row_hover"), hovered);
+    let fill = if response.is_pointer_button_down_on() {
+        motion::mix(t::wash(), t::control(), 0.35)
+    } else if active {
+        t::wash()
+    } else if hover > 0.0 {
+        t::tint(t::wash(), 0.7 * hover)
+    } else {
+        return;
+    };
+    ui.painter().rect_filled(rect, motion::R, fill);
 }
 
 pub(crate) fn card() -> egui::Frame {

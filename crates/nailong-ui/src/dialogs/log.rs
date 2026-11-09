@@ -368,12 +368,14 @@ impl LogView {
                                     } else {
                                         t::sub()
                                     };
+                                    // 日志里的字可以拖选复制（别处的字默认不能选）。
                                     ui.add(
                                         egui::Label::new(
                                             egui::RichText::new(line)
                                                 .font(font.clone())
                                                 .color(color),
                                         )
+                                        .selectable(true)
                                         .wrap_mode(egui::TextWrapMode::Extend),
                                     );
                                 }

@@ -683,7 +683,7 @@ pub(crate) fn save_world_row(
 ) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 54.0), egui::Sense::click());
-    list_row_fill(ui, rect, active, response.hovered());
+    list_row_fill(ui, rect, active, &response);
     let inner = rect.shrink2(egui::vec2(12.0, 8.0));
     let mut child = ui.new_child(
         egui::UiBuilder::new()
