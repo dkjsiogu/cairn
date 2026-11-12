@@ -3,12 +3,12 @@
 use crate::prelude::*;
 
 impl App {
-    pub(crate) fn new(root: Root) -> Self {
+    pub(crate) fn new(root: Root, ctx: &egui::Context) -> Self {
         let javas = java::find_all(&root);
         let java_ok = javas.iter().any(|j| j.major >= 21);
         let java_label = javas.iter().find(|j| j.major >= 21).map(|j| j.label());
         let backup_cfg = snapshots::load_config(&root);
-        let prefs = load_ui_prefs(&root);
+        let prefs = UiPrefs::load(&root);
         let accounts = load_accounts(&root, &prefs.username);
         let (icon_jobs, icon_job_rx) = mpsc::channel::<(String, String)>();
         let (icon_done, icon_rx) = mpsc::channel::<(String, Vec<u8>)>();
@@ -26,8 +26,13 @@ impl App {
                 tuning_cache: HashMap::new(),
                 versions: BTreeMap::new(),
                 last: None,
-                started: None,
-                running_row: None,
+                sessions: Vec::new(),
+                stop_pending: Vec::new(),
+                stop_confirm: None,
+                stats: nailong_core::played::load(&root),
+                recovery: None,
+                recovery_open: false,
+                minimized: false,
                 launch_after_java: None,
             },
             env: Env {
@@ -42,8 +47,12 @@ impl App {
                 cache: None,
                 scan: None,
                 verified: None,
+                quick_play: HashMap::new(),
+                switch_query: String::new(),
             },
+            selected: prefs.selected.clone(),
             prefs,
+            ctx: ctx.clone(),
             install: InstallForm {
                 catalog: None,
                 catalog_loading: false,
@@ -136,16 +145,17 @@ impl App {
                 icon_rx,
                 focus_search: false,
                 drop_preview: None,
+                pending_update_check: false,
             },
             root,
             rows: Vec::new(),
-            selected: None,
             show_tuning: false,
             bench_confirm: false,
             launch_edit: None,
-            show_install: false,
-            show_manage: false,
-            show_mods: false,
+            page: Page::Home,
+            palette: None,
+            duplicate: None,
+            notice_seen: None,
             delete_confirm: None,
             renaming: None,
             delete_failed: None,
@@ -161,8 +171,6 @@ impl App {
             notice: None,
             log: vec!["启动器已就绪".into()],
             log_view: None,
-            show_saves: false,
-            show_gallery: false,
             gallery: Default::default(),
             accounts,
             show_settings: false,
@@ -170,6 +178,9 @@ impl App {
             version_cache: None,
             page_key: 255,
             page_enter_at: 0.0,
+            version_query: String::new(),
+            version_search_focus: false,
+            settings_tab: Default::default(),
             rx: None,
         };
         app.play.versions = launchcfg::load_all(&app.root);
@@ -197,10 +208,7 @@ impl App {
             let row = app.selected_row().or_else(|| app.rows.first().cloned());
             match screen.as_str() {
                 "install" => app.open_install(),
-                "manage" => {
-                    app.show_manage = true;
-                    app.show_install = false;
-                }
+                "manage" => app.page = Page::Versions,
                 "export" | "export-done" => {
                     if let Some(row) = &row {
                         app.open_export(row);
@@ -224,8 +232,7 @@ impl App {
                 }
                 "datadir" => app.open_data_dir(),
                 "rename" | "delete" => {
-                    app.show_manage = true;
-                    app.show_install = false;
+                    app.page = Page::Versions;
                     if let Some(row) = &row {
                         app.selected = Some(row.id.clone());
                         if screen == "rename" {
@@ -354,10 +361,55 @@ impl App {
                     // 别让启动时的自动检查把这个假版本冲掉。
                     app.prefs.update_checked = u64::MAX / 2;
                 }
-                "running" => {
-                    app.busy = Some(Task::Launch);
-                    app.play.started = Some(Instant::now());
+                "running" | "running-versions" | "stop" => {
+                    if let Some(row) = &row {
+                        app.selected = Some(row.id.clone());
+                        app.play.sessions.push(crate::play::Session::debug(row));
+                        if let Some(other) = app.rows.iter().find(|other| other.id != row.id) {
+                            app.play.sessions.push(crate::play::Session::debug(other));
+                        }
+                        if screen == "running-versions" {
+                            app.page = Page::Versions;
+                        }
+                        if screen == "stop" {
+                            app.play.stop_confirm = Some(row.id.clone());
+                        }
+                    }
                 }
+                "palette" => app.open_palette(),
+                "recovery" | "recovery-open" => {
+                    if let Some(row) = &row {
+                        let now = crate::play::unix_now();
+                        let point = |age: u64, reason: &str| rollback::Snapshot {
+                            id: format!("debug-{age}"),
+                            created_at: now - age,
+                            reason: reason.into(),
+                            bytes: 48_000_000,
+                            files: Vec::new(),
+                            extra_files: Vec::new(),
+                        };
+                        app.play.recovery = Some(crate::play::Recovery {
+                            row_id: row.id.clone(),
+                            game_dir: row.game_dir.clone(),
+                            point: point(7200, "安装 Sodium 前"),
+                            changes: 3,
+                            last_good: now - 86400 * 2,
+                        });
+                        app.error = Some(
+                            "游戏异常退出（代码 1）：有 Mod 注入失败，通常是 Mod 和游戏版本或其他 Mod 冲突"
+                                .into(),
+                        );
+                        app.play.recovery_open = screen == "recovery-open";
+                    }
+                }
+                "duplicate" => {
+                    app.page = Page::Versions;
+                    if let Some(row) = &row {
+                        app.selected = Some(row.id.clone());
+                        app.open_duplicate(row);
+                    }
+                }
+                "notice" => app.notice = Some("已把「1.20.1 Fabric」移到回收站".into()),
                 "progress" | "progress-bg" => {
                     app.busy = Some(Task::Install);
                     let mut activity = Activity::new("1.21.1 · NeoForge 21.1.264", "读取版本信息")
@@ -417,7 +469,7 @@ impl App {
         }
         #[cfg(debug_assertions)]
         if let Ok(term) = std::env::var("NAILONG_DEBUG_PROJECT")
-            && app.show_mods
+            && app.page == Page::Content
             && app.content.selected.is_none()
             && let Ok(page) = mods::search(
                 &term,
@@ -435,14 +487,14 @@ impl App {
         }
         #[cfg(debug_assertions)]
         if let Ok(term) = std::env::var("NAILONG_DEBUG_SEARCH")
-            && app.show_mods
+            && app.page == Page::Content
         {
             app.content.query = term;
             app.start_mods_search();
         }
         #[cfg(debug_assertions)]
         if std::env::var("NAILONG_DEBUG_REVIEW").as_deref() == Ok("quick")
-            && app.show_mods
+            && app.page == Page::Content
             && let Some(project) = app.content.selected.clone()
         {
             app.review_quick_install(project);
@@ -489,201 +541,110 @@ impl App {
         }
         #[cfg(debug_assertions)]
         if std::env::var("NAILONG_DEBUG_SCREEN").as_deref() == Ok("welcome") {
-            app.show_install = false;
-            app.show_manage = false;
-            app.show_mods = false;
-            app.show_saves = false;
+            app.page = Page::Home;
         }
         app
     }
 
-    /// 安装和下载会占住进度页；游戏运行不会，玩的时候照样能看内容和存档。
     /// 整个界面锁住、只能等的时候：登录中、测这台电脑时。下载和安装不锁，可以照常浏览。
     pub(crate) fn page_locked(&self) -> bool {
         self.login.busy || matches!(self.busy, Some(Task::Bench))
     }
 
-    /// 现在不能改这个版本的原因；`None` 表示可以改。
+    /// 换到一个页面。只换视图，不动数据；各页面的 `open_*` 负责准备自己的状态。
+    pub(crate) fn go(&mut self, page: Page) {
+        self.page = page;
+        self.progress_open = false;
+    }
+
+    /// 现在不能改这个版本的原因；`None` 表示可以改。`row_id` 为 `None` 是问「能不能动整个数据目录」。
     pub(crate) fn write_block(&self, row_id: Option<&str>) -> Option<&'static str> {
         match self.busy {
-            Some(Task::Install) | Some(Task::Mods) => Some("正在安装，完成后再试"),
-            Some(Task::Files) => Some("正在整理内容，完成后再试"),
-            Some(Task::Export) => Some("正在导出整合包，完成后再试"),
-            Some(Task::Bench) => Some("正在测试这台电脑，完成后再试"),
-            Some(Task::Java) => Some("正在下载 Java，完成后再试"),
-            Some(Task::Launch)
-                if row_id.is_some() && self.play.running_row.as_deref() == row_id =>
-            {
-                Some("游戏正在使用这个版本，退出游戏后再修改")
-            }
+            Some(Task::Install) | Some(Task::Mods) => return Some("正在安装，完成后再试"),
+            Some(Task::Files) => return Some("正在整理内容，完成后再试"),
+            Some(Task::Export) => return Some("正在导出整合包，完成后再试"),
+            Some(Task::Bench) => return Some("正在测试这台电脑，完成后再试"),
+            Some(Task::Java) => return Some("正在下载 Java，完成后再试"),
+            None => {}
+        }
+        match row_id {
+            Some(id) if self.is_running(id) => Some("游戏正在使用这个版本，退出游戏后再修改"),
+            None if self.any_game() => Some("游戏运行中，退出游戏后再试"),
             _ => None,
-        }
-    }
-
-    /// 页面最底下一条细边，右边是版本号。单独占一条，不会压住列表、卡片和按钮。
-    /// 点版本号打开设置（那里能检查更新）。
-    pub(crate) fn version_line(&mut self, ui: &mut egui::Ui) {
-        let mut open = false;
-        egui::Panel::bottom("version_line")
-            .resizable(false)
-            .show_separator_line(false)
-            .exact_size(18.0)
-            .frame(egui::Frame::new().fill(t::bg()).inner_margin(egui::Margin {
-                left: 12,
-                right: 12,
-                top: 0,
-                bottom: 4,
-            }))
-            .show(ui, |ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let version = env!("CARGO_PKG_VERSION");
-                    let response = ui
-                        .add(
-                            egui::Label::new(
-                                egui::RichText::new(format!("v{version}"))
-                                    .size(11.0)
-                                    .color(t::dim()),
-                            )
-                            .sense(egui::Sense::click()),
-                        )
-                        .on_hover_text(format!("Cairn {version} · 点开设置检查更新"));
-                    if response.clicked() {
-                        open = true;
-                    }
-                });
-            });
-        if open {
-            self.login.open = false;
-            self.show_settings = true;
-        }
-    }
-
-    /// 页面底部的一行提示：错误、完成通知，以及“查看日志”。
-    pub(crate) fn message_bar(&mut self, ui: &mut egui::Ui) {
-        let (text, color, is_error) = match (&self.error, &self.notice) {
-            (Some(error), _) => (error.clone(), t::danger(), true),
-            (None, Some(notice)) => (notice.clone(), t::ok(), false),
-            (None, None) => return,
-        };
-        let full = ui.max_rect();
-        let bar = egui::Rect::from_min_max(
-            egui::pos2(full.left(), full.bottom() - 40.0),
-            full.right_bottom(),
-        );
-        ui.painter().rect_filled(bar, 0.0, t::surface());
-        ui.painter().line_segment(
-            [bar.left_top(), bar.right_top()],
-            egui::Stroke::new(1.0, t::hairline()),
-        );
-        let mut close = false;
-        let mut show_log = false;
-        let mut copy = false;
-        let mut child = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(bar.shrink2(egui::vec2(24.0, 0.0)))
-                .layout(egui::Layout::left_to_right(egui::Align::Center)),
-        );
-        child.add(egui::Label::new(egui::RichText::new(&text).size(13.0).color(color)).truncate());
-        child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui
-                .add(egui::Button::new(egui::RichText::new("×").size(15.0)).frame(false))
-                .on_hover_text("关闭提示")
-                .clicked()
-            {
-                close = true;
-            }
-            if is_error
-                && ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new("查看日志").size(13.0).color(t::sub()),
-                        )
-                        .frame(false),
-                    )
-                    .clicked()
-            {
-                show_log = true;
-            }
-            if is_error
-                && ui
-                    .add(
-                        egui::Button::new(egui::RichText::new("复制").size(13.0).color(t::sub()))
-                            .frame(false),
-                    )
-                    .on_hover_text("复制这条错误")
-                    .clicked()
-            {
-                copy = true;
-            }
-        });
-        if copy {
-            ui.ctx().copy_text(text.clone());
-        }
-        if close {
-            self.error = None;
-            self.notice = None;
-        }
-        if show_log {
-            self.open_log();
         }
     }
 
     /// 按钮不可用时给出的说明。
     pub(crate) fn busy_reason(&self) -> &'static str {
         match self.busy {
-            Some(Task::Launch) => "游戏运行中，退出游戏后再安装",
             Some(Task::Bench) => "正在测试这台电脑，完成后再试",
             Some(Task::Java) => "正在下载 Java，完成后再试",
             Some(Task::Export) => "正在导出整合包，完成后再试",
+            Some(Task::Files) => "正在整理内容，完成后再试",
             _ => "正在安装，完成后再试",
         }
     }
 
-    pub(crate) fn page_id(&self) -> u8 {
-        if self.busy.is_some_and(Task::shows_progress) {
-            return 10;
-        }
-        if self.show_gallery {
-            return 9;
-        }
-        if self.show_mods {
-            if self.content.show_installed {
-                6
-            } else if self.content.selected.is_some() {
-                5
-            } else if self.content.searching {
-                4
-            } else {
-                3
-            }
-        } else if self.show_saves {
-            8
-        } else if self.show_manage {
-            2
-        } else if self.show_install {
-            1
-        } else {
-            0
-        }
-    }
-
-    /// 全局快捷键：只在不输入文字、没有弹窗时生效。
-    pub(crate) fn handle_shortcuts(&mut self, ctx: &egui::Context) {
-        if ctx.egui_wants_keyboard_input()
-            || self.show_settings
+    /// 有弹窗盖在页面上。快捷键、拖放提示这些只在没有弹窗时生效；新弹窗记得加进来。
+    pub(crate) fn modal_open(&self) -> bool {
+        self.show_settings
             || self.login.open
             || self.login.busy
             || self.login.url.is_some()
+            || self.login.error.is_some()
+            || self.login.add.is_some()
             || self.pending_install.is_some()
             || self.rollback.open
             || self.log_view.is_some()
             || self.launch_edit.is_some()
+            || self.bench_confirm
+            || self.update.open
+            || self.export.open
+            || self.data_dir.open
+            || self.palette.is_some()
+            || self.duplicate.is_some()
+            || self.play.recovery_open
             || self
                 .gallery
                 .shots
                 .as_ref()
                 .is_some_and(|shots| shots.viewing())
-        {
+    }
+
+    /// 进度页是不是正在整页显示。
+    pub(crate) fn progress_showing(&self) -> bool {
+        self.busy.is_some_and(Task::shows_progress) && (self.progress_open || self.page_locked())
+    }
+
+    /// 当前视图的编号，变了就放一次切页动效。
+    pub(crate) fn view_key(&self) -> u8 {
+        if self.progress_showing() {
+            return 10;
+        }
+        match self.page {
+            Page::Home => 0,
+            Page::Install => 1,
+            Page::Versions => 2,
+            Page::Content if self.content.show_installed => 6,
+            Page::Content if self.content.selected.is_some() => 5,
+            Page::Content if self.content.searching => 4,
+            Page::Content => 3,
+            Page::Worlds => 8,
+            Page::Shots => 9,
+        }
+    }
+
+    /// 全局快捷键：只在不输入文字、没有弹窗时生效。`Ctrl+K` 例外，它自己就是开关。
+    pub(crate) fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::K)) {
+            if self.palette.is_some() {
+                self.palette = None;
+            } else if !self.modal_open() && !self.page_locked() {
+                self.open_palette();
+            }
+            return;
+        }
+        if ctx.egui_wants_keyboard_input() || self.modal_open() {
             return;
         }
         let mut nav = None;
@@ -712,12 +673,16 @@ impl App {
             self.open_log();
             return;
         }
-        if search && self.show_mods {
-            self.content.focus_search = true;
+        if search {
+            match self.page {
+                Page::Content => self.content.focus_search = true,
+                Page::Versions => self.version_search_focus = true,
+                Page::Shots => self.gallery.focus_search = true,
+                _ => {}
+            }
         }
         if settings {
-            self.login.open = false;
-            self.show_settings = true;
+            self.open_settings();
         }
         if refresh {
             self.refresh();
@@ -725,6 +690,11 @@ impl App {
         if let Some(nav) = nav {
             self.nav_go(nav);
         }
+    }
+
+    pub(crate) fn open_settings(&mut self) {
+        self.login.open = false;
+        self.show_settings = true;
     }
 
     pub(crate) fn refresh_java(&mut self) {
@@ -741,6 +711,7 @@ impl App {
     pub(crate) fn refresh(&mut self) {
         self.home.cache = None;
         self.home.verified = None;
+        self.home.quick_play.clear();
         self.play.tuning_cache.clear();
         self.version_cache = None;
         let mut rows = Vec::new();
@@ -763,15 +734,23 @@ impl App {
                 health: health::inspect(&self.root, &name),
             });
         }
-        rows.sort_by(|a, b| {
-            b.pack
-                .is_some()
-                .cmp(&a.pack.is_some())
+        self.rows = rows;
+        self.sort_rows();
+        self.ensure_visible_selection();
+    }
+
+    /// 最近玩过的排在前面；没玩过的按整合包、游戏版本、加载器排。
+    pub(crate) fn sort_rows(&mut self) {
+        let stats = &self.play.stats;
+        let last = |row: &Row| stats.get(&row.id).map_or(0, |stat| stat.last);
+        self.rows.sort_by(|a, b| {
+            last(b)
+                .cmp(&last(a))
+                .then_with(|| b.pack.is_some().cmp(&a.pack.is_some()))
                 .then_with(|| mc_key(&b.mc).cmp(&mc_key(&a.mc)))
                 .then_with(|| a.loader.rank().cmp(&b.loader.rank()))
+                .then_with(|| a.id.cmp(&b.id))
         });
-        self.rows = rows;
-        self.ensure_visible_selection();
     }
 
     pub(crate) fn selected_row(&self) -> Option<Row> {
@@ -781,41 +760,201 @@ impl App {
             .cloned()
     }
 
+    pub(crate) fn row(&self, id: &str) -> Option<Row> {
+        self.rows.iter().find(|row| row.id == id).cloned()
+    }
+
     pub(crate) fn ensure_visible_selection(&mut self) {
         let valid = self
             .selected
             .as_ref()
             .is_some_and(|id| self.rows.iter().any(|r| &r.id == id));
         if !valid {
-            // 首屏优先选“看起来像常用版本”的那个：整合包、有内容、安装完整。
-            // 没有任何线索时退回列表最后一个，避免总选到空版本。
-            self.selected = self
+            // 没有记住的选择时：最近玩过的那个（排在最前）；都没玩过就挑「看起来像常用版本」的：
+            // 整合包、有内容、安装完整。
+            let played = self
                 .rows
-                .iter()
-                .max_by_key(|row| {
-                    let content = installed::load(&row.game_dir).entries.len();
-                    (row.pack.is_some(), content, row.health.missing == 0)
+                .first()
+                .filter(|row| self.play.stats.get(&row.id).is_some_and(|s| s.last > 0));
+            self.selected = played
+                .or_else(|| {
+                    self.rows.iter().max_by_key(|row| {
+                        let content = installed::load(&row.game_dir).entries.len();
+                        (row.pack.is_some(), content, row.health.missing == 0)
+                    })
                 })
                 .map(|row| row.id.clone());
         }
     }
 
-    pub(crate) fn save_ui_config(&self) {
-        let value = serde_json::json!({
-            "username": self.prefs.username,
-            "memory": self.prefs.memory,
-            "gc": self.prefs.gc.key(),
-            "jvm_args": self.prefs.jvm_args.trim(),
-            "reduce_motion": self.prefs.reduce_motion,
-            "theme": self.prefs.theme.key(),
-            "update_checked": self.prefs.update_checked,
-            "update_skip": self.prefs.update_skip,
-            "source": self.prefs.source,
-            "shots_embed": self.prefs.embed_shots,
-            "auto_update": self.prefs.auto_update,
-        });
-        if let Ok(bytes) = serde_json::to_vec_pretty(&value) {
-            let _ = std::fs::write(self.root.dir().join("ui.json"), bytes);
+    /// 窗口不在前台时，在任务栏上提醒一下：装完了、游戏退出了。
+    pub(crate) fn notify_if_away(&self, ctx: &egui::Context) {
+        if !self.window_focused {
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                egui::UserAttentionType::Informational,
+            ));
+        }
+    }
+
+    /// 页面最底下一条细边，右边是版本号。单独占一条，不会压住列表、卡片和按钮。
+    /// 点版本号打开设置（那里能检查更新）；左边是 `Ctrl+K` 的提示。
+    pub(crate) fn version_line(&mut self, ui: &mut egui::Ui) {
+        let mut open = false;
+        let mut palette = false;
+        egui::Panel::bottom("version_line")
+            .resizable(false)
+            .show_separator_line(false)
+            .exact_size(18.0)
+            .frame(egui::Frame::new().fill(t::bg()).inner_margin(egui::Margin {
+                left: 12,
+                right: 12,
+                top: 0,
+                bottom: 4,
+            }))
+            .show(ui, |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let version = env!("CARGO_PKG_VERSION");
+                    let small = |text: String| egui::RichText::new(text).size(11.0).color(t::dim());
+                    let response = ui
+                        .add(
+                            egui::Label::new(small(format!("v{version}")))
+                                .sense(egui::Sense::click()),
+                        )
+                        .on_hover_text(format!("Cairn {version} · 设置和检查更新"));
+                    if response.clicked() {
+                        open = true;
+                    }
+                    ui.add_space(10.0);
+                    if ui
+                        .add(
+                            egui::Label::new(small("Ctrl+K 找任何东西".into()))
+                                .sense(egui::Sense::click()),
+                        )
+                        .on_hover_text("版本、页面、设置和常用操作，打几个字就到")
+                        .clicked()
+                    {
+                        palette = true;
+                    }
+                });
+            });
+        if open {
+            self.open_settings();
+        }
+        if palette && !self.page_locked() {
+            self.open_palette();
+        }
+    }
+
+    /// 页面底部的一行提示：错误、完成通知，以及「查看日志」「复制」和崩溃后的「退回改动」。
+    /// 所有页面共用这一处。完成通知过几秒自己消失，错误留到玩家关掉。
+    pub(crate) fn message_bar(&mut self, ui: &mut egui::Ui) {
+        const NOTICE_SECONDS: f64 = 6.0;
+        // 安装没完成的那一页自己把原因写在正中间，不用再说一遍。
+        if self.page == Page::Install && self.install.repair_target.is_some() {
+            return;
+        }
+        let now = ui.input(|i| i.time);
+        let (text, color, is_error) = match (&self.error, &self.notice) {
+            (Some(error), _) => (error.clone(), t::danger(), true),
+            (None, Some(notice)) => (notice.clone(), t::ok(), false),
+            (None, None) => {
+                self.notice_seen = None;
+                return;
+            }
+        };
+        if !is_error {
+            let fresh = self
+                .notice_seen
+                .as_ref()
+                .is_none_or(|(seen, _)| seen != &text);
+            if fresh {
+                self.notice_seen = Some((text.clone(), now));
+            }
+        }
+        let mut close = false;
+        let mut show_log = false;
+        let mut copy = false;
+        let mut recover = false;
+        let has_recovery = is_error && self.play.recovery.is_some();
+        let response = egui::Panel::bottom("message_bar")
+            .resizable(false)
+            .show_separator_line(false)
+            .exact_size(40.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(t::surface())
+                    .inner_margin(egui::Margin::symmetric(24, 0)),
+            )
+            .show(ui, |ui| {
+                let bar = ui.max_rect().expand2(egui::vec2(24.0, 0.0));
+                ui.painter().line_segment(
+                    [bar.left_top(), bar.right_top()],
+                    egui::Stroke::new(1.0, t::hairline()),
+                );
+                ui.horizontal_centered(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add(
+                                egui::Button::new(egui::RichText::new("×").size(15.0)).frame(false),
+                            )
+                            .on_hover_text("关闭提示")
+                            .clicked()
+                        {
+                            close = true;
+                        }
+                        if is_error {
+                            if action_link(ui, "查看日志")
+                                .on_hover_text("Ctrl+L")
+                                .clicked()
+                            {
+                                show_log = true;
+                            }
+                            if action_link(ui, "复制").clicked() {
+                                copy = true;
+                            }
+                        }
+                        if has_recovery && small_accent(ui, "退回改动").clicked() {
+                            recover = true;
+                        }
+                        // 剩下的地方给文字，放不下从末尾省略，悬停看全文。
+                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(&text).size(13.0).color(color),
+                                )
+                                .truncate(),
+                            )
+                            .on_hover_text(&text);
+                        });
+                    });
+                });
+            })
+            .response;
+        if !is_error && let Some((_, since)) = &self.notice_seen {
+            let left = NOTICE_SECONDS - (now - since);
+            if response.contains_pointer() {
+                // 指着它就不走，挪开再重新数。
+                self.notice_seen = Some((text.clone(), now));
+            } else if left <= 0.0 {
+                close = true;
+            } else {
+                ui.ctx()
+                    .request_repaint_after(Duration::from_secs_f64(left.max(0.05)));
+            }
+        }
+        if copy {
+            ui.ctx().copy_text(text);
+        }
+        if close {
+            self.error = None;
+            self.notice = None;
+            self.notice_seen = None;
+        }
+        if show_log {
+            self.open_log();
+        }
+        if recover {
+            self.play.recovery_open = true;
         }
     }
 }
@@ -824,21 +963,18 @@ pub(crate) struct App {
     // ---- 数据和选择 ----
     /// 数据目录。
     pub(crate) root: Root,
-    /// 左侧的版本列表（原版、加载器和整合包）。
+    /// 界面的上下文：后台线程做完事用它叫醒界面。
+    pub(crate) ctx: egui::Context,
+    /// 版本列表（原版、加载器和整合包），最近玩过的在前。
     pub(crate) rows: Vec<Row>,
-    /// 当前选中的版本行。
+    /// 当前选中的版本行；会记进 `ui.json`，下次打开还是它。
     pub(crate) selected: Option<String>,
     /// 全部账户和正在用的那个，存在数据目录的 `accounts.json`。
     pub(crate) accounts: nailong_core::accounts::Accounts,
-    /// 玩家名、全局启动参数和外观，存在数据目录的 `ui.json`。
+    /// 全局启动参数、外观、窗口大小这些，存在数据目录的 `ui.json`。
     pub(crate) prefs: UiPrefs,
     // ---- 导航：哪个页面在前面 ----
-    pub(crate) show_install: bool,
-    pub(crate) show_manage: bool,
-    pub(crate) show_mods: bool,
-    pub(crate) show_saves: bool,
-    /// 截图页。
-    pub(crate) show_gallery: bool,
+    pub(crate) page: Page,
     /// 截图页的状态和全部截图（启动台那一排也用它）。
     pub(crate) gallery: crate::pages::gallery::GalleryState,
     /// 等待确认删除的版本。
@@ -847,15 +983,18 @@ pub(crate) struct App {
     pub(crate) renaming: Option<(String, String)>,
     /// 移不到回收站的版本：问玩家要不要直接删。
     pub(crate) delete_failed: Option<String>,
+    /// 版本页的搜索框，和「下一帧把焦点给它」。
+    pub(crate) version_query: String,
+    pub(crate) version_search_focus: bool,
     /// 有任务时是否整页显示进度。离开（点侧栏）后任务在后台继续，点侧栏的进度卡回来。
     pub(crate) progress_open: bool,
-    /// 上一帧的任务，用来发现「刚开始了一个任务」。
+    /// 上一帧的任务，用来发现「刚开始了一个任务」和「任务刚做完」。
     pub(crate) progress_seen: Option<Task>,
     /// 设置里的「清理不用的文件」。
     pub(crate) cleanup: crate::dialogs::settings::CleanupState,
-    /// 当前页面的编号，变了就放一次切页动效。
+    /// 当前视图的编号，变了就放一次切页动效。
     pub(crate) page_key: u8,
-    /// 进入当前页面的时间。
+    /// 进入当前视图的时间。
     pub(crate) page_enter_at: f64,
     /// 窗口上一帧是否在前台：回到窗口时重新核对内容目录。
     pub(crate) window_focused: bool,
@@ -884,6 +1023,8 @@ pub(crate) struct App {
     pub(crate) version_cache: Option<(String, (usize, usize, usize, usize))>,
     /// 设置弹窗。
     pub(crate) show_settings: bool,
+    /// 设置弹窗现在看的是哪一栏。
+    pub(crate) settings_tab: crate::dialogs::settings::SettingsTab,
     /// 设置里的「查看计算」展开了没有。
     pub(crate) show_tuning: bool,
     /// 实测调参的确认弹窗。
@@ -892,13 +1033,17 @@ pub(crate) struct App {
     pub(crate) launch_edit: Option<LaunchEdit>,
     /// 日志窗口；None 时关着。
     pub(crate) log_view: Option<log::LogView>,
+    /// `Ctrl+K` 的命令面板；None 时关着。
+    pub(crate) palette: Option<crate::dialogs::palette::Palette>,
+    /// 「复制版本」的弹窗。
+    pub(crate) duplicate: Option<crate::dialogs::duplicate::Duplicate>,
     // ---- 开始游戏和这台电脑 ----
-    /// 开始游戏：每个版本的启动参数、算好的调参，以及最近一次启动。
+    /// 开始游戏：每个版本的启动参数、算好的调参、游玩记录，以及正在运行的游戏。
     pub(crate) play: PlayState,
     /// 这台电脑：找到的 Java、配置，以及「测一下这台电脑」的结论。
     pub(crate) env: Env,
     // ---- 后台任务和提示 ----
-    /// 正在跑的后台任务；同一时间只有一个。
+    /// 正在跑的后台任务；同一时间只有一个。游戏运行不算（见 `play.sessions`）。
     pub(crate) busy: Option<Task>,
     /// 任务的「取消」已经按过。
     pub(crate) cancel_requested: bool,
@@ -906,129 +1051,51 @@ pub(crate) struct App {
     pub(crate) activity: Option<Activity>,
     /// 后台任务的结果和进度从这里回来。
     pub(crate) rx: Option<mpsc::Receiver<Msg>>,
-    /// 页面底部的错误。
+    /// 页面底部的错误，留到玩家关掉。
     pub(crate) error: Option<String>,
-    /// 页面底部的提示。
+    /// 页面底部的提示，过几秒自己消失。
     pub(crate) notice: Option<String>,
+    /// 正在显示的提示和它第一次出现的时间。
+    pub(crate) notice_seen: Option<(String, f64)>,
     /// 启动器自己的记录，日志窗口的「启动器」标签显示它。
     pub(crate) log: Vec<String>,
 }
 
-pub(crate) struct UiPrefs {
-    pub(crate) username: String,
-    pub(crate) memory: Option<u32>,
-    pub(crate) gc: tuning::GcChoice,
-    pub(crate) jvm_args: String,
-    pub(crate) reduce_motion: bool,
-    pub(crate) theme: t::Preference,
-    /// 上次检查更新的时间（Unix 秒）。
-    pub(crate) update_checked: u64,
-    /// 玩家选了「跳过这个版本」的版本号。
-    pub(crate) update_skip: String,
-    /// 下载源：`official` 官方优先（连不上自动换镜像），`bmcl` 镜像优先。
-    pub(crate) source: String,
-    /// 截图时把地点和人物写进图片本身；关掉就只记在 `shots.json`。
-    pub(crate) embed_shots: bool,
-    /// 打开时发现新版本就自动装：Windows 后台下载、关掉时换上；Linux 后台启动系统的更新服务。
-    pub(crate) auto_update: bool,
-}
-
-/// 玩家名、内存和外观存在数据目录的 `ui.json`，随设置弹窗关闭落盘。
-pub(crate) fn load_ui_prefs(root: &Root) -> UiPrefs {
-    let value = std::fs::read(root.dir().join("ui.json"))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
-    let get = |key: &str| value.as_ref().and_then(|value| value.get(key));
-    let username = get("username")
-        .and_then(|value| value.as_str())
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or("Player")
-        .to_string();
-    // 0.33 及以前没有 "gc"，那时的 4096 是默认值而不是用户选的，迁移成自动。
-    let legacy = get("gc").is_none();
-    let memory = get("memory")
-        .and_then(|value| value.as_u64())
-        .filter(|&mb| !(legacy && mb == 4096))
-        .map(|mb| mb.clamp(1024, 16384) as u32);
-    let gc = get("gc")
-        .and_then(|value| value.as_str())
-        .map(tuning::GcChoice::from_key)
-        .unwrap_or_default();
-    let jvm_args = get("jvm_args")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let reduce_motion = get("reduce_motion")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    let theme = get("theme")
-        .and_then(|value| value.as_str())
-        .map(t::Preference::from_key)
-        .unwrap_or(t::Preference::System);
-    UiPrefs {
-        username,
-        memory,
-        gc,
-        jvm_args,
-        reduce_motion,
-        theme,
-        update_checked: get("update_checked")
-            .and_then(|value| value.as_u64())
-            .unwrap_or(0),
-        update_skip: get("update_skip")
-            .and_then(|value| value.as_str())
-            .unwrap_or_default()
-            .to_string(),
-        source: match get("source").and_then(|value| value.as_str()) {
-            Some("bmcl") => "bmcl".into(),
-            _ => "official".into(),
-        },
-        embed_shots: get("shots_embed")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(true),
-        auto_update: get("auto_update")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(true),
-    }
-}
-
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        t::sync(ui.ctx());
+        let ctx = ui.ctx().clone();
+        t::sync(&ctx);
         self.poll();
-        self.poll_accounts(ui.ctx());
-        self.tick_shots(ui.ctx());
-        self.poll_update(ui.ctx());
+        self.poll_sessions(&ctx);
+        self.poll_accounts(&ctx);
+        self.tick_shots(&ctx);
+        self.poll_update(&ctx);
+        self.poll_duplicate();
         motion::set_reduced(self.prefs.reduce_motion);
-        self.handle_shortcuts(ui.ctx());
-        self.drain_icons(ui.ctx());
+        self.handle_shortcuts(&ctx);
+        self.drain_icons(&ctx);
+        self.track_window(&ctx);
         if self.worlds.backup.enabled {
-            ui.ctx().request_repaint_after(Duration::from_secs(5));
+            ctx.request_repaint_after(Duration::from_secs(60));
             self.maybe_auto_backup();
         }
-        let dropped: Vec<PathBuf> = ui
-            .ctx()
+        let dropped: Vec<PathBuf> = ctx
             .input_mut(|i| std::mem::take(&mut i.raw.dropped_files))
             .into_iter()
             .map(|file| file.path().to_path_buf())
             .collect();
-        // 安装页有自己的整合包拖放区，那里只认整合包。
         if !dropped.is_empty() {
             self.content.drop_preview = None;
-            let plan = self.plan_drop(&dropped);
-            if self.show_install && plan.items.is_empty() && plan.packs.len() == 1 {
-                if self.busy.is_none() {
-                    self.start_modpack(plan.packs[0].clone());
-                }
-            } else {
-                self.import_dropped(plan);
-            }
+            self.handle_drop(&dropped);
         }
         // 回到窗口时，文件管理器里做的改动直接反映出来，不用点「重新扫描」。
-        let focused = ui.ctx().input(|i| i.focused);
+        let focused = ctx.input(|i| i.focused);
         if focused && !self.window_focused {
             self.rescan_if_changed();
             self.gallery.stale = true;
+            if self.page == Page::Worlds {
+                self.reload_saves();
+            }
         }
         self.window_focused = focused;
         if self.busy.is_some()
@@ -1040,12 +1107,21 @@ impl eframe::App for App {
             || self.content.browse_loading
             || !self.content.icons_pending.is_empty()
         {
-            ui.ctx().request_repaint_after(Duration::from_millis(100));
+            ctx.request_repaint_after(Duration::from_millis(100));
         }
-        let now = ui.ctx().input(|input| input.time);
-        let page = self.page_id();
-        if page != self.page_key {
-            self.page_key = page;
+        // 刚开始一个任务：安装、下载 Java 先整页显示进度；内容页装 Mod 留在原页，只在侧栏显示。
+        if self.busy != self.progress_seen {
+            match self.busy {
+                Some(task) if task.shows_progress() => self.progress_open = task != Task::Mods,
+                Some(_) => {}
+                None => self.notify_if_away(&ctx),
+            }
+            self.progress_seen = self.busy;
+        }
+        let now = ctx.input(|input| input.time);
+        let view = self.view_key();
+        if view != self.page_key {
+            self.page_key = view;
             // 别的页面可能改了内容或快照，回到启动台时重新读取。
             self.home.cache = None;
             self.home.verified = None;
@@ -1059,47 +1135,30 @@ impl eframe::App for App {
         };
         let eased = motion::ease_out_cubic(enter);
         if enter < 1.0 {
-            ui.ctx().request_repaint_after(Duration::from_millis(16));
+            ctx.request_repaint_after(Duration::from_millis(16));
         }
         #[cfg(debug_assertions)]
         if std::env::var_os("NAILONG_DEBUG_HOVER_CYCLE").is_some() {
-            ui.ctx().request_repaint_after(Duration::from_millis(33));
-        }
-        // 刚开始一个任务：安装、下载 Java 先整页显示进度；内容页装 Mod 留在原页，只在侧栏显示。
-        if self.busy != self.progress_seen {
-            if let Some(task) = self.busy
-                && task.shows_progress()
-            {
-                self.progress_open = task != Task::Mods;
-            }
-            self.progress_seen = self.busy;
+            ctx.request_repaint_after(Duration::from_millis(33));
         }
         self.sidebar(ui);
         egui::CentralPanel::no_frame()
             .frame(egui::Frame::new().fill(t::bg()))
             .show(ui, |ui| {
                 self.version_line(ui);
+                self.message_bar(ui);
                 ui.add_space((1.0 - eased) * 6.0);
-                if self.busy.is_some_and(Task::shows_progress)
-                    && (self.progress_open || self.page_locked())
-                {
+                if self.progress_showing() {
                     self.progress_view(ui);
-                } else if self.show_gallery {
-                    self.gallery_page(ui);
-                } else if self.show_mods {
-                    self.mods_view(ui);
-                } else if self.show_saves {
-                    self.saves_view(ui);
-                } else if self.show_manage {
-                    self.manage_view(ui);
-                } else if self.show_install {
-                    self.install_view(ui);
                 } else {
-                    self.main_view(ui);
-                }
-                // 版本、内容、存档页没有放全局提示的位置，统一放在底部。
-                if matches!(page, 2..=9) {
-                    self.message_bar(ui);
+                    match self.page {
+                        Page::Home => self.main_view(ui),
+                        Page::Versions => self.manage_view(ui),
+                        Page::Install => self.install_view(ui),
+                        Page::Content => self.mods_view(ui),
+                        Page::Worlds => self.saves_view(ui),
+                        Page::Shots => self.gallery_page(ui),
+                    }
                 }
                 self.drop_overlay(ui);
                 // 用一层底色做淡入：嵌套面板各有画笔，逐个调透明度并不可靠。
@@ -1109,28 +1168,58 @@ impl eframe::App for App {
                         .rect_filled(ui.max_rect(), 0.0, t::tint(t::bg(), veil));
                 }
             });
-        self.account_overlay(ui.ctx());
-        self.settings_overlay(ui.ctx());
-        self.bench_overlay(ui.ctx());
-        self.rollback_overlay(ui.ctx());
-        self.install_review_overlay(ui.ctx());
-        self.log_overlay(ui.ctx());
-        self.launch_overlay(ui.ctx());
-        self.update_overlay(ui.ctx());
-        self.export_overlay(ui.ctx());
-        self.data_dir_overlay(ui.ctx());
+        self.account_overlay(&ctx);
+        self.settings_overlay(&ctx);
+        self.bench_overlay(&ctx);
+        self.rollback_overlay(&ctx);
+        self.install_review_overlay(&ctx);
+        self.log_overlay(&ctx);
+        self.launch_overlay(&ctx);
+        self.update_overlay(&ctx);
+        self.export_overlay(&ctx);
+        self.data_dir_overlay(&ctx);
+        self.duplicate_overlay(&ctx);
+        self.recovery_overlay(&ctx);
         if self.gallery.shots.as_ref().is_some_and(|s| s.viewing()) {
-            let faces = self.player_faces(ui.ctx());
+            let faces = self.player_faces(&ctx);
             if let Some(shots) = &mut self.gallery.shots {
-                shots.viewer(ui.ctx(), &faces);
+                shots.viewer(&ctx, &faces);
             }
         }
-        motion::focus_ring(ui.ctx());
-        motion::pointer_on_clickables(ui.ctx());
+        self.palette_overlay(&ctx);
+        self.remember_selection();
+        motion::focus_ring(&ctx);
+        motion::pointer_on_clickables(&ctx);
     }
 
-    /// 关掉 Cairn 时，把下载好的新版本换上（Windows）。下次打开就是新版本。
+    /// 关掉 Cairn 时：记下窗口大小；把下载好的新版本换上（Windows），下次打开就是新版本。
+    /// 还在运行的游戏不受影响，照常玩。
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.save_ui_config();
         let _ = nailong_core::update::apply_staged(&self.root.cache(), false);
+    }
+}
+
+impl App {
+    /// 记下窗口大小和缩放（关掉时写进 `ui.json`）。最大化时不记大小，还原后还是原来那么大。
+    fn track_window(&mut self, ctx: &egui::Context) {
+        let zoom = ctx.zoom_factor();
+        let (size, maximized) = ctx.input(|input| {
+            let viewport = input.viewport();
+            (
+                viewport.inner_rect.map(|rect| rect.size()),
+                viewport.maximized.unwrap_or(false),
+            )
+        });
+        self.prefs.maximized = maximized;
+        self.prefs.zoom = zoom;
+        if !maximized
+            && let Some(size) = size
+            && size.x > 100.0
+            && size.y > 100.0
+        {
+            // 存没缩放时的大小：下次打开先按它建窗口，再套上缩放。
+            self.prefs.window = Some([(size.x * zoom).round(), (size.y * zoom).round()]);
+        }
     }
 }

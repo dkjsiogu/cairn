@@ -17,6 +17,7 @@ pub mod learned;
 pub mod manifest;
 pub mod mods;
 pub mod paths;
+pub mod played;
 pub mod progress;
 pub mod rollback;
 pub mod runtime;

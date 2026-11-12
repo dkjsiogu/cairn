@@ -644,6 +644,13 @@ impl App {
             self.content.notice = None;
             self.start_mods_scan();
         }
+        if self.content.pending_update_check
+            && self.content.scan_rx.is_none()
+            && !self.content.installed_loading
+        {
+            self.content.pending_update_check = false;
+            check_updates = true;
+        }
         if check_updates {
             self.start_mods_update_check();
         }

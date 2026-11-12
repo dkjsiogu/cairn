@@ -360,6 +360,7 @@ pub fn remove_permanently(root: &Root, name: &str) -> Result<()> {
 fn forget(root: &Root, name: &str) {
     let _ = std::fs::remove_dir_all(root.natives(name));
     let _ = crate::launchcfg::save(root, name, &crate::launchcfg::VersionLaunch::default());
+    crate::played::forget(root, name);
 }
 
 /// 改名：文件夹、JSON、jar、JSON 里的 `id` 和启动参数一起改。
@@ -400,7 +401,107 @@ pub fn rename(root: &Root, from: &str, to: &str) -> Result<String> {
         crate::launchcfg::save(root, &to, &settings)?;
         crate::launchcfg::save(root, from, &crate::launchcfg::VersionLaunch::default())?;
     }
+    crate::played::rename(root, from, &to);
     let _ = std::fs::remove_dir_all(root.natives(from));
+    Ok(to)
+}
+
+/// 复制一个版本：Mod、配置、资源包照搬，`worlds` 为真时连存档一起。日志、崩溃报告、
+/// 备份和恢复点不带过去。想试新 Mod 又怕弄坏时用。返回新版本的名字。
+pub fn duplicate(root: &Root, from: &str, to: &str, worlds: bool, sink: &Sink) -> Result<String> {
+    let to = check_name(to)?;
+    let from_dir = child_dir(root, from)?;
+    let to_dir = root.version_dir(&to);
+    if to_dir.exists() || exists_ignoring_case(&root.versions(), &to) {
+        return Err(Error::Plain(format!("已经有叫「{to}」的版本了")));
+    }
+    let mut version: Value = std::fs::read(root.version_json(from))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .ok_or_else(|| Error::Plain(format!("读不懂「{from}」的版本文件")))?;
+
+    // 先数一遍，进度才有分母。
+    let skip = |relative: &Path| {
+        let Some(std::path::Component::Normal(first)) = relative.components().next() else {
+            return false;
+        };
+        let first = first.to_string_lossy();
+        matches!(
+            first.as_ref(),
+            "backups" | "logs" | "crash-reports" | "debug" | ".cache" | "natives"
+        ) || (!worlds && first == "saves")
+            || (relative.parent() == Some(Path::new("")) && first.starts_with("hs_err_pid"))
+    };
+    let mut files: Vec<(PathBuf, u64)> = Vec::new();
+    let mut stack = vec![PathBuf::new()];
+    while let Some(relative) = stack.pop() {
+        let dir = from_dir.join(&relative);
+        for entry in std::fs::read_dir(&dir).map_err(|e| io(&dir, e))?.flatten() {
+            let inner = relative.join(entry.file_name());
+            if skip(&inner) {
+                continue;
+            }
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                stack.push(inner);
+            } else if kind.is_file() {
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                files.push((inner, size));
+            }
+        }
+    }
+    let total: u64 = files.iter().map(|(_, size)| size).sum();
+
+    // 复制到一半失败或取消时不留半个版本：先写进临时文件夹，全部好了再改名。
+    let part = root.versions().join(format!(".{to}.part"));
+    let _ = std::fs::remove_dir_all(&part);
+    let mut copy = || -> Result<()> {
+        let mut done = 0u64;
+        for (index, (relative, size)) in files.iter().enumerate() {
+            crate::cancel::check()?;
+            let source = from_dir.join(relative);
+            // JSON 和 jar 跟着版本名走。
+            let target_relative = match relative.to_str() {
+                Some(name) if name == format!("{from}.json") => PathBuf::from(format!("{to}.json")),
+                Some(name) if name == format!("{from}.jar") => PathBuf::from(format!("{to}.jar")),
+                _ => relative.clone(),
+            };
+            let target = part.join(&target_relative);
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| io(parent, e))?;
+            }
+            // 游戏本体是只读的大文件，和原来那份共用一份磁盘空间；链接不了再复制。
+            let is_jar = target_relative == Path::new(&format!("{to}.jar"));
+            if !(is_jar && std::fs::hard_link(&source, &target).is_ok()) {
+                std::fs::copy(&source, &target).map_err(|e| io(&source, e))?;
+            }
+            done += size;
+            sink(crate::progress::Progress {
+                stage: "复制文件".into(),
+                files_done: index as u64 + 1,
+                files_total: files.len() as u64,
+                bytes_done: done,
+                bytes_total: total,
+                current: Some(relative.to_string_lossy().replace('\\', "/")),
+                ..Default::default()
+            });
+        }
+        std::fs::create_dir_all(&part).map_err(|e| io(&part, e))?;
+        version["id"] = Value::String(to.clone());
+        let text = serde_json::to_vec_pretty(&version).map_err(|e| Error::Plain(e.to_string()))?;
+        write_atomic(&part.join(format!("{to}.json")), &text)?;
+        std::fs::rename(&part, &to_dir).map_err(|e| io(&part, e))
+    };
+    if let Err(e) = copy() {
+        let _ = std::fs::remove_dir_all(&part);
+        return Err(e);
+    }
+    let all = crate::launchcfg::load_all(root);
+    if let Some(settings) = all.get(from) {
+        let _ = crate::launchcfg::save(root, &to, settings);
+    }
     Ok(to)
 }
 
@@ -950,6 +1051,66 @@ mod tests {
         assert!(!root.version_dir("生存").join("mods").exists());
         assert_ne!(root.natives("生存"), root.natives("测试"));
         assert_eq!(names(&root), vec!["测试".to_string(), "生存".to_string()]);
+        let _ = std::fs::remove_dir_all(root.dir());
+    }
+
+    #[test]
+    fn duplicating_copies_content_but_not_backups_or_logs() {
+        let root = temp_root("duplicate");
+        fake_store(&root);
+        create(&root, "生存", "neoforge-21.1.209", neoforge_meta()).unwrap();
+        let dir = root.version_dir("生存");
+        write(&dir.join("mods/a.jar"), b"mod");
+        write(&dir.join("config/a.toml"), b"config");
+        write(&dir.join("saves/家/level.dat"), b"world");
+        write(&dir.join("backups/instance/objects/x"), b"old");
+        write(&dir.join("logs/latest.log"), b"log");
+        let settings = crate::launchcfg::VersionLaunch {
+            window: Some([1920, 1080]),
+            ..Default::default()
+        };
+        crate::launchcfg::save(&root, "生存", &settings).unwrap();
+        let sink = crate::progress::noop();
+
+        // 不带存档。
+        assert_eq!(
+            duplicate(&root, "生存", "试新 Mod", false, &sink).unwrap(),
+            "试新 Mod"
+        );
+        let copy = root.version_dir("试新 Mod");
+        assert_eq!(std::fs::read(copy.join("mods/a.jar")).unwrap(), b"mod");
+        assert_eq!(
+            std::fs::read(copy.join("config/a.toml")).unwrap(),
+            b"config"
+        );
+        assert!(!copy.join("saves").exists());
+        assert!(!copy.join("backups").exists());
+        assert!(!copy.join("logs").exists());
+        assert!(root.client_jar("试新 Mod").is_file());
+        assert!(!copy.join("生存.json").exists() && !copy.join("生存.jar").exists());
+        assert_eq!(manifest::load(&root, "试新 Mod").unwrap().id, "试新 Mod");
+        assert_eq!(meta(&root, "试新 Mod"), meta(&root, "生存"));
+        assert_eq!(
+            crate::launchcfg::load_all(&root).get("试新 Mod"),
+            Some(&settings)
+        );
+
+        // 带存档；原来的那份一点没动。
+        duplicate(&root, "生存", "带存档", true, &sink).unwrap();
+        assert_eq!(
+            std::fs::read(root.version_dir("带存档").join("saves/家/level.dat")).unwrap(),
+            b"world"
+        );
+        assert_eq!(
+            std::fs::read(dir.join("saves/家/level.dat")).unwrap(),
+            b"world"
+        );
+
+        // 重名、不合法的名字都拒绝，也不留半成品。
+        assert!(duplicate(&root, "生存", "带存档", false, &sink).is_err());
+        assert!(duplicate(&root, "生存", "a/b", false, &sink).is_err());
+        assert!(duplicate(&root, "没有这个", "新的", false, &sink).is_err());
+        assert_eq!(names(&root).len(), 3);
         let _ = std::fs::remove_dir_all(root.dir());
     }
 

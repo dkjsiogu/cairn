@@ -67,6 +67,10 @@ impl Arch {
 pub struct Features {
     pub demo: bool,
     pub custom_resolution: bool,
+    /// 启动后直接进一个世界（1.20 起版本文件里有 `--quickPlaySingleplayer`）。
+    pub quick_play_singleplayer: bool,
+    /// 启动后直接连一个服务器（1.20 起是 `--quickPlayMultiplayer`）。
+    pub quick_play_multiplayer: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -628,6 +632,8 @@ fn rule_matches(rule: &Rule, ctx: &Context) -> bool {
             let actual = match k.as_str() {
                 "is_demo_user" => ctx.features.demo,
                 "has_custom_resolution" => ctx.features.custom_resolution,
+                "is_quick_play_singleplayer" => ctx.features.quick_play_singleplayer,
+                "is_quick_play_multiplayer" => ctx.features.quick_play_multiplayer,
                 _ => false,
             };
             if actual != *v {

@@ -8,11 +8,13 @@
 crates/nailong-ui/src/
   main.rs        入口：模块清单和 main()，70 行
   prelude.rs     每个模块开头 use crate::prelude::*，常用的东西一次带齐
-  app.rs         App：全部状态（按功能分组）和每一帧的流程
+  app.rs         App：全部状态（按功能分组）和每一帧的流程；`Page` 决定哪一页在前
+  prefs.rs       ui.json 的读写（保留不认识的键）
   msg.rs         后台线程回到界面的唯一入口：Msg 和 poll()
   activity.rs    后台任务给人看的样子：步骤、刚下载的文件、来源、速度、剩余时间
   model.rs       数据类型：版本行、导航、任务种类、这台电脑（Env）……
-  play.rs        开始游戏：合并启动参数、选 Java、算 JVM 参数、缺 Java 时下载
+  play.rs        开始游戏：合并启动参数、选 Java、算 JVM 参数、缺 Java 时下载；
+                 每局游戏一个 Session（阶段、结束、日志），游玩记录，崩溃后的退路
   widgets.rs     通用组件：按钮、胶囊、输入框、搜索框、路径行、标签……
   fonts.rs       字体和窗口图标
   theme.rs  motion.rs  rings.rs    配色、动效、状态圆环
@@ -28,6 +30,7 @@ crates/nailong-ui/src/
     settings.rs  account.rs（账户列表、微软登录、头像）  add_account.rs（添加账户、外置登录）
     params.rs（启动参数）  log.rs  rollback.rs
     review.rs（安装确认）  update.rs（启动器更新）
+    palette.rs（Ctrl+K）  duplicate.rs（复制版本）  recovery.rs（退回改动）
 ```
 
 最大的文件 1300 行（版本页），其余多在 300–900 行；`main.rs` 从 12039 行变成 70 行。
@@ -69,3 +72,12 @@ crates/nailong-ui/src/
 - **下载页**：以前只有百分比和文件数；现在能看到做完了哪几步、各用了多久，正在做哪一步，刚下载的几个文件（越早的越淡），来自 Mojang 官方还是 BMCLAPI 镜像，速度和剩余时间。资源文件显示真名（`minecraft/sounds/...`），不是哈希。
 - **Java 自动下载**：用官方启动器同一份运行时清单，优先下 LZMA 压缩版（约三分之一大小），逐个校验 SHA-1，下到 `.part` 目录、全部通过后才改名生效。点「开始游戏」时没有合适的 Java 就直接下载，下完接着启动；设置、首次引导和启动参数里也能手动下。
 - **启动器更新**：启动时安静地查一次（最多 12 小时一次），有新版本时侧栏出现小提示；更新说明来自发版提交的说明；下载后按 SHA256SUMS 校验，Windows 一键重启到新版本，Linux 给出能复制的安装命令。
+
+## 6. 0.44 的调整
+
+- 哪一页在前是 `App::page`（`model::Page`），换页用 `App::go`；以前的五个 `show_*` 没有了。
+- 游戏运行不再是 `Task`：`play.sessions` 里一局一个 `Session`，安装、下载照常进行。要问「这个版本能不能改」用 `write_block(Some(id))`，「能不能启动」用 `launch_block(row)`。
+- 新弹窗：用 `widgets::dialog()` 画外框（遮罩、Esc、点外面关），并在 `App::modal_open()` 里加一行，快捷键和拖放提示就会让开。
+- 设置弹窗分四栏（`SettingsTab`），新设置项放进对应那一栏的函数，用 `settings_card` 和 `toggle_row`。
+- 底部提示（`App::error` / `App::notice`）所有页面共用：完成提示 6 秒消失，错误留到关掉。
+- 见 [29](29-play-and-find.md)。

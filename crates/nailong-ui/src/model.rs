@@ -132,15 +132,14 @@ impl RepairTarget {
     }
 }
 
-/// 正在跑的后台任务。同一时间只有一个。
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// 正在跑的后台任务。同一时间只有一个。游戏运行不算任务（见 `play::Session`）：
+/// 玩的时候照样能装别的版本、下 Mod。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Task {
-    /// 安装或修复版本、导入整合包。
+    /// 安装或修复版本、导入整合包、复制版本。
     Install,
     /// 下载 Mod、资源包、光影或更新它们。
     Mods,
-    /// 游戏在运行。
-    Launch,
     /// 测一下这台电脑：后台跑模拟负载，不开游戏窗口。
     Bench,
     /// 下载这个版本需要的 Java，下完接着启动。
@@ -222,11 +221,43 @@ pub(crate) struct DropPlan {
     pub(crate) target: Option<(Row, PathBuf)>,
     pub(crate) items: Vec<(PathBuf, mods::ContentKind)>,
     pub(crate) packs: Vec<PathBuf>,
+    /// 世界：带 `level.dat` 的文件夹，或者里面有世界的 zip。
+    pub(crate) worlds: Vec<PathBuf>,
     pub(crate) unknown: Vec<PathBuf>,
 }
 
-/// 侧边栏的四个一级入口。玩家只需要记住这四个地方。
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// 现在在前面的页面。同一时间只有一个；弹窗盖在它上面。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Page {
+    /// 启动台。没有版本时是首次引导。
+    Home,
+    /// 版本列表和详情。
+    Versions,
+    /// 安装新版本（「版本」的子流程）；装到一半失败时是「继续安装」。
+    Install,
+    /// 内容：发现和已安装。
+    Content,
+    /// 存档和快照。
+    Worlds,
+    /// 截图。
+    Shots,
+}
+
+impl Page {
+    /// 这个页面属于侧边栏的哪一项。
+    pub(crate) fn nav(self) -> Nav {
+        match self {
+            Self::Home => Nav::Home,
+            Self::Versions | Self::Install => Nav::Versions,
+            Self::Content => Nav::Content,
+            Self::Worlds => Nav::Saves,
+            Self::Shots => Nav::Shots,
+        }
+    }
+}
+
+/// 侧边栏的一级入口。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Nav {
     Home,
     Versions,

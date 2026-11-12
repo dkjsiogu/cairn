@@ -14,15 +14,12 @@ impl App {
         }
         self.selected = Some(row.id.clone());
         self.worlds.row = Some(row);
-        self.show_saves = true;
-        self.show_manage = false;
-        self.show_mods = false;
+        self.go(Page::Worlds);
         self.worlds.confirm = None;
         self.worlds.confirm_backup = None;
         self.worlds.notice = None;
         self.worlds.error = None;
-        self.worlds.busy = false;
-        self.worlds.rx = None;
+        // 正在做的快照不打断：结果回来时照常处理。
         self.worlds.selected = None;
         self.reload_saves();
     }
@@ -120,7 +117,9 @@ impl App {
     }
 
     pub(crate) fn maybe_auto_backup(&mut self) {
-        if !self.worlds.backup.enabled || self.worlds.busy || self.busy.is_some() {
+        // 游戏开着时世界文件正在写，等退出后那一份（每局结束都会留）。
+        if !self.worlds.backup.enabled || self.worlds.busy || self.busy.is_some() || self.any_game()
+        {
             return;
         }
         let now = std::time::SystemTime::now()
@@ -291,7 +290,7 @@ impl App {
                         });
                         ui.label(
                             egui::RichText::new(format!(
-                                "{} 个世界 · 快照分块去重，第二次只写改动块",
+                                "{} 个世界 · 每次快照只存改过的部分",
                                 self.worlds.list.len()
                             ))
                             .size(13.0)
@@ -390,11 +389,20 @@ impl App {
                         if worlds.is_empty() {
                             ui.add_space(16.0);
                             ui.label(egui::RichText::new("还没有存档").size(13.0).color(t::sub()));
+                        } else {
+                            ui.add_space(8.0);
+                            ui.label(
+                                egui::RichText::new("拖世界文件夹或 zip 进来导入")
+                                    .size(12.5)
+                                    .color(t::dim()),
+                            );
                         }
                     });
             });
 
         let mut open_shots: Option<String> = None;
+        let mut enter_world: Option<String> = None;
+        let can_enter = self.quick_play_ok(&row);
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
@@ -420,7 +428,7 @@ impl App {
                                 ui.add_space(6.0);
                                 ui.label(
                                     egui::RichText::new(
-                                        "进游戏创建一个世界，回来刷新就能做快照和回滚。",
+                                        "进游戏建一个世界，或者把世界文件夹、zip 拖进来。",
                                     )
                                     .size(13.0)
                                     .color(t::sub()),
@@ -488,6 +496,28 @@ impl App {
                         }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // 能直接进世界的版本（1.20 起）：一步开游戏进这个世界。
+                        if can_enter {
+                            let block = self.launch_block(&row);
+                            let response = ui.add_enabled_ui(block.is_none(), |ui| {
+                                motion::primary_sized_glyph(
+                                    ui,
+                                    "进入",
+                                    block.is_none(),
+                                    84.0,
+                                    32.0,
+                                    13.0,
+                                    motion::PrimaryGlyph::Play,
+                                )
+                            });
+                            match block {
+                                Some(reason) => {
+                                    response.response.on_disabled_hover_text(reason);
+                                }
+                                None if response.inner => enter_world = Some(world.clone()),
+                                None => {}
+                            }
+                        }
                         if motion::secondary_sized(
                             ui,
                             "立即快照",
@@ -589,6 +619,9 @@ impl App {
 
         if let Some(dir) = open_dir {
             open_folder(&dir);
+        }
+        if let Some(world) = enter_world {
+            self.launch_row(&row, Some(launch::QuickPlay::World(world)));
         }
         if reload {
             self.reload_saves();

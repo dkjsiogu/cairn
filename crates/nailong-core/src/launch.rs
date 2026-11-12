@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct LaunchOptions {
@@ -37,6 +39,17 @@ pub struct LaunchOptions {
     pub injector: Option<Injector>,
     /// 截图时记下时间地点人物；None 就不管截图。
     pub shots: Option<crate::shots::Tag>,
+    /// 启动后直接进一个世界或服务器；None 就停在主菜单。
+    pub quick_play: Option<QuickPlay>,
+}
+
+/// 启动后直接进哪里。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QuickPlay {
+    /// 存档的文件夹名。
+    World(String),
+    /// 服务器地址，可以带端口。
+    Server(String),
 }
 
 /// 外置登录要交给 authlib-injector 的东西。
@@ -71,6 +84,7 @@ impl Default for LaunchOptions {
             user_type: None,
             injector: None,
             shots: None,
+            quick_play: None,
         }
     }
 }
@@ -218,6 +232,18 @@ fn build(root: &Root, profile: &str, opts: &LaunchOptions, write: bool) -> Resul
     ctx.features.custom_resolution = true;
     ctx.features.demo = opts.demo;
     let resolved = manifest::resolve(root, profile, &ctx)?;
+    // 1.20 起版本文件里有 quickPlay 参数，按规则打开；更老的版本连服务器用 --server。
+    match &opts.quick_play {
+        Some(QuickPlay::World(_)) => {
+            ctx.features.quick_play_singleplayer =
+                has_feature(&resolved.arguments.game, "is_quick_play_singleplayer");
+        }
+        Some(QuickPlay::Server(_)) => {
+            ctx.features.quick_play_multiplayer =
+                has_feature(&resolved.arguments.game, "is_quick_play_multiplayer");
+        }
+        None => {}
+    }
     let required = required_java(&resolved);
     let java_rt = choose_java(root, required, opts.java.as_deref())?;
     if write {
@@ -350,8 +376,20 @@ fn build(root: &Root, profile: &str, opts: &LaunchOptions, write: bool) -> Resul
     vars.insert("resolution_height".to_string(), opts.height.to_string());
     vars.insert("classpath".to_string(), join_paths(&classpath));
     vars.insert("quickPlayPath".into(), String::new());
-    vars.insert("quickPlaySingleplayer".into(), String::new());
-    vars.insert("quickPlayMultiplayer".into(), String::new());
+    vars.insert(
+        "quickPlaySingleplayer".into(),
+        match &opts.quick_play {
+            Some(QuickPlay::World(name)) => name.clone(),
+            _ => String::new(),
+        },
+    );
+    vars.insert(
+        "quickPlayMultiplayer".into(),
+        match &opts.quick_play {
+            Some(QuickPlay::Server(address)) => address.clone(),
+            _ => String::new(),
+        },
+    );
     vars.insert("quickPlayRealms".into(), String::new());
 
     let mut jvm = expand_args(&resolved.arguments.jvm, &ctx);
@@ -364,6 +402,9 @@ fn build(root: &Root, profile: &str, opts: &LaunchOptions, write: bool) -> Resul
         &format!("-Djava.library.path={}", natives.display()),
     );
     push_default(&mut jvm, "-Dfile.encoding=", "-Dfile.encoding=UTF-8");
+    // Java 19 起标准输出另有编码设置，不写的话 Windows 上是系统编码，日志里的中文会乱。
+    push_default(&mut jvm, "-Dstdout.encoding=", "-Dstdout.encoding=UTF-8");
+    push_default(&mut jvm, "-Dstderr.encoding=", "-Dstderr.encoding=UTF-8");
     push_default(
         &mut jvm,
         "-Dlog4j2.formatMsgNoLookups=",
@@ -444,6 +485,13 @@ fn build(root: &Root, profile: &str, opts: &LaunchOptions, write: bool) -> Resul
     if opts.demo && !game.iter().any(|a| a == "--demo") {
         game.push("--demo".into());
     }
+    if let Some(QuickPlay::Server(address)) = &opts.quick_play
+        && !ctx.features.quick_play_multiplayer
+        && !game.iter().any(|a| a == "--server")
+    {
+        let (host, port) = split_address(address);
+        game.extend(["--server".into(), host, "--port".into(), port.to_string()]);
+    }
     game = game.into_iter().map(|a| substitute(&a, &vars)).collect();
 
     Ok(Prepared {
@@ -459,13 +507,152 @@ fn build(root: &Root, profile: &str, opts: &LaunchOptions, write: bool) -> Resul
     })
 }
 
+/// 启动游戏并等它退出，返回退出码。命令行用；界面用 [`start`]，能中途结束。
 pub fn launch(root: &Root, profile: &str, opts: &LaunchOptions) -> Result<i32> {
-    let prepared = prepare(root, profile, opts)?;
-    if opts.print_plan || opts.dry_run {
-        prepared.print();
-    }
     if opts.dry_run {
+        prepare(root, profile, opts)?.print();
         return Ok(0);
+    }
+    start(root, profile, opts)?.wait()
+}
+
+/// 一个正在运行的游戏。[`Game::wait`] 等它退出，[`Game::handle`] 给别的线程一个能结束它的把手。
+pub struct Game {
+    pub version_id: String,
+    pub game_dir: PathBuf,
+    pub log: PathBuf,
+    root: Root,
+    profile: String,
+    plan: tuning::Plan,
+    shared: Arc<Shared>,
+    pumps: Vec<std::thread::JoinHandle<()>>,
+}
+
+struct Shared {
+    child: Mutex<std::process::Child>,
+    pid: u32,
+    /// 游戏窗口出来了：从输出里认。
+    window: Arc<AtomicBool>,
+    stopping: AtomicBool,
+}
+
+/// 结束游戏用的把手，可以复制到别的线程。
+#[derive(Clone)]
+pub struct Handle(Arc<Shared>);
+
+impl Handle {
+    pub fn pid(&self) -> u32 {
+        self.0.pid
+    }
+
+    /// 游戏窗口出来了没有。
+    pub fn window_shown(&self) -> bool {
+        self.0.window.load(Ordering::Relaxed)
+    }
+
+    /// 已经按过结束。
+    pub fn stopping(&self) -> bool {
+        self.0.stopping.load(Ordering::Relaxed)
+    }
+
+    /// 结束游戏：先请它自己退出，3 秒后还在就强制结束。没存盘的进度会丢。
+    pub fn stop(&self) {
+        if self.0.stopping.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let alive = self
+            .0
+            .child
+            .lock()
+            .map(|mut child| matches!(child.try_wait(), Ok(None)))
+            .unwrap_or(false);
+        if !alive {
+            return;
+        }
+        #[cfg(unix)]
+        {
+            let _ = Command::new("kill")
+                .arg("-TERM")
+                .arg(self.0.pid.to_string())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            let shared = self.0.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(3));
+                if let Ok(mut child) = shared.child.lock()
+                    && matches!(child.try_wait(), Ok(None))
+                {
+                    let _ = child.kill();
+                }
+            });
+        }
+        #[cfg(not(unix))]
+        if let Ok(mut child) = self.0.child.lock() {
+            let _ = child.kill();
+        }
+    }
+}
+
+impl Game {
+    pub fn handle(&self) -> Handle {
+        Handle(self.shared.clone())
+    }
+
+    /// 等游戏退出，返回退出码；被结束或被信号杀掉时是 -1。退出后记下这局学到的内存。
+    pub fn wait(self) -> Result<i32> {
+        let status = loop {
+            {
+                let mut child = self
+                    .shared
+                    .child
+                    .lock()
+                    .map_err(|_| Error::Launch("等待游戏失败".into()))?;
+                if let Some(status) = child
+                    .try_wait()
+                    .map_err(|e| Error::Launch(format!("等待游戏失败: {e}")))?
+                {
+                    break status;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(150));
+        };
+        for pump in self.pumps {
+            let _ = pump.join();
+        }
+        let code = status.code().unwrap_or(-1);
+        if let Some(session) = crate::learned::record(
+            &self.root,
+            &self.profile,
+            &self.game_dir,
+            self.plan.heap_mb,
+            self.plan.collector,
+        ) {
+            match session.live_mb {
+                Some(live) => println!(
+                    "→ 这局存活数据最多 {}，下次「自动」内存按实测算",
+                    tuning::gb(live)
+                ),
+                None => println!("→ 这局没有发生老年代回收，存活数据未知"),
+            }
+        }
+        if code == 0 {
+            println!("✓ 游戏正常退出");
+        } else {
+            println!(
+                "✗ 游戏异常退出（exit {code}），日志: {}",
+                self.log.display()
+            );
+        }
+        Ok(code)
+    }
+}
+
+/// 启动游戏，不等它退出。
+pub fn start(root: &Root, profile: &str, opts: &LaunchOptions) -> Result<Game> {
+    let prepared = prepare(root, profile, opts)?;
+    if opts.print_plan {
+        prepared.print();
     }
 
     println!("→ 启动游戏…（日志会输出到终端）");
@@ -486,47 +673,81 @@ pub fn launch(root: &Root, profile: &str, opts: &LaunchOptions) -> Result<i32> {
     let mut child = cmd
         .spawn()
         .map_err(|e| Error::Launch(format!("无法启动 Java: {e}")))?;
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let log1 = log.clone();
-    let watch1 = watcher.clone();
-    let t1 = stdout.map(|s| std::thread::spawn(move || pump(s, log1, watch1)));
-    let log2 = log.clone();
-    let t2 = stderr.map(|s| std::thread::spawn(move || pump(s, log2, watcher)));
-    let status = child
-        .wait()
-        .map_err(|e| Error::Launch(format!("等待游戏失败: {e}")))?;
-    if let Some(t) = t1 {
-        let _ = t.join();
+    let window = Arc::new(AtomicBool::new(false));
+    let mut pumps = Vec::new();
+    if let Some(stdout) = child.stdout.take() {
+        let (log, watcher, window) = (log.clone(), watcher.clone(), window.clone());
+        pumps.push(std::thread::spawn(move || {
+            pump(stdout, log, watcher, window)
+        }));
     }
-    if let Some(t) = t2 {
-        let _ = t.join();
+    if let Some(stderr) = child.stderr.take() {
+        let window = window.clone();
+        pumps.push(std::thread::spawn(move || {
+            pump(stderr, log, watcher, window)
+        }));
     }
-    let code = status.code().unwrap_or(-1);
-    if let Some(session) = crate::learned::record(
-        root,
-        profile,
-        &prepared.game_dir,
-        prepared.plan.heap_mb,
-        prepared.plan.collector,
-    ) {
-        match session.live_mb {
-            Some(live) => println!(
-                "→ 这局存活数据最多 {}，下次「自动」内存按实测算",
-                tuning::gb(live)
-            ),
-            None => println!("→ 这局没有发生老年代回收，存活数据未知"),
-        }
+    Ok(Game {
+        version_id: prepared.version_id.clone(),
+        game_dir: prepared.game_dir.clone(),
+        log: log_path,
+        root: root.clone(),
+        profile: profile.to_string(),
+        plan: prepared.plan,
+        shared: Arc::new(Shared {
+            pid: child.id(),
+            child: Mutex::new(child),
+            window,
+            stopping: AtomicBool::new(false),
+        }),
+        pumps,
+    })
+}
+
+/// 这个版本能不能启动后直接进世界（1.20 起）。连服务器所有版本都行。
+pub fn can_quick_play_world(root: &Root, profile: &str) -> bool {
+    manifest::resolve(root, profile, &Context::current())
+        .map(|resolved| has_feature(&resolved.arguments.game, "is_quick_play_singleplayer"))
+        .unwrap_or(false)
+}
+
+/// 版本文件的参数里有没有按这个特性开关的条目。
+fn has_feature(args: &[Argument], feature: &str) -> bool {
+    args.iter().any(|arg| match arg {
+        Argument::Ruled { rules, .. } => rules.iter().any(|rule| {
+            rule.features
+                .as_ref()
+                .is_some_and(|features| features.contains_key(feature))
+        }),
+        Argument::Plain(_) => false,
+    })
+}
+
+/// `host:port` 拆开；没写端口就是 25565。`[::1]:25565` 这种 IPv6 写法也认。
+fn split_address(address: &str) -> (String, u16) {
+    let address = address.trim();
+    if let Some(rest) = address.strip_prefix('[')
+        && let Some((host, tail)) = rest.split_once(']')
+    {
+        let port = tail.strip_prefix(':').and_then(|p| p.parse().ok());
+        return (host.to_string(), port.unwrap_or(25565));
     }
-    if code == 0 {
-        println!("✓ 游戏正常退出");
-    } else {
-        println!(
-            "✗ 游戏异常退出（exit {code}），日志: {}",
-            log_path.display()
-        );
+    match address.rsplit_once(':') {
+        Some((host, port)) if !host.contains(':') => match port.parse() {
+            Ok(port) => (host.to_string(), port),
+            Err(_) => (address.to_string(), 25565),
+        },
+        _ => (address.to_string(), 25565),
     }
-    Ok(code)
+}
+
+/// 游戏窗口出来的时候会打印这些：窗口建好后报 LWJGL 版本，再往后是声音和贴图。
+fn window_line(line: &str) -> bool {
+    line.contains("Backend library:")
+        || line.contains("LWJGL Version")
+        || line.contains("OpenAL initialized")
+        || line.contains("Sound engine started")
+        || line.contains("textures/atlas")
 }
 
 /// 游戏输出（标准输出和错误）写到这里，界面的日志窗口读的也是它。
@@ -665,16 +886,28 @@ fn pump<R: std::io::Read + Send + 'static>(
     reader: R,
     log: Arc<Mutex<std::fs::File>>,
     watcher: Option<Arc<crate::shots::Watcher>>,
+    window: Arc<AtomicBool>,
 ) {
     let mut out = std::io::stdout();
-    for line in BufReader::new(reader).lines() {
-        let Ok(line) = line else {
-            break;
-        };
-        if let Some(watcher) = &watcher {
-            watcher.line(&line);
+    let mut reader = BufReader::new(reader);
+    let mut bytes = Vec::new();
+    loop {
+        bytes.clear();
+        // 按字节读：输出里有不是 UTF-8 的字（Windows 上的中文路径、玩家名）也照样往下读。
+        // 要是在这里停下，管道写满后游戏会卡住。
+        match reader.read_until(b'\n', &mut bytes) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
         }
-        let red = redact(&line);
+        let text = String::from_utf8_lossy(&bytes);
+        let line = text.trim_end_matches(['\n', '\r']);
+        if let Some(watcher) = &watcher {
+            watcher.line(line);
+        }
+        if !window.load(Ordering::Relaxed) && window_line(line) {
+            window.store(true, Ordering::Relaxed);
+        }
+        let red = redact(line);
         let _ = writeln!(out, "{red}");
         let _ = out.flush();
         if let Ok(mut f) = log.lock() {
@@ -988,6 +1221,84 @@ mod tests {
         let spaced = quote("/home/me/My Games/java");
         assert!(spaced.starts_with('\'') || spaced.starts_with('"'));
         assert!(spaced.contains("My Games"));
+    }
+
+    #[test]
+    fn quick_play_arguments_follow_the_version_file() {
+        // 1.20 起版本文件里的写法。
+        let modern: Vec<Argument> = serde_json::from_str(
+            r#"[
+                "--username", "${auth_player_name}",
+                {"rules":[{"action":"allow","features":{"is_quick_play_singleplayer":true}}],
+                 "value":["--quickPlaySingleplayer","${quickPlaySingleplayer}"]},
+                {"rules":[{"action":"allow","features":{"is_quick_play_multiplayer":true}}],
+                 "value":["--quickPlayMultiplayer","${quickPlayMultiplayer}"]}
+            ]"#,
+        )
+        .unwrap();
+        assert!(has_feature(&modern, "is_quick_play_singleplayer"));
+        assert!(has_feature(&modern, "is_quick_play_multiplayer"));
+        let mut ctx = Context::current();
+        // 没要求直接进世界时，这两个参数都不出现。
+        assert_eq!(expand_args(&modern, &ctx).len(), 2);
+        ctx.features.quick_play_singleplayer = true;
+        let args = expand_args(&modern, &ctx);
+        assert!(args.contains(&"--quickPlaySingleplayer".to_string()));
+        assert!(!args.contains(&"--quickPlayMultiplayer".to_string()));
+        // 老版本没有这些条目：进世界做不到，连服务器改用 --server。
+        let old: Vec<Argument> =
+            serde_json::from_str(r#"["--username", "${auth_player_name}"]"#).unwrap();
+        assert!(!has_feature(&old, "is_quick_play_singleplayer"));
+    }
+
+    #[test]
+    fn server_addresses_split_into_host_and_port() {
+        assert_eq!(
+            split_address("mc.example.com"),
+            ("mc.example.com".into(), 25565)
+        );
+        assert_eq!(
+            split_address(" mc.example.com:25570 "),
+            ("mc.example.com".into(), 25570)
+        );
+        assert_eq!(
+            split_address("192.168.1.8:1234"),
+            ("192.168.1.8".into(), 1234)
+        );
+        assert_eq!(split_address("[::1]:25566"), ("::1".into(), 25566));
+        assert_eq!(
+            split_address("[2001:db8::1]"),
+            ("2001:db8::1".into(), 25565)
+        );
+        // 写错的端口不当端口用。
+        assert_eq!(split_address("host:abc"), ("host:abc".into(), 25565));
+    }
+
+    #[test]
+    fn output_that_is_not_utf8_keeps_flowing() {
+        let dir = std::env::temp_dir().join(format!(
+            "cairn-pump-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("out.log");
+        let log = Arc::new(Mutex::new(std::fs::File::create(&path).unwrap()));
+        let window = Arc::new(AtomicBool::new(false));
+        // GBK 的「中文」夹在两行正常输出中间，最后一行没有换行符。
+        let mut bytes = b"[main/INFO]: Setting user: Steve\r\n".to_vec();
+        bytes.extend([0xD6, 0xD0, 0xCE, 0xC4, b'\n']);
+        bytes.extend(b"[Render thread/INFO]: Backend library: LWJGL version 3.3.3\n");
+        bytes.extend(b"--accessToken secret-token-value last line");
+        pump(std::io::Cursor::new(bytes), log, None, window.clone());
+        let text = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 4, "{text}");
+        assert_eq!(lines[0], "[main/INFO]: Setting user: Steve");
+        assert!(lines[2].contains("Backend library"));
+        assert!(lines[3].ends_with("last line"));
+        assert!(window.load(Ordering::Relaxed));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

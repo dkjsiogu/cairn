@@ -340,12 +340,15 @@ impl App {
         }
         let ring_data = self.ring_data(&row, &cache);
         let running = ring_data.state == rings::State::Running;
-        let title = row
-            .label
-            .split(" · ")
-            .next()
-            .unwrap_or(&row.label)
-            .to_string();
+        let session_status = self.session(&row.id).map(|session| session.status());
+        let stat = self.play.stats.get(&row.id).cloned().unwrap_or_default();
+        let (title, named) = home_title(&row);
+        // 能不能启动后直接进最近的世界（1.20 起的版本）。
+        let quick_world = cache
+            .latest_world
+            .as_ref()
+            .filter(|_| !running && self.quick_play_ok(&row))
+            .map(|world| world.name.clone());
         let compact_h = ui.ctx().content_rect().height() < 680.0;
         let hero_h: f32 = if compact_h { 230.0 } else { 290.0 };
         let width = (ui.available_width() - 72.0).clamp(320.0, 1000.0);
@@ -357,6 +360,9 @@ impl App {
         let mut open_saves = false;
         let mut open_content = false;
         let mut open_manage = false;
+        let mut stop: Option<bool> = None;
+        let mut enter_world = false;
+        let stop_confirm = self.play.stop_confirm.as_deref() == Some(row.id.as_str());
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -387,22 +393,34 @@ impl App {
                                 .layout(egui::Layout::top_down(egui::Align::LEFT)),
                         );
                         child.add_space((hero_h - 206.0).max(0.0) / 2.0);
-                        let status = match ring_data.state {
-                            rings::State::Running => "游戏运行中".to_string(),
-                            rings::State::Missing => {
+                        let status = match (&session_status, ring_data.state) {
+                            (Some(status), _) => status.clone(),
+                            (None, rings::State::Missing) => {
                                 format!("缺 {} 个文件", row.health.missing)
                             }
-                            _ => "安装完整".to_string(),
+                            // 玩过的写玩了多久；没玩过的只说装好了。
+                            (None, _) if stat.seconds >= 60 => {
+                                format!("玩了 {}", nailong_core::played::human(stat.seconds))
+                            }
+                            (None, _) => "安装完整".to_string(),
                         };
                         let loader = match &row.loader_version {
                             Some(version) => format!("{} {version}", row.loader.name()),
                             None => row.loader.name().to_string(),
                         };
+                        // 起过名字的版本：大字是名字，这一行补上游戏版本。
+                        let kind = if named {
+                            format!("{} · {loader}", row.mc)
+                        } else {
+                            loader
+                        };
                         child.label(
-                            egui::RichText::new(format!("{loader} · {status}"))
+                            egui::RichText::new(format!("{kind} · {status}"))
                                 .size(13.0)
                                 .color(if row.health.missing > 0 {
                                     t::warn()
+                                } else if running {
+                                    t::accent()
                                 } else {
                                     t::sub()
                                 }),
@@ -417,40 +435,59 @@ impl App {
                         );
                         child
                             .add(if wrap { label.wrap() } else { label.extend() })
-                            .on_hover_text(&row.label);
+                            .on_hover_text(format!("{}\n{}", row.id, row_kind(&row)));
                         child.add_space(14.0);
                         child.horizontal(|ui| {
-                            let (label, glyph) = match ring_data.state {
-                                rings::State::Missing => {
-                                    ("补全文件", motion::PrimaryGlyph::Download)
+                            if running {
+                                // 游戏开着：主按钮看这一局的输出，旁边能结束它。
+                                if motion::secondary_sized(ui, "查看日志", true, 104.0, 40.0, 14.0)
+                                    .on_hover_text("这一局的游戏输出，跟着游戏刷新")
+                                    .clicked()
+                                {
+                                    primary = true;
                                 }
-                                rings::State::Running => {
-                                    ("查看运行状态", motion::PrimaryGlyph::None)
-                                }
-                                _ => ("开始游戏", motion::PrimaryGlyph::Play),
-                            };
-                            if motion::primary_sized_glyph(
-                                ui, label, true, 150.0, 40.0, 14.0, glyph,
-                            ) {
-                                primary = true;
-                            }
-                            ui.spacing_mut().interact_size.y = 40.0;
-                            let mut picked = row.id.clone();
-                            egui::ComboBox::from_id_salt("home_version_switch")
-                                .selected_text(egui::RichText::new("切换版本").size(14.0))
-                                .width(96.0)
-                                .height(240.0)
-                                .show_ui(ui, |ui| {
-                                    for item in &rows {
-                                        ui.selectable_value(
-                                            &mut picked,
-                                            item.id.clone(),
-                                            &item.label,
-                                        );
+                                if stop_confirm {
+                                    if danger_button(ui, "确认结束", 96.0, 40.0)
+                                        .on_hover_text("没存盘的进度会丢")
+                                        .clicked()
+                                    {
+                                        stop = Some(true);
                                     }
-                                });
-                            if picked != row.id {
-                                chosen = Some(picked);
+                                    if motion::secondary_sized(ui, "取消", true, 64.0, 40.0, 14.0)
+                                        .clicked()
+                                    {
+                                        stop = Some(false);
+                                    }
+                                } else if motion::secondary_sized(
+                                    ui,
+                                    "结束游戏",
+                                    true,
+                                    96.0,
+                                    40.0,
+                                    14.0,
+                                )
+                                .on_hover_text("游戏卡住时用。正常退出请在游戏里退")
+                                .clicked()
+                                {
+                                    self.play.stop_confirm = Some(row.id.clone());
+                                }
+                            } else {
+                                let (label, glyph) = match ring_data.state {
+                                    rings::State::Missing => {
+                                        ("补全文件", motion::PrimaryGlyph::Download)
+                                    }
+                                    _ => ("开始游戏", motion::PrimaryGlyph::Play),
+                                };
+                                if motion::primary_sized_glyph(
+                                    ui, label, true, 150.0, 40.0, 14.0, glyph,
+                                ) {
+                                    primary = true;
+                                }
+                            }
+                            if rows.len() > 1
+                                && let Some(id) = self.version_switcher(ui, &rows, &row)
+                            {
+                                chosen = Some(id);
                             }
                         });
                         child.add_space(12.0);
@@ -463,30 +500,6 @@ impl App {
                         }
 
                         ui.add_space(if compact_h { 10.0 } else { 18.0 });
-                        if let Some(note) = &self.notice {
-                            ui.label(egui::RichText::new(note).size(13.0).color(t::ok()));
-                            ui.add_space(6.0);
-                        }
-                        if let Some(err) = self.error.clone() {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(egui::RichText::new(err).size(13.0).color(t::danger()));
-                                if ui
-                                    .add(
-                                        egui::Button::new(
-                                            egui::RichText::new("查看日志")
-                                                .size(13.0)
-                                                .color(t::sub()),
-                                        )
-                                        .frame(false),
-                                    )
-                                    .on_hover_text("直接打开这次的游戏输出（Ctrl+L）")
-                                    .clicked()
-                                {
-                                    self.open_log();
-                                }
-                            });
-                            ui.add_space(6.0);
-                        }
 
                         // 三栏摘要：细线分隔，整栏可点。
                         let top = ui.cursor().top();
@@ -525,7 +538,33 @@ impl App {
                                 cells.left_top() + egui::vec2(cell_w * index as f32, 0.0),
                                 egui::vec2(cell_w, cells.height()),
                             );
-                            if summary_cell(ui, rect, name, &detail, index > 0).clicked() {
+                            // 「最近世界」右边一个小按钮：启动后直接进这个世界。先占住它的位置，
+                            // 再画整栏，这样点按钮不会同时算成点了这一栏。
+                            let enter = (index == 0).then_some(quick_world.as_ref()).flatten().map(
+                                |world| {
+                                    let button = egui::Rect::from_center_size(
+                                        egui::pos2(rect.right() - 52.0, rect.center().y),
+                                        egui::vec2(72.0, 30.0),
+                                    );
+                                    (button, world)
+                                },
+                            );
+                            let cell = summary_cell(ui, rect, name, &detail, index > 0);
+                            let mut on_button = false;
+                            if let Some((button, world)) = enter {
+                                // 用子区域画，不动外面的排版位置。
+                                let mut child =
+                                    ui.new_child(egui::UiBuilder::new().max_rect(button));
+                                let response = motion::secondary_sized(
+                                    &mut child, "进入", true, 72.0, 30.0, 13.0,
+                                )
+                                .on_hover_text(format!("开始游戏，直接进「{world}」"));
+                                on_button = response.hovered();
+                                if response.clicked() {
+                                    enter_world = true;
+                                }
+                            }
+                            if cell.clicked() && !on_button {
                                 match index {
                                     1 => open_content = true,
                                     _ => open_saves = true,
@@ -541,6 +580,15 @@ impl App {
 
         if let Some(id) = chosen {
             self.selected = Some(id);
+            self.play.stop_confirm = None;
+        }
+        match stop {
+            Some(true) => self.stop_game(&row.id),
+            Some(false) => self.play.stop_confirm = None,
+            None => {}
+        }
+        if enter_world && let Some(world) = quick_world {
+            self.launch_row(&row, Some(launch::QuickPlay::World(world)));
         }
         match clicked_layer {
             Some(rings::Layer::Core) => primary = true,
@@ -551,7 +599,7 @@ impl App {
         }
         if primary {
             if running {
-                self.show_settings = true;
+                self.open_game_log(&row.id);
             } else if row.health.missing > 0 {
                 self.start_repair(row.clone());
             } else {
@@ -567,6 +615,90 @@ impl App {
         if open_content {
             self.open_content(true);
         }
+    }
+
+    /// 这个版本能不能启动后直接进世界。要读版本文件，结果按版本记着，列表刷新时清掉。
+    pub(crate) fn quick_play_ok(&mut self, row: &Row) -> bool {
+        if let Some(known) = self.home.quick_play.get(&row.id) {
+            return *known;
+        }
+        let ok = launch::can_quick_play_world(&self.root, &row.profile);
+        self.home.quick_play.insert(row.id.clone(), ok);
+        ok
+    }
+
+    /// 启动台的「切换版本」：列出版本名（最近玩过的在前），带游戏版本和加载器；
+    /// 正在运行的前面有圆点。版本多的时候能搜。返回选中的版本。
+    pub(crate) fn version_switcher(
+        &mut self,
+        ui: &mut egui::Ui,
+        rows: &[Row],
+        current: &Row,
+    ) -> Option<String> {
+        let mut chosen = None;
+        let running: HashSet<&str> = self
+            .play
+            .sessions
+            .iter()
+            .map(|session| session.row_id.as_str())
+            .collect();
+        ui.spacing_mut().interact_size.y = 40.0;
+        let searchable = rows.len() > 8;
+        let query = self.home.switch_query.trim().to_lowercase();
+        let response = egui::ComboBox::from_id_salt("home_version_switch")
+            .selected_text(egui::RichText::new("切换版本").size(14.0))
+            .width(96.0)
+            .height(320.0)
+            .show_ui(ui, |ui| {
+                ui.set_min_width(280.0);
+                if searchable {
+                    let field = search_field(ui, &mut self.home.switch_query, "搜索版本", 252.0);
+                    if !field.has_focus() && self.home.switch_query.is_empty() {
+                        field.request_focus();
+                    }
+                    ui.add_space(4.0);
+                }
+                let mut shown = 0;
+                for item in rows {
+                    let kind = row_kind(item);
+                    if !query.is_empty()
+                        && !item.id.to_lowercase().contains(&query)
+                        && !kind.to_lowercase().contains(&query)
+                    {
+                        continue;
+                    }
+                    shown += 1;
+                    if switch_row(
+                        ui,
+                        &item.id,
+                        &kind,
+                        item.id == current.id,
+                        running.contains(item.id.as_str()),
+                    )
+                    .clicked()
+                    {
+                        chosen = Some(item.id.clone());
+                    }
+                }
+                if shown == 0 {
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new("没有符合的版本")
+                            .size(13.0)
+                            .color(t::dim()),
+                    );
+                    ui.add_space(6.0);
+                }
+            });
+        if response.inner.is_none() {
+            // 列表关着：下次打开从头搜。
+            self.home.switch_query.clear();
+        }
+        if chosen.is_some() {
+            self.home.switch_query.clear();
+            ui.close();
+        }
+        chosen.filter(|id| id != &current.id)
     }
 
     pub(crate) fn home_cache_for(&mut self, row: &Row, game_dir: &std::path::Path) -> HomeCache {
@@ -695,7 +827,8 @@ impl App {
             .map(|update| update.entry.name.clone())
             .collect();
         let missing = row.health.missing;
-        let state = if matches!(self.busy, Some(Task::Launch)) {
+        let session = self.session(&row.id);
+        let state = if session.is_some() {
             rings::State::Running
         } else if missing > 0 {
             rings::State::Missing
@@ -712,12 +845,43 @@ impl App {
             update_names,
             snapshots: cache.snapshots,
             latest_snapshot: cache.latest_snapshot.map(human_age),
-            running_minutes: self
-                .play
-                .started
-                .map(|started| started.elapsed().as_secs() / 60)
+            running_minutes: session
+                .map(|session| session.started.elapsed().as_secs() / 60)
                 .unwrap_or(0),
         }
+    }
+}
+
+/// 启动台的大标题，以及它是不是玩家起的名字。默认名字（`1.21.1`、`1.21.1 NeoForge`）和别的
+/// 启动器那种 `neoforge-21.1.209` 只显示游戏版本，加载器写在上面一行；整合包显示整合包的名字；
+/// 玩家自己起的名字原样显示。
+pub(crate) fn home_title(row: &Row) -> (String, bool) {
+    if let Some(pack) = &row.pack {
+        return (pack.clone(), true);
+    }
+    let id = row.id.as_str();
+    let lower = id.to_lowercase();
+    let loader_word = match row.loader {
+        LoaderKind::Vanilla => "",
+        LoaderKind::Fabric => "fabric",
+        LoaderKind::NeoForge => "neoforge",
+        LoaderKind::Forge => "forge",
+    };
+    // `fabric-loader-0.16.10-1.21.1`、`1.21.1-forge-52.1.0`：去掉加载器的名字只剩版本号。
+    let only_versions = |text: &str| {
+        text.chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '_' | ' '))
+    };
+    let default_like = id == row.mc
+        || id == versions::default_name(&row.mc, row.loader.core())
+        || (!loader_word.is_empty()
+            && lower.contains(loader_word)
+            && only_versions(&lower.replace(loader_word, "").replace("loader", "")));
+    if default_like || row.mc.is_empty() {
+        let title = if row.mc.is_empty() { id } else { &row.mc };
+        (title.to_string(), false)
+    } else {
+        (id.to_string(), true)
     }
 }
 
@@ -749,6 +913,49 @@ pub(crate) fn fit_title(ui: &egui::Ui, text: &str, max_width: f32) -> (f32, bool
                 .clamp(24.0, MIN),
             true,
         )
+    }
+}
+
+/// 「切换版本」里的一行：版本名一行，游戏版本和加载器一行；正在运行的前面一个圆点。
+fn switch_row(
+    ui: &mut egui::Ui,
+    name: &str,
+    kind: &str,
+    active: bool,
+    running: bool,
+) -> egui::Response {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), egui::Sense::click());
+    list_row_fill(ui, rect, active, &response);
+    let left = rect.left() + 12.0;
+    let text_w = rect.width() - 24.0 - if running { 14.0 } else { 0.0 };
+    let name_font = egui::FontId::proportional(14.0);
+    let kind_font = egui::FontId::proportional(12.0);
+    ui.painter().text(
+        egui::pos2(left, rect.top() + 14.0),
+        egui::Align2::LEFT_CENTER,
+        elide_middle(ui, name, &name_font, text_w),
+        name_font,
+        t::ink(),
+    );
+    ui.painter().text(
+        egui::pos2(left, rect.top() + 31.0),
+        egui::Align2::LEFT_CENTER,
+        elide_middle(ui, kind, &kind_font, text_w),
+        kind_font,
+        t::dim(),
+    );
+    if running {
+        ui.painter().circle_filled(
+            egui::pos2(rect.right() - 14.0, rect.center().y),
+            4.0,
+            t::accent(),
+        );
+    }
+    if running {
+        response.on_hover_text("正在运行")
+    } else {
+        response
     }
 }
 
@@ -801,4 +1008,8 @@ pub(crate) struct HomeState {
     pub(crate) scan: Option<(String, mpsc::Receiver<Vec<installed::InstalledEntry>>)>,
     /// 这一轮缓存里已经核对过的版本行。
     pub(crate) verified: Option<String>,
+    /// 每个版本能不能启动后直接进世界（读版本文件得出，列表刷新时清掉）。
+    pub(crate) quick_play: HashMap<String, bool>,
+    /// 「切换版本」里的搜索词。
+    pub(crate) switch_query: String,
 }

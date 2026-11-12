@@ -1,7 +1,7 @@
-# 14 · 原型实现状态（0.1 → 0.43.0）
+# 14 · 原型实现状态（0.1 → 0.44.0）
 
 > 日期：2026-11-12
-> 对应发布：GitHub Release `v0.43.0` 的 `cairn.exe`、`cairn_0.43.0_amd64.deb`，以及 apt 源 `https://dkjsiogu.github.io/cairn/apt`（0.37 起改名 Cairn）
+> 对应发布：GitHub Release `v0.44.0` 的 `cairn.exe`、`cairn_0.44.0_amd64.deb`，以及 apt 源 `https://dkjsiogu.github.io/cairn/apt`（0.37 起改名 Cairn）
 > 目的：把「设计稿」和「已经跑起来的代码」分开记账，避免把计划当成已完成。
 
 ## 1. 一句话结论
@@ -49,6 +49,8 @@
 0.34.1 修复 26.x 无法安装和启动：版本文件 `default-user-jvm` 的首条没有 `rules`，解析失败；`${natives_directory}` 误指向 `java` 子目录，`java.library.path` 变成 `.../java/java`。实测 26.1、26.3 原版可安装并进入世界。调参在版本文件带官方默认时跟随官方（26.x 为 ZGC + 紧凑对象头 + 预先占用 + 字符串去重，初始堆 2 GB）。Java 选择改为够用里最低的大版本，同版本优先 64 位 OpenJDK。
 
 0.42.5 手感（见 [21](21-handling.md) §4）。文字默认不可选中（`selectable_labels = false`），整行可点的列表、卡片点在字上也算；`motion::pointer_on_clickables` 让所有能点的地方悬停变手形，egui 按钮也设了 `interact_cursor`；`list_row_fill` 看整个 Response，悬停渐变、按下加深、右键菜单开着时保持高亮；次按钮加按下颜色。版本列表右键菜单（启动、打开文件夹、改名、移到回收站）和 ↑ ↓ 切换；日志行可拖选，错误提示加「复制」；右下角单独一条细边写版本号，点它打开设置。
+
+0.44.0 玩的时候和找东西的时候（见 [29](29-play-and-find.md)）。core：`launch::start` 返回 `Game`（`wait()` 等退出并记下学到的内存，`handle()` 给别的线程结束它：Unix 先 `SIGTERM`、3 秒后强制，Windows 直接结束；从输出认出窗口出来了），`launch::launch` 包一层；`QuickPlay::{World, Server}` 按版本文件里的 `is_quick_play_*` 特性打开 `--quickPlaySingleplayer` / `--quickPlayMultiplayer`，没有这些条目的老版本连服务器用 `--server --port`；游戏输出按字节读（非 UTF-8 不再让读取线程停下、管道写满卡住游戏），加 `-Dstdout.encoding=UTF-8`；新模块 `played`（`played.json`：游玩秒数、次数、上次和上次正常玩完的时间，改名、删除跟着走）；`versions::duplicate`（不带日志、备份、恢复点，存档可选，游戏 jar 硬链接，`.part` 完成后改名，可取消）；`saves::{is_world, import_world}`（文件夹或 zip，找最浅的 `level.dat`，重名加 `(2)`）。界面：游戏不再是 `Task`，`play::Session` 一局一个（阶段、结束、日志），侧栏每局一行，启动台「查看日志 / 结束游戏」，可同时开不同版本；`Page` 枚举代替五个 `show_*`；`prefs.rs` 读写 `ui.json` 保留不认识的键，新增上次选的版本、窗口大小和最大化、缩放、游戏启动后收起；`modal_open()`、`widgets::dialog()`；`Ctrl+K` 命令面板（`dialogs/palette.rs`）；复制版本（`dialogs/duplicate.rs`）；崩溃退路（`dialogs/recovery.rs`，`play::Recovery::find` 取上次正常游戏之后最早的恢复点）；拖入世界；版本页搜索、「3 天前玩过」、数字可点；启动台「进入」、切换版本列表、起过名字的版本大字显示名字；存档页「进入」；设置分四栏、界面缩放；底部提示所有页面共用、完成提示 6 秒消失；窗口不在前台时任务做完或游戏退出请求注意。CLI：`launch --world / --server`。实测：Xvfb 里真实启动原版 1.21.1 到主菜单，状态从「正在启动」变「运行中」，结束游戏后进程退出、记下 66 秒。
 
 0.43.0 导出整合包和别的启动器的 .minecraft（见 [28](28-export.md)、[27](27-version-folders.md) §10）。`core::export` 把一个版本导出成最小的 `.mrpack`：`mods/`、`resourcepacks/`、`shaderpacks/` 第一层的 jar/zip 按 SHA-1 问 Modrinth、按指纹（MurmurHash2）问 CurseForge，找得到的只记地址和哈希，找不到的连同 config、kubejs、选中的世界打包进 `overrides/`；日志、缓存、备份、启动器文件、版本文件不导出，世界和小地图数据默认不勾。真实整合包实测：Mod 901 MB，导出 307 MB；装回空目录后 150 个 Mod 的 SHA-1 一致，70 秒进主菜单。设置里可以把数据目录换成 PCL、HMCL、官方启动器的 `.minecraft`（`paths::choose_root`，账户和设置带过去、不覆盖，换好后重新打开）。`versions::game_dir` 认出别的启动器版本的游戏目录（`cairn` 记录 → `hmclversion.cfg` → 版本文件夹里有没有东西 → `.minecraft`），`manifest::load` 合并 HMCL 的 `patches`。大文件下载并发降到 12，整合包文件经内容库下载，重试时跳过已下好的。
 
@@ -169,7 +171,7 @@
 | 大文件分段下载 | `core::http` | 完成 | client jar 4 段并行、段续传、源回退 |
 | 重复安装快速路径 | `core::install::forge` / `neoforge` | 完成 | health 通过则 0 下载、0 processor |
 | Windows 交叉编译 | `x86_64-pc-windows-gnu` | 通过 | 无 MinGW DLL 依赖，仅系统 DLL |
-| 发布包 | GitHub Release `v0.43.0` | 完成（CI 构建） | 单 exe 约 8 MB / deb 约 4 MB |
+| 发布包 | GitHub Release `v0.44.0` | 完成（CI 构建） | 单 exe 约 8 MB / deb 约 4 MB |
 | apt 源 | GitHub Pages `dkjsiogu.github.io/cairn/apt` | 完成（CI 部署） | 最近 3 个版本；ed25519 签名；系统每天自动更新 |
 
 ### 2.1 实测记录

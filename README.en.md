@@ -8,7 +8,7 @@ A small, native Minecraft: Java Edition launcher written in Rust. Renamed to **C
 
 [简体中文](README.md) | **English**
 
-> Current version: **0.43.0** (preview)
+> Current version: **0.44.0** (preview)
 >
 > Goals: small binaries, few dependencies, visible install progress, and a repair path after interruption. See [implementation status](docs/design/14-implementation-status.md) for exact boundaries.
 
@@ -26,6 +26,15 @@ A cairn is the pile of stones hikers leave by a trail: it does not walk for you,
 It is not a universal launcher, and it is not 1.0 yet. What works and what does not is laid out below.
 
 ## Interface
+
+0.44: while you play, and when you look for things.
+
+- While a game runs, the sidebar shows each session's state, and a stuck game can be ended. A running game no longer holds the launcher: install other versions and download mods as usual, and run different versions side by side.
+- "Enter": start the game straight into your latest world, or any world from the Saves page (1.20+).
+- If the game crashes and content changed since the last good session, the bottom bar offers "Undo changes" to go back in one step.
+- `Ctrl+K` finds anything: versions, worlds, pages, settings and common actions.
+- Duplicate a version; drop a world folder or zip to import it; play time is tracked and versions are sorted by last played.
+- Settings are split into Game, Launcher, Storage and About; the interface can be zoomed; window size and the last selected version are remembered. See [29](docs/design/29-play-and-find.md).
 
 0.43: export modpacks; use another launcher's .minecraft directly.
 
@@ -212,7 +221,7 @@ Export: click "导出整合包" on a version to get a `.mrpack`. Files available
 | Platform | File | Size | Requirements |
 |---|---|---:|---|
 | Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | ~9 MB | Windows 10/11, Java 21 |
-| Linux x64 (deb) | [cairn_0.43.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.43.0_amd64.deb) | ~3.4 MB | Ubuntu 24.04+ / glibc ≥ 2.39, Java 21 |
+| Linux x64 (deb) | [cairn_0.44.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.44.0_amd64.deb) | ~3.4 MB | Ubuntu 24.04+ / glibc ≥ 2.39, Java 21 |
 
 Checksums: [SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS).
 
@@ -239,7 +248,7 @@ sudo apt update && sudo apt install cairn
 Or install the deb; it adds the same apt repository:
 
 ```bash
-sudo apt install ./cairn_0.43.0_amd64.deb
+sudo apt install ./cairn_0.44.0_amd64.deb
 ```
 
 You can also double-click the deb in a software center. After installation, **Cairn** appears in the application menu. An installed `nailong` package is replaced automatically.

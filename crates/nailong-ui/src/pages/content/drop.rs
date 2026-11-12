@@ -1,4 +1,4 @@
-//! 拖放导入：按内容识别拖进来的文件，整批一个恢复点。
+//! 拖放导入：按内容识别拖进来的文件（Mod、资源包、光影、整合包、世界），整批一个恢复点。
 
 use crate::prelude::*;
 
@@ -8,7 +8,7 @@ type DropItem = (PathBuf, mods::ContentKind);
 impl App {
     /// 拖进来的内容装到哪：在内容页就是上面选的目标，其他页面是当前版本。
     pub(crate) fn drop_target(&self) -> Option<(Row, PathBuf)> {
-        if self.show_mods {
+        if self.page == Page::Content {
             return self.content.row.clone().zip(self.content.game_dir.clone());
         }
         let row = self.selected_row()?;
@@ -16,11 +16,52 @@ impl App {
         Some((row, dir))
     }
 
-    /// 把拖进来的文件（或文件夹里的文件）分成内容、整合包和认不出的。
+    /// 拖进来的世界放进哪个版本：在存档页是上面选的版本，其他页面是当前版本。
+    pub(crate) fn world_target(&self) -> Option<Row> {
+        if self.page == Page::Worlds
+            && let Some(row) = &self.worlds.row
+        {
+            return Some(row.clone());
+        }
+        self.selected_row()
+    }
+
+    /// 收到拖进来的文件：世界进存档，其余按内容或整合包处理。
+    pub(crate) fn handle_drop(&mut self, paths: &[PathBuf]) {
+        let mut plan = self.plan_drop(paths);
+        let worlds = std::mem::take(&mut plan.worlds);
+        let rest = !plan.items.is_empty() || !plan.packs.is_empty() || !plan.unknown.is_empty();
+        if !worlds.is_empty() {
+            self.import_worlds(worlds);
+        }
+        if rest || paths.is_empty() {
+            self.import_dropped(plan);
+        }
+    }
+
+    /// 把拖进来的文件（或文件夹里的文件）分成内容、整合包、世界和认不出的。
     pub(crate) fn plan_drop(&self, paths: &[PathBuf]) -> DropPlan {
         let mut files = Vec::new();
+        let mut worlds = Vec::new();
         for path in paths {
             if path.is_dir() {
+                // 世界文件夹，或者装着几个世界的 saves 文件夹。
+                if saves::is_world(path) {
+                    worlds.push(path.clone());
+                    continue;
+                }
+                let mut inner_worlds: Vec<PathBuf> = std::fs::read_dir(path)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|entry| entry.path())
+                    .filter(|p| p.is_dir() && p.join("level.dat").is_file())
+                    .collect();
+                if !inner_worlds.is_empty() {
+                    inner_worlds.sort();
+                    worlds.extend(inner_worlds);
+                    continue;
+                }
                 let mut inside: Vec<PathBuf> = std::fs::read_dir(path)
                     .into_iter()
                     .flatten()
@@ -37,16 +78,19 @@ impl App {
             }
         }
         // 在资源包、光影页拖进不认识的 zip，就按当前页的类别装。
-        let page_kind = (self.show_mods && self.content.kind != mods::ContentKind::Mod)
+        let page_kind = (self.page == Page::Content && self.content.kind != mods::ContentKind::Mod)
             .then_some(self.content.kind);
         let mut plan = DropPlan {
             target: self.drop_target(),
+            worlds,
             ..Default::default()
         };
         for file in files {
             match installed::classify(&file) {
                 installed::Dropped::Content(kind) => plan.items.push((file, kind)),
                 installed::Dropped::Modpack => plan.packs.push(file),
+                // 认不出的 zip：里面有 level.dat 就是世界；在资源包、光影页按当前页处理。
+                installed::Dropped::Archive if saves::is_world(&file) => plan.worlds.push(file),
                 installed::Dropped::Archive => match page_kind {
                     Some(kind) => plan.items.push((file, kind)),
                     None => plan.unknown.push(file),
@@ -59,11 +103,30 @@ impl App {
 
     /// 悬停时的一句话：会装进哪、装几个；不能装时说为什么。
     pub(crate) fn describe_drop(&self, plan: &DropPlan) -> (String, bool) {
+        if !plan.worlds.is_empty() && plan.items.is_empty() && plan.packs.is_empty() {
+            let Some(row) = self.world_target() else {
+                return ("先装一个版本：世界要放进某个版本里".into(), false);
+            };
+            if self.is_running(&row.id) {
+                return ("游戏正在使用这个版本，退出游戏后再导入".into(), false);
+            }
+            if self.worlds.busy {
+                return ("正在处理存档，完成后再试".into(), false);
+            }
+            return (
+                format!(
+                    "松开导入 {} 个世界 → {}",
+                    plan.worlds.len(),
+                    short_text(&row.id, 24)
+                ),
+                true,
+            );
+        }
         if plan.items.is_empty() {
             return match (plan.packs.len(), plan.unknown.len()) {
                 (1, 0) => ("松开导入整合包，自动装好加载器".into(), self.busy.is_none()),
                 (0, _) => (
-                    "认不出这些文件：支持 Mod .jar、资源包和光影 .zip、整合包 .mrpack".into(),
+                    "认不出这些文件：支持 Mod .jar、资源包和光影 .zip、整合包 .mrpack、世界".into(),
                     false,
                 ),
                 _ => ("整合包一次拖一个".into(), false),
@@ -106,7 +169,7 @@ impl App {
     /// 导入一批拖进来或选中的文件：整批只留一个恢复点，已经装过的跳过。
     /// 建恢复点要读整个 mods/config，可能要几秒，放到后台做，界面不卡。
     pub(crate) fn import_dropped(&mut self, plan: DropPlan) {
-        let on_content = self.show_mods;
+        let on_content = self.page == Page::Content;
         let mut skipped: Vec<String> = Vec::new();
         let mut problems: Vec<String> = Vec::new();
         // 要真正导入的：版本、游戏目录、还没装过的文件。
@@ -238,6 +301,48 @@ impl App {
         });
     }
 
+    /// 把世界（文件夹或 zip）导入存档，不覆盖已有的。大世界要复制一阵，放到后台做；
+    /// 做完跳到存档页，选中刚导入的那个。
+    pub(crate) fn import_worlds(&mut self, sources: Vec<PathBuf>) {
+        let Some(row) = self.world_target() else {
+            self.error = Some("先装一个版本：世界要放进某个版本里".into());
+            return;
+        };
+        if self.is_running(&row.id) {
+            self.error = Some("游戏正在使用这个版本，退出游戏后再导入".into());
+            return;
+        }
+        if self.worlds.busy {
+            self.error = Some("正在处理存档，完成后再试".into());
+            return;
+        }
+        self.worlds.busy = true;
+        self.worlds.auto_backup_running = false;
+        self.notice = Some(format!("正在导入 {} 个世界…", sources.len()));
+        self.error = None;
+        let game_dir = row.game_dir.clone();
+        let row_id = row.id.clone();
+        let (tx, rx) = mpsc::channel();
+        self.worlds.rx = Some(rx);
+        let ctx = self.ctx.clone();
+        std::thread::spawn(move || {
+            let mut names = Vec::new();
+            let mut problems = Vec::new();
+            for source in &sources {
+                match saves::import_world(&game_dir, source) {
+                    Ok(name) => names.push(name),
+                    Err(e) => problems.push(e.to_string()),
+                }
+            }
+            let _ = tx.send(Msg::WorldsImported {
+                row_id,
+                names,
+                problems,
+            });
+            ctx.request_repaint();
+        });
+    }
+
     /// 后台导入或删除做完以后：写提示，刷新列表；导入的东西要看得见。
     pub(crate) fn finish_content(&mut self, done: ContentDone) {
         let mut notice = None;
@@ -293,7 +398,9 @@ impl App {
 
     /// 文件管理器里改过内容目录、回到窗口时自动重扫。
     pub(crate) fn rescan_if_changed(&mut self) {
-        if !(self.show_mods && self.content.show_installed) || self.content.scan_rx.is_some() {
+        if !(self.page == Page::Content && self.content.show_installed)
+            || self.content.scan_rx.is_some()
+        {
             return;
         }
         let Some(game_dir) = &self.content.game_dir else {
@@ -315,7 +422,7 @@ impl App {
                 .collect()
         });
         let dragging = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
-        if !dragging || self.show_install {
+        if !dragging || self.page == Page::Install {
             self.content.drop_preview = None;
             return;
         }

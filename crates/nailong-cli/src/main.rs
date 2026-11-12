@@ -105,6 +105,12 @@ enum Commands {
         demo: bool,
         #[arg(long)]
         game_dir: Option<PathBuf>,
+        /// 启动后直接进这个世界（存档文件夹名，1.20 起）
+        #[arg(long, conflicts_with = "server")]
+        world: Option<String>,
+        /// 启动后直接连这个服务器（地址，可以带端口）
+        #[arg(long)]
+        server: Option<String>,
         #[arg(long)]
         dry_run: bool,
         #[arg(long)]
@@ -395,6 +401,8 @@ fn main() -> anyhow::Result<()> {
             height,
             demo,
             game_dir,
+            world,
+            server,
             dry_run,
             print_plan,
         } => {
@@ -411,6 +419,9 @@ fn main() -> anyhow::Result<()> {
                 game_dir: Some(game_dir.unwrap_or_else(|| versions::game_dir(&root, &profile))),
                 dry_run,
                 print_plan,
+                quick_play: world
+                    .map(launch::QuickPlay::World)
+                    .or(server.map(launch::QuickPlay::Server)),
                 ..Default::default()
             };
             let code = launch::launch(&root, &profile, &opts)?;

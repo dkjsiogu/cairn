@@ -8,7 +8,7 @@
 
 **简体中文** | [English](README.en.md)
 
-> 当前版本：**0.43.0**（预览版）
+> 当前版本：**0.44.0**（预览版）
 >
 > 目标：小体积、少依赖、安装过程可见、中断可补。功能边界见 [实现状态](docs/design/14-implementation-status.md)。
 
@@ -26,6 +26,15 @@ Cairn 是登山者叠在路边的石堆：它不帮你走路，只标出回去�
 它不是“万能启动器”，也还不是 1.0。能做和不能做的，下文列清楚了。
 
 ## 界面
+
+0.44：玩的时候和找东西的时候。
+
+- 游戏开着时侧栏显示每一局的状态，卡住了能「结束游戏」。游戏不再占着启动器：玩的时候照样能装别的版本、下 Mod，不同版本能同时开。
+- 「进入」：开游戏直接进最近的世界，存档页每个世界都有（1.20 起）。
+- 游戏崩了而上次正常玩之后改过内容，底部提示有「退回改动」，一步回到改之前。
+- `Ctrl+K` 找任何东西：版本、世界、页面、设置、常做的事。
+- 复制版本；世界文件夹或 zip 拖进来就导入；记游玩时长，版本按最近玩过排。
+- 设置分成游戏、启动器、存储、关于四栏；能缩放界面；记住窗口大小和上次选的版本。详见 [29](docs/design/29-play-and-find.md)。
 
 0.43：导出整合包；能直接用别的启动器的 .minecraft。
 
@@ -213,7 +222,7 @@ Cairn 是登山者叠在路边的石堆：它不帮你走路，只标出回去�
 | 平台 | 文件 | 大小 | 要求 |
 |---|---|---:|---|
 | Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | 约 9 MB | Windows 10/11，Java 21 |
-| Linux x64 (deb) | [cairn_0.43.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.43.0_amd64.deb) | 约 3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39，Java 21 |
+| Linux x64 (deb) | [cairn_0.44.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.44.0_amd64.deb) | 约 3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39，Java 21 |
 
 校验值：[SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS)。
 
@@ -240,7 +249,7 @@ sudo apt update && sudo apt install cairn
 或者下载 deb 安装，效果一样：deb 会自动加上这个 apt 源。
 
 ```bash
-sudo apt install ./cairn_0.43.0_amd64.deb
+sudo apt install ./cairn_0.44.0_amd64.deb
 ```
 
 也可以双击 deb 用软件中心安装。安装后应用菜单里会有 **Cairn**。装过旧的 `nailong` 包也没关系，`cairn` 会替换它。

@@ -20,6 +20,7 @@ mod motion;
 mod msg;
 mod pages;
 mod play;
+mod prefs;
 mod prelude;
 mod rings;
 #[cfg(test)]
@@ -40,6 +41,11 @@ fn main() -> eframe::Result<()> {
     if let Ok(Some(_)) = nailong_core::update::apply_staged(&root.cache(), true) {
         return Ok(());
     }
+    // 上次关掉时的窗口大小和缩放：打开还是那样。
+    let prefs = UiPrefs::load(&root);
+    let zoom = prefs.zoom;
+    // 存的是窗口本身的大小（缩放前），原样用。
+    let saved = prefs.window;
     #[cfg(debug_assertions)]
     let size = std::env::var("NAILONG_DEBUG_SIZE")
         .ok()
@@ -47,13 +53,15 @@ fn main() -> eframe::Result<()> {
             let (w, h) = value.split_once('x')?;
             Some([w.parse().ok()?, h.parse().ok()?])
         })
+        .or(saved)
         .unwrap_or([1120.0, 720.0]);
     #[cfg(not(debug_assertions))]
-    let size = [1120.0, 720.0];
+    let size = saved.unwrap_or([1120.0, 720.0]);
     let options = eframe::NativeOptions {
         centered: true,
         viewport: egui::ViewportBuilder::default()
             .with_inner_size(size)
+            .with_maximized(prefs.maximized)
             .with_min_inner_size([900.0, 620.0])
             .with_title("Cairn")
             .with_app_id("cairn")
@@ -67,7 +75,8 @@ fn main() -> eframe::Result<()> {
             t::install(&cc.egui_ctx);
             install_fonts(&cc.egui_ctx);
             root.migrate_legacy_cache();
-            let app = App::new(root);
+            cc.egui_ctx.set_zoom_factor(zoom);
+            let app = App::new(root, &cc.egui_ctx);
             app.prefs.theme.apply(&cc.egui_ctx);
             Ok(Box::new(app))
         }),

@@ -123,22 +123,6 @@ pub(crate) fn inline_dot(ui: &mut egui::Ui) {
     ui.add_space(7.0);
 }
 
-pub(crate) fn stat_cell(ui: &mut egui::Ui, value: usize, label: &str) {
-    ui.allocate_ui_with_layout(
-        egui::vec2(96.0, 42.0),
-        egui::Layout::top_down(egui::Align::LEFT),
-        |ui| {
-            ui.set_min_height(42.0);
-            ui.label(
-                egui::RichText::new(value.to_string())
-                    .size(15.0)
-                    .family(bold_family()),
-            );
-            ui.label(egui::RichText::new(label).size(13.0).color(t::sub()));
-        },
-    );
-}
-
 pub(crate) fn info_line(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(label).size(13.0).color(t::sub()));
@@ -610,6 +594,76 @@ pub(crate) fn danger_tiny(ui: &mut egui::Ui, text: &str) -> egui::Response {
             .corner_radius(motion::R)
             .min_size(egui::vec2(64.0, 24.0)),
     )
+}
+
+/// 危险操作的确认按钮：`danger` 色的字和细边，淡淡的底。只在二次确认时出现。
+pub(crate) fn danger_button(
+    ui: &mut egui::Ui,
+    text: &str,
+    width: f32,
+    height: f32,
+) -> egui::Response {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, height.max(24.0)), egui::Sense::click());
+    let hover = motion::hover_amount(ui, response.id.with("hover"), response.hovered());
+    let fill = if response.is_pointer_button_down_on() {
+        0.30
+    } else {
+        0.14 + 0.08 * hover
+    };
+    ui.painter().rect(
+        rect,
+        motion::R,
+        t::tint(t::danger(), fill),
+        egui::Stroke::new(1.0, t::tint(t::danger(), 0.7)),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        text,
+        egui::FontId::proportional(14.0),
+        t::danger(),
+    );
+    response
+}
+
+/// 弹窗的外框：遮罩、`surface` 底、细边。返回（内容的返回值，点了遮罩或按了 Esc）。
+/// 新弹窗都用它，外观和关闭方式就一致了；别忘了把开关加进 `App::modal_open`。
+pub(crate) fn dialog<R>(
+    ctx: &egui::Context,
+    id: &str,
+    width: f32,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> (R, bool) {
+    let modal = egui::Modal::new(egui::Id::unique(("dialog", id)))
+        .backdrop_color(t::veil(1.0))
+        .frame(
+            egui::Frame::new()
+                .fill(t::surface())
+                .stroke(egui::Stroke::new(1.0, t::hairline()))
+                .corner_radius(6)
+                .inner_margin(egui::Margin::symmetric(26, 22)),
+        )
+        .show(ctx, |ui| {
+            ui.set_width(width);
+            add(ui)
+        });
+    let dismissed = modal.backdrop_response.clicked() || escape_pressed(ctx);
+    (modal.inner, dismissed)
+}
+
+/// 弹窗的标题和下面一行说明。
+pub(crate) fn dialog_title(ui: &mut egui::Ui, title: &str, subtitle: &str) {
+    ui.label(
+        egui::RichText::new(title)
+            .size(24.0)
+            .family(display_family())
+            .color(t::ink()),
+    );
+    if !subtitle.is_empty() {
+        ui.add(egui::Label::new(egui::RichText::new(subtitle).size(13.0).color(t::sub())).wrap());
+    }
 }
 
 pub(crate) fn short_date(text: &str) -> String {

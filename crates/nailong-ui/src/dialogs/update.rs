@@ -364,7 +364,7 @@ impl App {
             .filter(|release| release.version == version)
             .map(|release| plain_notes(&release.notes));
         let kind = self.update.kind;
-        let playing = matches!(self.busy, Some(Task::Launch));
+        let playing = self.any_game();
         let mut close = false;
         let mut skip = false;
         let mut start = false;

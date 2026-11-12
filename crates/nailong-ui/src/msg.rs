@@ -103,13 +103,16 @@ impl App {
                     cancel::reset();
                     self.activity = None;
                     self.rx = None;
-                    self.show_install = false;
                     self.error = None;
                     self.install.repair_target = None;
-                    self.notice = Some("安装完成".into());
+                    self.notice = Some(format!("「{id}」装好了"));
                     self.refresh();
                     if self.rows.iter().any(|r| r.id == id) {
                         self.selected = Some(id);
+                    }
+                    // 装完回启动台，新版本已经选中，点一下就能玩。在别的页面逛着的不打断。
+                    if self.page == Page::Install {
+                        self.page = Page::Home;
                     }
                 }
                 Msg::InstallFailed(e) => {
@@ -118,7 +121,7 @@ impl App {
                     cancel::reset();
                     self.activity = None;
                     self.rx = None;
-                    self.show_install = true;
+                    self.page = Page::Install;
                     self.log.push(format!("安装未完成: {e}"));
                     if e.contains("操作已取消") {
                         self.error = None;
@@ -134,7 +137,7 @@ impl App {
                     cancel::reset();
                     self.activity = None;
                     self.rx = None;
-                    self.show_install = true;
+                    self.page = Page::Install;
                     self.error = None;
                     self.notice =
                         Some("安装已取消，已下载的部分会保留；重新开始会检查并补全。".into());
@@ -223,7 +226,7 @@ impl App {
                     self.content.notice = Some(note);
                     self.content.error = None;
                     self.refresh();
-                    if self.show_mods {
+                    if self.page == Page::Content {
                         self.start_mods_scan();
                     }
                 }
@@ -372,18 +375,51 @@ impl App {
                         Err(e) => self.worlds.error = Some(e),
                     }
                 }
+                Msg::WorldsImported {
+                    row_id,
+                    names,
+                    problems,
+                } => {
+                    self.worlds.busy = false;
+                    self.worlds.rx = None;
+                    self.home.cache = None;
+                    self.version_cache = None;
+                    if !names.is_empty() {
+                        // 刚做的事看得见：到存档页，选中刚导入的那个。
+                        if let Some(row) = self.row(&row_id) {
+                            self.open_saves(row);
+                            self.worlds.selected = names.first().cloned();
+                        }
+                        self.notice = Some(match names.as_slice() {
+                            [one] => format!("已导入世界「{one}」"),
+                            many => format!("已导入 {} 个世界", many.len()),
+                        });
+                    } else {
+                        self.notice = None;
+                    }
+                    self.error = (!problems.is_empty()).then(|| problems.join("；"));
+                }
                 Msg::RollbackDone(result) => {
                     self.rollback.busy = false;
                     self.rollback.rx = None;
                     match result {
                         Ok(note) => {
+                            if !self.rollback.open {
+                                self.notice = Some(note.clone());
+                            }
                             self.rollback.notice = Some(note);
                             self.rollback.error = None;
                             self.reload_rollback_points();
                             self.refresh_installed_keys();
                             self.start_mods_scan();
                         }
-                        Err(e) => self.rollback.error = Some(e),
+                        Err(e) => {
+                            if !self.rollback.open {
+                                self.notice = None;
+                                self.error = Some(format!("没能退回：{e}"));
+                            }
+                            self.rollback.error = Some(e);
+                        }
                     }
                 }
                 Msg::LoginBrowser(url) => {
@@ -412,60 +448,11 @@ impl App {
                         }
                     }
                 }
-                Msg::LaunchDone(code, reason) => {
-                    if let Some(last) = &mut self.play.last {
-                        last.outcome = log::Outcome::Exited(code);
-                    }
-                    // 启动前可能刷新过凭证，重新读一遍；这局截的图也该出现在截图页了。
-                    self.accounts = nailong_core::accounts::Accounts::load(&self.root);
-                    self.gallery.stale = true;
-                    self.busy = None;
-                    self.play.running_row = None;
-                    // 每玩完一局就给世界留一份快照，比按时间间隔更贴近“坏了能救”。
-                    if self.worlds.backup.enabled && !self.worlds.busy {
-                        self.start_auto_backup();
-                    }
-                    self.rx = None;
-                    self.play.tuning_cache.clear();
-                    if code == 0 {
-                        self.notice = Some("游戏已退出".into());
-                    } else {
-                        self.log.push(format!("游戏异常退出（代码 {code}）"));
-                        self.error = Some(match reason {
-                            Some(reason) => format!("游戏异常退出（代码 {code}）：{reason}"),
-                            None => {
-                                format!("游戏异常退出（代码 {code}），日志里标红的是出错的地方")
-                            }
-                        });
-                    }
-                }
                 // 账户的后台结果走自己的通道，在 poll_accounts 里处理。
                 Msg::ServerChecked(..)
                 | Msg::ExternalLogin(_)
                 | Msg::AccountAdded(_)
                 | Msg::Face(..) => {}
-                Msg::NeedRelogin(id, reason) => {
-                    if let Some(last) = &mut self.play.last {
-                        last.outcome = log::Outcome::Failed(reason.clone());
-                    }
-                    self.busy = None;
-                    self.play.running_row = None;
-                    self.rx = None;
-                    self.accounts = nailong_core::accounts::Accounts::load(&self.root);
-                    self.log.push(format!("账户要重新登录：{reason}"));
-                    self.relogin(&id, Some(reason.clone()));
-                }
-                Msg::LaunchFailed(e) => {
-                    self.accounts = nailong_core::accounts::Accounts::load(&self.root);
-                    if let Some(last) = &mut self.play.last {
-                        last.outcome = log::Outcome::Failed(e.clone());
-                    }
-                    self.busy = None;
-                    self.play.running_row = None;
-                    self.rx = None;
-                    self.error = Some(format!("启动失败：{e}"));
-                    self.log.push(format!("启动失败: {e}"));
-                }
                 Msg::BenchDone(result) => {
                     self.finish_bench();
                     match result {
@@ -558,14 +545,15 @@ pub(crate) enum Msg {
         result: Result<mods::SearchPage, String>,
     },
     SavesDone(Result<String, String>),
+    /// 拖进来的世界导入完了：放进了哪个版本、导入后的名字、没导进去的原因。
+    WorldsImported {
+        row_id: String,
+        names: Vec<String>,
+        problems: Vec<String>,
+    },
     RollbackDone(Result<String, String>),
     LoginBrowser(String),
     LoginDone(Result<auth::Account, String>),
-    /// 退出码，以及从游戏输出里认出的原因。
-    LaunchDone(i32, Option<String>),
-    LaunchFailed(String),
-    /// 开始游戏前发现账户凭证失效：账户编号和原因。
-    NeedRelogin(String, String),
     /// 外置登录：检查认证服务器（玩家的输入，结果）。
     ServerChecked(String, Result<nailong_core::yggdrasil::Server, String>),
     /// 外置登录：密码对了，但有好几个角色要选。

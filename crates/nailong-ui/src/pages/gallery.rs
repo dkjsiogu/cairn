@@ -56,6 +56,8 @@ pub(crate) struct GalleryState {
     pub(crate) size: u8,
     /// 每个游戏目录 `servers.dat` 里的服务器名。
     pub(crate) server_names: HashMap<String, String>,
+    /// `Ctrl+F`：下一帧把焦点给搜索框。
+    pub(crate) focus_search: bool,
 }
 
 pub(crate) fn place_of(shot: &Shot) -> Place {
@@ -211,7 +213,7 @@ impl App {
 
     /// 每帧：收后台结果；该重新列的时候在后台列一遍；处理看大图时做完的事。
     pub(crate) fn tick_shots(&mut self, ctx: &egui::Context) {
-        let wanted = self.gallery.shots.is_some() || self.show_gallery;
+        let wanted = self.gallery.shots.is_some() || self.page == Page::Shots;
         if !wanted {
             return;
         }
@@ -220,7 +222,7 @@ impl App {
             self.gallery.stale = true;
         }
         let now = ctx.input(|i| i.time);
-        let playing = matches!(self.busy, Some(Task::Launch));
+        let playing = self.any_game();
         let dirs = if self.gallery.stale || playing {
             Some(self.shot_dirs())
         } else {
@@ -272,11 +274,7 @@ impl App {
         if self.page_locked() {
             return;
         }
-        self.show_mods = false;
-        self.show_saves = false;
-        self.show_manage = false;
-        self.show_install = false;
-        self.show_gallery = true;
+        self.go(Page::Shots);
         self.gallery.stale = true;
         if let Some(filter) = filter {
             self.gallery.filter = filter;
@@ -358,7 +356,7 @@ impl App {
                             "搜索存档、服务器、人或日期",
                             240.0,
                         );
-                        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
+                        if std::mem::take(&mut self.gallery.focus_search) {
                             search.request_focus();
                         }
                         if !self.gallery.query.trim().is_empty()

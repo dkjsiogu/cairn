@@ -11,21 +11,16 @@ pub(crate) mod versions;
 pub(crate) mod worlds;
 
 impl App {
-    /// 当前侧边栏应该高亮哪一项。安装页属于「版本」的子流程。
+    /// 当前侧边栏应该高亮哪一项。整页显示进度时跟着任务走，其余跟着页面走。
     pub(crate) fn nav_active(&self) -> Nav {
-        if matches!(self.busy, Some(Task::Install)) {
-            Nav::Versions
-        } else if self.show_gallery {
-            Nav::Shots
-        } else if self.show_mods {
-            Nav::Content
-        } else if self.show_saves {
-            Nav::Saves
-        } else if self.show_manage || self.show_install {
-            Nav::Versions
-        } else {
-            Nav::Home
+        if self.progress_showing() {
+            match self.busy {
+                Some(Task::Install) => return Nav::Versions,
+                Some(Task::Mods) => return Nav::Content,
+                _ => {}
+            }
         }
+        self.page.nav()
     }
 
     pub(crate) fn nav_go(&mut self, nav: Nav) {
@@ -33,13 +28,13 @@ impl App {
             return;
         }
         // 下载、安装时点侧栏：离开进度页，任务在后台继续。
+        let was_progress = self.progress_showing();
         self.progress_open = false;
-        if self.nav_active() == nav {
+        if self.page.nav() == nav && !was_progress {
             // 再点一次当前入口：只做“回到这个入口的默认视图”，不重置数据。
             match nav {
-                Nav::Versions if self.show_install => {
-                    self.show_install = false;
-                    self.show_manage = true;
+                Nav::Versions if self.page == Page::Install && !self.rows.is_empty() => {
+                    self.page = Page::Versions;
                     self.install.repair_target = None;
                 }
                 Nav::Content if !self.content.show_installed => self.open_content(true),
@@ -53,40 +48,34 @@ impl App {
             }
             return;
         }
-        if nav != Nav::Shots {
-            self.show_gallery = false;
-        }
         match nav {
             Nav::Home => {
-                self.show_mods = false;
-                self.show_saves = false;
-                self.show_manage = false;
-                self.show_install = false;
+                self.page = Page::Home;
                 self.install.repair_target = None;
-                self.error = None;
-                self.notice = None;
                 // 首页只是切视图：版本列表已在安装/删除/内容变更后刷新过。
                 // 不再在这里同步 scan 每个版本的 health，否则点击会卡一下。
                 self.ensure_visible_selection();
             }
-            Nav::Versions => {
-                if self.rows.is_empty() {
-                    self.open_install();
-                } else {
-                    self.show_mods = false;
-                    self.show_saves = false;
-                    self.show_install = false;
-                    self.show_manage = true;
-                    self.install.repair_target = None;
-                    self.delete_confirm = None;
-                    self.error = None;
-                    self.ensure_visible_selection();
-                }
-            }
+            Nav::Versions => self.open_versions(),
             Nav::Content => self.open_content(true),
             Nav::Saves => self.open_saves_page(),
             Nav::Shots => self.open_gallery(None),
         }
+    }
+
+    /// 进版本页；一个版本都没有时直接去安装。
+    pub(crate) fn open_versions(&mut self) {
+        if self.page_locked() {
+            return;
+        }
+        if self.rows.is_empty() {
+            self.open_install();
+            return;
+        }
+        self.go(Page::Versions);
+        self.install.repair_target = None;
+        self.delete_confirm = None;
+        self.ensure_visible_selection();
     }
 
     /// 内容只有一页：发现和已安装是同一页的两种模式。
@@ -99,17 +88,14 @@ impl App {
             return;
         };
         self.selected = Some(row.id.clone());
-        self.show_saves = false;
-        self.show_manage = false;
-        self.show_install = false;
-        self.error = None;
-        self.notice = None;
+        let was_content = self.page == Page::Content;
+        self.go(Page::Content);
         let same_target = self
             .content
             .row
             .as_ref()
             .is_some_and(|current| current.id == row.id);
-        if !self.show_mods || !same_target {
+        if !was_content || !same_target {
             self.enter_mods(Some(row));
         }
         self.clear_mods_selection();
@@ -159,6 +145,7 @@ impl App {
         let update_badge = self.update.badge(&self.prefs.update_skip);
         let mut settings_clicked = false;
         let mut open_progress = false;
+        let mut open_game: Option<String> = None;
 
         egui::Panel::left("shell_nav")
             .resizable(false)
@@ -201,7 +188,18 @@ impl App {
                 }
 
                 // 底部用显式留白定位：嵌套 bottom_up 在侧边栏里会缩成内容高度。
-                let playing = matches!(self.busy, Some(Task::Launch));
+                let games: Vec<(String, String)> = self
+                    .play
+                    .sessions
+                    .iter()
+                    .map(|session| {
+                        let status = match &session.target {
+                            Some(target) => format!("{} · {target}", session.status()),
+                            None => session.status(),
+                        };
+                        (session.row_id.clone(), status)
+                    })
+                    .collect();
                 // 下载、安装在后台进行：底部一张进度卡，点它回到进度页。
                 let task_card = self
                     .busy
@@ -214,25 +212,28 @@ impl App {
                     0.0
                 } + if locked {
                     40.0
-                } else if playing {
-                    112.0
-                } else if task_card.is_some() {
-                    78.0 + if wide { 62.0 } else { 44.0 }
                 } else {
-                    78.0
+                    78.0 + if task_card.is_some() {
+                        if wide { 62.0 } else { 44.0 }
+                    } else {
+                        0.0
+                    }
+                } + if locked {
+                    0.0
+                } else {
+                    games.len() as f32 * 38.0 + if games.is_empty() { 0.0 } else { 6.0 }
                 };
                 ui.add_space((ui.available_height() - footer).max(10.0));
-                if playing {
-                    ui.horizontal(|ui| {
-                        ui.add_space(if wide { 14.0 } else { 18.0 });
-                        status_dot(ui, true);
-                        if wide {
-                            ui.label(egui::RichText::new("游戏运行中").size(13.0).color(t::sub()));
+                if !locked {
+                    // 正在运行的游戏：一个一行，点它看这一局的输出。
+                    for (row_id, status) in &games {
+                        if game_row(ui, row_id, status, wide).clicked() {
+                            open_game = Some(row_id.clone());
                         }
-                    })
-                    .response
-                    .on_hover_text("游戏运行中：可以查看各页，正在玩的版本退出后才能修改");
-                    ui.add_space(8.0);
+                    }
+                    if !games.is_empty() {
+                        ui.add_space(6.0);
+                    }
                 }
                 if locked {
                     ui.horizontal(|ui| {
@@ -306,6 +307,9 @@ impl App {
         if open_progress {
             self.progress_open = true;
         }
+        if let Some(row_id) = open_game {
+            self.open_game_log(&row_id);
+        }
         if account_rect.is_some() {
             self.login.anchor = account_rect;
         }
@@ -316,10 +320,39 @@ impl App {
             self.update.open = true;
         }
         if settings_clicked {
-            self.login.open = false;
-            self.show_settings = true;
+            self.open_settings();
         }
     }
+}
+
+/// 侧栏里一个正在运行的游戏：圆点、版本名和状态。点它看这一局的输出。
+fn game_row(ui: &mut egui::Ui, name: &str, status: &str, wide: bool) -> egui::Response {
+    let (rect, response, color) = nav_row(ui, 36.0, false, true);
+    let center = if wide {
+        egui::pos2(rect.left() + 21.0, rect.center().y)
+    } else {
+        rect.center()
+    };
+    ui.painter().circle_filled(center, 4.0, t::accent());
+    if wide {
+        let font = egui::FontId::proportional(13.0);
+        let width = rect.right() - 12.0 - (rect.left() + 40.0);
+        ui.painter().text(
+            egui::pos2(rect.left() + 40.0, rect.center().y - 8.0),
+            egui::Align2::LEFT_CENTER,
+            elide_middle(ui, name, &font, width),
+            font,
+            color,
+        );
+        ui.painter().text(
+            egui::pos2(rect.left() + 40.0, rect.center().y + 8.0),
+            egui::Align2::LEFT_CENTER,
+            status,
+            egui::FontId::proportional(11.5),
+            t::dim(),
+        );
+    }
+    response.on_hover_text(format!("{name} · {status}\n点开看游戏输出"))
 }
 
 /// 侧栏底部的进度卡：下载、安装在后台进行时显示。宽侧栏两行（在做什么 · 百分比，剩余时间），

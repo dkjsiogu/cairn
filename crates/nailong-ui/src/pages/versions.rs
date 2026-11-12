@@ -4,17 +4,25 @@ use crate::prelude::*;
 
 impl App {
     pub(crate) fn open_install(&mut self) {
-        self.show_install = true;
-        self.show_manage = false;
-        self.show_mods = false;
-        self.show_saves = false;
-        self.error = None;
-        self.notice = None;
+        if self.page_locked() {
+            return;
+        }
+        self.go(Page::Install);
         self.install.repair_target = None;
         if self.install.catalog.is_some() {
             self.pick_defaults();
         } else {
             self.load_catalog();
+        }
+    }
+
+    /// 离开安装页：有版本回版本页，一个都没有回启动台（首次引导）。
+    pub(crate) fn leave_install(&mut self) {
+        if self.rows.is_empty() {
+            self.page = Page::Home;
+        } else {
+            self.page = Page::Versions;
+            self.ensure_visible_selection();
         }
     }
 
@@ -78,9 +86,7 @@ impl App {
             .unwrap_or_else(|| "整合包".to_string());
         self.error = None;
         self.notice = None;
-        self.show_install = true;
-        self.show_manage = false;
-        self.show_mods = false;
+        self.page = Page::Install;
         cancel::reset();
         self.cancel_requested = false;
         self.busy = Some(Task::Install);
@@ -130,6 +136,11 @@ impl App {
             self.error = Some(format!("这个版本没有可用的 {}", loader.name()));
             return;
         }
+        // 补全正在玩的版本会改它的文件：等游戏退出。
+        if self.is_running(&name) {
+            self.error = Some("游戏正在使用这个版本，退出游戏后再修改".into());
+            return;
+        }
         let name = match versions::check_name(&name) {
             Ok(name) => name,
             Err(e) => {
@@ -144,9 +155,7 @@ impl App {
         };
         self.error = None;
         self.notice = None;
-        self.show_install = true;
-        self.show_manage = false;
-        self.show_mods = false;
+        self.page = Page::Install;
         cancel::reset();
         self.cancel_requested = false;
         self.busy = Some(Task::Install);
@@ -242,7 +251,6 @@ impl App {
                 self.delete_confirm = None;
                 self.refresh();
                 if self.rows.is_empty() {
-                    self.show_manage = false;
                     self.open_install();
                 }
             }
@@ -265,17 +273,45 @@ impl App {
         row: &Row,
         open_dir: &mut Option<PathBuf>,
     ) {
-        if motion::primary_sized_glyph(
-            ui,
-            "启动",
-            self.busy.is_none(),
-            92.0,
-            34.0,
-            13.0,
-            motion::PrimaryGlyph::Play,
-        ) {
-            self.selected = Some(row.id.clone());
-            self.start_launch();
+        if self.is_running(&row.id) {
+            if self.play.stop_confirm.as_deref() == Some(row.id.as_str()) {
+                if danger_button(ui, "确认结束", 92.0, 34.0)
+                    .on_hover_text("没存盘的进度会丢")
+                    .clicked()
+                {
+                    self.stop_game(&row.id);
+                }
+            } else if motion::secondary_sized(ui, "结束游戏", true, 92.0, 34.0, 13.0)
+                .on_hover_text("游戏卡住时用")
+                .clicked()
+            {
+                self.play.stop_confirm = Some(row.id.clone());
+            }
+        } else {
+            let block = self.launch_block(row);
+            let response = ui.add_enabled_ui(block.is_none(), |ui| {
+                motion::primary_sized_glyph(
+                    ui,
+                    "启动",
+                    block.is_none(),
+                    92.0,
+                    34.0,
+                    13.0,
+                    motion::PrimaryGlyph::Play,
+                )
+            });
+            if let Some(reason) = &block {
+                response.response.on_disabled_hover_text(reason);
+            } else if response.inner {
+                self.launch_row(row, None);
+            }
+        }
+        ui.add_space(6.0);
+        if motion::secondary_sized(ui, "复制", self.busy.is_none(), 64.0, 34.0, 12.0)
+            .on_hover_text("复制一份，试新 Mod 前留个备份")
+            .clicked()
+        {
+            self.open_duplicate(row);
         }
         ui.add_space(6.0);
         if motion::secondary_sized(ui, "导出整合包", self.busy.is_none(), 96.0, 34.0, 12.0)
@@ -327,6 +363,15 @@ impl App {
         let mut delete_target: Option<(Row, bool)> = None;
         let mut row_menu: Option<(Row, RowAction)> = None;
         let busy = self.busy.is_some();
+        let query = self.version_query.trim().to_lowercase();
+        let shown: Vec<&Row> = rows
+            .iter()
+            .filter(|row| {
+                query.is_empty()
+                    || row.id.to_lowercase().contains(&query)
+                    || row_kind(row).to_lowercase().contains(&query)
+            })
+            .collect();
         let mut open_dir: Option<PathBuf> = None;
 
         egui::Panel::left("manage_versions")
@@ -369,13 +414,54 @@ impl App {
                     });
                 });
                 ui.add_space(10.0);
+                // 版本多了才要搜。
+                if rows.len() > 6 || !self.version_query.is_empty() {
+                    let search = search_field(
+                        ui,
+                        &mut self.version_query,
+                        "搜索版本",
+                        ui.available_width(),
+                    );
+                    if std::mem::take(&mut self.version_search_focus) {
+                        search.request_focus();
+                    }
+                    if search.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        self.version_query.clear();
+                    }
+                    ui.add_space(8.0);
+                }
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .max_height((ui.available_height() - 46.0).max(120.0))
                     .show(ui, |ui| {
-                        for row in &rows {
+                        if shown.is_empty() {
+                            ui.add_space(12.0);
+                            ui.label(
+                                egui::RichText::new("没有符合的版本")
+                                    .size(13.0)
+                                    .color(t::dim()),
+                            );
+                        }
+                        for &row in &shown {
                             let active = selected.as_ref().is_some_and(|item| item.id == row.id);
-                            let response = version_row(ui, row, active);
+                            let note =
+                                match self.session(&row.id) {
+                                    Some(session) => Some((session.status(), true)),
+                                    None => {
+                                        self.play.stats.get(&row.id).filter(|s| s.last > 0).map(
+                                            |s| {
+                                                (
+                                                    format!(
+                                                        "{}玩过",
+                                                        human_age(s.last).replace(" ", "")
+                                                    ),
+                                                    false,
+                                                )
+                                            },
+                                        )
+                                    }
+                                };
+                            let response = version_row(ui, row, active, note);
                             if response.clicked() {
                                 chosen = Some(row.clone());
                             }
@@ -391,6 +477,12 @@ impl App {
                                 }
                                 if ui.add_enabled(!busy, egui::Button::new("改名")).clicked() {
                                     pick(RowAction::Rename);
+                                }
+                                if ui
+                                    .add_enabled(!busy, egui::Button::new("复制一份"))
+                                    .clicked()
+                                {
+                                    pick(RowAction::Duplicate);
                                 }
                                 if ui
                                     .add_enabled(!busy, egui::Button::new("导出整合包"))
@@ -522,7 +614,6 @@ impl App {
                                         .clicked()
                                 {
                                     self.selected = Some(row.id.clone());
-                                    self.show_manage = false;
                                     self.start_repair(row.clone());
                                 }
                             });
@@ -546,48 +637,69 @@ impl App {
                     .show(ui, |ui| {
                         ui.add_space(16.0);
                         let (mods, packs, shaders, worlds) = self.version_summary(&row);
+                        let stat = self.play.stats.get(&row.id).cloned().unwrap_or_default();
+                        let memory = self.memory_label(&row);
+                        let mut go_content: Option<mods::ContentKind> = None;
+                        let mut go_worlds = false;
                         egui::Frame::new()
                             .fill(t::surface())
                             .stroke(egui::Stroke::new(1.0, t::hairline()))
                             .corner_radius(motion::R)
-                            .inner_margin(egui::Margin::symmetric(18, 12))
+                            .inner_margin(egui::Margin::symmetric(10, 8))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
-                                    stat_cell(ui, mods, "Mod");
-                                    ui.add_space(14.0);
-                                    stat_cell(ui, packs, "资源包");
-                                    ui.add_space(14.0);
-                                    stat_cell(ui, shaders, "光影");
-                                    ui.add_space(14.0);
-                                    stat_cell(ui, worlds, "存档");
+                                    ui.spacing_mut().item_spacing.x = 2.0;
+                                    // 数字就是入口：点 Mod 去内容页，点存档去存档页。
+                                    for (value, label, kind) in [
+                                        (mods, "Mod", Some(mods::ContentKind::Mod)),
+                                        (packs, "资源包", Some(mods::ContentKind::ResourcePack)),
+                                        (shaders, "光影", Some(mods::ContentKind::Shader)),
+                                        (worlds, "存档", None),
+                                    ] {
+                                        if stat_button(ui, value, label).clicked() {
+                                            match kind {
+                                                Some(kind) => go_content = Some(kind),
+                                                None => go_worlds = true,
+                                            }
+                                        }
+                                    }
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
+                                            ui.add_space(8.0);
                                             ui.vertical(|ui| {
+                                                ui.spacing_mut().item_spacing.y = 2.0;
                                                 ui.label(
-                                                    egui::RichText::new(
-                                                        self.memory_label(&row),
-                                                    )
+                                                    egui::RichText::new(if stat.launches > 0 {
+                                                        format!(
+                                                            "玩了 {} · {} 次",
+                                                            nailong_core::played::human(stat.seconds),
+                                                            stat.launches
+                                                        )
+                                                    } else {
+                                                        "还没玩过".into()
+                                                    })
                                                     .size(13.0)
                                                     .color(t::sub()),
                                                 );
                                                 ui.label(
-                                                    egui::RichText::new(format!(
-                                                        "Java 21 {}",
-                                                        if self.env.java_ok {
-                                                            "已检测到"
-                                                        } else {
-                                                            "未检测到"
-                                                        }
-                                                    ))
-                                                    .size(13.0)
-                                                    .color(if self.env.java_ok { t::ok() } else { t::warn() }),
+                                                    egui::RichText::new(memory)
+                                                        .size(13.0)
+                                                        .color(t::dim()),
                                                 );
                                             });
                                         },
                                     );
                                 });
                             });
+                        if let Some(kind) = go_content {
+                            self.selected = Some(row.id.clone());
+                            self.open_content(true);
+                            self.content.kind = kind;
+                        }
+                        if go_worlds {
+                            self.open_saves(row.clone());
+                        }
 
                         ui.add_space(18.0);
                         ui.label(
@@ -639,32 +751,7 @@ impl App {
                                 );
                             });
 
-                        ui.add_space(20.0);
-                        egui::Frame::new()
-                            .fill(t::wash())
-                            .stroke(egui::Stroke::new(1.0, t::hairline()))
-                            .corner_radius(motion::R)
-                            .inner_margin(egui::Margin::symmetric(16, 12))
-                            .show(ui, |ui| {
-                                ui.set_width(ui.available_width());
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        egui::RichText::new("内容与存档")
-                                            .size(15.0)
-                                            .family(bold_family()),
-                                    );
-                                    ui.add_space(8.0);
-                                    ui.label(
-                                        egui::RichText::new(
-                                            "在左侧「内容」「存档」里按版本管理，这里只负责启动与维护",
-                                        )
-                                        .size(13.0)
-                                        .color(t::sub()),
-                                    );
-                                });
-                            });
-
-                        ui.add_space(10.0);
+                        ui.add_space(16.0);
                         ui.horizontal(|ui| {
                             if self.delete_failed.as_deref() == Some(row.id.as_str()) {
                                 ui.label(
@@ -760,6 +847,7 @@ impl App {
                 RowAction::Launch => self.start_launch(),
                 RowAction::OpenFolder => open_dir = Some(row.game_dir.clone()),
                 RowAction::Export => self.open_export(&row),
+                RowAction::Duplicate => self.open_duplicate(&row),
                 RowAction::Rename => {
                     self.delete_confirm = None;
                     self.renaming = Some((row.id.clone(), row.id.clone()));
@@ -778,7 +866,6 @@ impl App {
             self.delete_confirm = None;
         }
         if go_install {
-            self.show_manage = false;
             self.open_install();
         }
     }
@@ -1304,15 +1391,8 @@ impl App {
             self.start_install_worker(mc, kind, version, name);
         }
         if back {
-            self.show_install = false;
             self.install.repair_target = None;
-            self.error = None;
-            if self.rows.is_empty() {
-                self.show_manage = false;
-            } else {
-                self.show_manage = true;
-                self.ensure_visible_selection();
-            }
+            self.leave_install();
         }
         if choose_pack && let Some(path) = pick_modpack() {
             self.start_modpack(path);
@@ -1400,17 +1480,36 @@ impl App {
                                 )
                                 .clicked()
                             {
-                                self.show_install = false;
                                 self.install.repair_target = None;
                                 self.error = None;
-                                self.show_manage = !self.rows.is_empty();
-                                self.ensure_visible_selection();
+                                self.leave_install();
                             }
                         });
                     });
             });
         });
     }
+}
+
+/// 版本详情里一格能点的数字：大一点的数，下面是它是什么。
+fn stat_button(ui: &mut egui::Ui, value: usize, label: &str) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(84.0, 50.0), egui::Sense::click());
+    list_row_fill(ui, rect, false, &response);
+    ui.painter().text(
+        rect.left_top() + egui::vec2(10.0, 8.0),
+        egui::Align2::LEFT_TOP,
+        value.to_string(),
+        egui::FontId::new(17.0, bold_family()),
+        t::ink(),
+    );
+    ui.painter().text(
+        rect.left_top() + egui::vec2(10.0, 30.0),
+        egui::Align2::LEFT_TOP,
+        label,
+        egui::FontId::proportional(12.5),
+        t::sub(),
+    );
+    response
 }
 
 pub(crate) fn feature(ui: &mut egui::Ui, title: &str, detail: &str) {
@@ -1478,10 +1577,17 @@ enum RowAction {
     OpenFolder,
     Rename,
     Export,
+    Duplicate,
     Delete,
 }
 
-pub(crate) fn version_row(ui: &mut egui::Ui, row: &Row, active: bool) -> egui::Response {
+/// 版本列表的一行：名字、游戏版本和加载器；右边是「运行中」或者上次什么时候玩的。
+pub(crate) fn version_row(
+    ui: &mut egui::Ui,
+    row: &Row,
+    active: bool,
+    note: Option<(String, bool)>,
+) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 54.0), egui::Sense::click());
     list_row_fill(ui, rect, active, &response);
@@ -1492,8 +1598,30 @@ pub(crate) fn version_row(ui: &mut egui::Ui, row: &Row, active: bool) -> egui::R
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
     child.spacing_mut().item_spacing.x = 10.0;
-    status_dot(&mut child, row.health.missing == 0);
+    match &note {
+        Some((_, true)) => {
+            let (dot, _) = child.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+            child
+                .painter()
+                .circle_filled(dot.center(), 3.5, t::accent());
+        }
+        _ => status_dot(&mut child, row.health.missing == 0),
+    }
+    if let Some((text, running)) = &note {
+        let font = egui::FontId::proportional(12.0);
+        child.painter().text(
+            egui::pos2(inner.right(), inner.top() + 9.0),
+            egui::Align2::RIGHT_CENTER,
+            text,
+            font,
+            if *running { t::accent() } else { t::dim() },
+        );
+    }
     child.vertical(|ui| {
+        // 右上角留给「运行中」「3 天前玩过」。
+        if note.is_some() {
+            ui.set_max_width(inner.width() - 92.0);
+        }
         ui.spacing_mut().item_spacing.y = 2.0;
         // 列表里放不下就省略，悬停整行看全名。
         ui.add(egui::Label::new(egui::RichText::new(&row.id).size(14.0)).truncate());

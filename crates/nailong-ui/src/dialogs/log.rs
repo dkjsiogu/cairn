@@ -452,6 +452,29 @@ impl App {
         }));
     }
 
+    /// 看一个正在运行的游戏的输出（侧栏和启动台的「查看日志」）。
+    pub(crate) fn open_game_log(&mut self, row_id: &str) {
+        if let Some(session) = self.session(row_id) {
+            let same = self
+                .play
+                .last
+                .as_ref()
+                .is_some_and(|last| last.log == session.log);
+            if !same {
+                self.play.last = Some(log::LastLaunch {
+                    label: row_id.to_string(),
+                    log: session.log.clone(),
+                    game_dir: session.game_dir.clone(),
+                    started: std::time::SystemTime::now() - session.started.elapsed(),
+                    outcome: log::Outcome::Running,
+                });
+            }
+        }
+        self.show_settings = false;
+        self.login.open = false;
+        self.log_view = Some(log::LogView::new(log::Tab::Game));
+    }
+
     pub(crate) fn log_overlay(&mut self, ctx: &egui::Context) {
         let Some(view) = &mut self.log_view else {
             return;

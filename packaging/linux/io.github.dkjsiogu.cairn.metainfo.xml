@@ -28,6 +28,11 @@
   <url type="bugtracker">https://github.com/dkjsiogu/cairn/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.44.0" date="2026-11-12">
+      <description>
+        <p>A running game no longer blocks the launcher: the sidebar shows each session, a stuck game can be ended, and different versions can run side by side. Start straight into a world. After a crash, undo the content changes made since the last good session in one step. Ctrl+K finds versions, worlds, pages and settings. Duplicate versions, drop worlds in to import them, play time tracking, tabbed settings, interface zoom, and the window and selected version are remembered.</p>
+      </description>
+    </release>
     <release version="0.43.0" date="2026-11-12">
       <description>
         <p>Export any version as a minimal .mrpack: mods, resource packs and shaders available on Modrinth or CurseForge are saved as download links, and everything else is packed. Cairn can now use the .minecraft folder of other launchers such as PCL, HMCL or the official launcher, with accounts and settings carried over.</p>

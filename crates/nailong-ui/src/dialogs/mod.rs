@@ -3,9 +3,12 @@
 pub(crate) mod account;
 pub(crate) mod add_account;
 pub(crate) mod datadir;
+pub(crate) mod duplicate;
 pub(crate) mod export;
 pub(crate) mod log;
+pub(crate) mod palette;
 pub(crate) mod params;
+pub(crate) mod recovery;
 pub(crate) mod review;
 pub(crate) mod rollback;
 pub(crate) mod settings;

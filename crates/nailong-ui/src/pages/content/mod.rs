@@ -27,9 +27,7 @@ impl App {
         self.content.loader = row.as_ref().and_then(|row| mod_loader(row.loader));
         self.content.row = row;
         self.content.game_dir = game_dir;
-        self.show_mods = true;
-        self.show_install = false;
-        self.show_manage = false;
+        self.page = Page::Content;
         self.content.kind = kind;
         self.content.show_installed = false;
         self.content.installed.clear();
@@ -627,4 +625,6 @@ pub(crate) struct ContentState {
     pub(crate) focus_search: bool,
     /// 拖着文件悬停时的预览：(这些文件, 说明, 能不能导入)。
     pub(crate) drop_preview: Option<(Vec<PathBuf>, String, bool)>,
+    /// 已安装列表扫完就检查更新（从命令面板来的「检查内容更新」）。
+    pub(crate) pending_update_check: bool,
 }
