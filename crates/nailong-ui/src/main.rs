@@ -33,6 +33,8 @@ fn main() -> eframe::Result<()> {
     let root = std::env::args_os()
         .nth(1)
         .map(|p| Root::new(PathBuf::from(p)))
+        // 没在命令行指定时：设置里选过的数据目录，没选过就用默认的。
+        .or_else(|| nailong_core::paths::chosen_root().map(Root::new))
         .unwrap_or_else(|| Root::new(Root::default_root()));
     // 上次下载好的新版本没来得及换上（比如被强制结束）：现在换上，打开新版本。
     if let Ok(Some(_)) = nailong_core::update::apply_staged(&root.cache(), true) {

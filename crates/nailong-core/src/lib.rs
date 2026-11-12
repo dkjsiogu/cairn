@@ -5,6 +5,7 @@ pub mod blob;
 pub mod builtin;
 pub mod cancel;
 pub mod error;
+pub mod export;
 pub mod gclog;
 pub mod http;
 pub mod install;

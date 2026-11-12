@@ -311,6 +311,13 @@ pub(crate) mod plan {
     pub(crate) const CONTENT: &[(&str, f32)] = &[("Mod 文件", 85.0), ("前置|依赖", 10.0)];
     /// 下载 Java。
     pub(crate) const JAVA: &[(&str, f32)] = &[("下载 Java", 85.0), ("解压 Java", 10.0)];
+    /// 导出整合包。
+    pub(crate) const EXPORT: &[(&str, f32)] = &[
+        ("读取文件", 30.0),
+        ("Modrinth", 8.0),
+        ("CurseForge", 7.0),
+        ("打包", 55.0),
+    ];
 }
 
 pub(crate) fn source_name(host: &str) -> String {

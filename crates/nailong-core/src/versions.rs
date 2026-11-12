@@ -375,7 +375,12 @@ pub fn rename(root: &Root, from: &str, to: &str) -> Result<String> {
     if !same_folder && (to_dir.exists() || exists_ignoring_case(&root.versions(), &to)) {
         return Err(Error::Plain(format!("已经有叫「{to}」的版本了")));
     }
-    let mut version = manifest::load(root, from)?;
+    // 按原样改 id：别的启动器写的版本文件（比如 HMCL 的 patches）别的部分一个字都不动。
+    let json_path = root.version_json(from);
+    let mut version: Value = std::fs::read(&json_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .ok_or_else(|| Error::Plain(format!("读不懂「{from}」的版本文件")))?;
     std::fs::rename(&from_dir, &to_dir).map_err(|e| io(&from_dir, e))?;
     let renames = [
         (format!("{from}.json"), format!("{to}.json")),
@@ -387,8 +392,9 @@ pub fn rename(root: &Root, from: &str, to: &str) -> Result<String> {
             std::fs::rename(&old, to_dir.join(new)).map_err(|e| io(&old, e))?;
         }
     }
-    version.id = to.clone();
-    write_atomic(&root.version_json(&to), &version_text(&version)?)?;
+    version["id"] = Value::String(to.clone());
+    let text = serde_json::to_vec_pretty(&version).map_err(|e| Error::Plain(e.to_string()))?;
+    write_atomic(&root.version_json(&to), &text)?;
     let mut all = crate::launchcfg::load_all(root);
     if let Some(settings) = all.remove(from) {
         crate::launchcfg::save(root, &to, &settings)?;
@@ -408,6 +414,66 @@ fn child_dir(root: &Root, name: &str) -> Result<PathBuf> {
         return Err(Error::Plain(format!("找不到版本「{name}」")));
     }
     Ok(dir)
+}
+
+/// 这个版本的游戏目录：Mod、存档、配置放在哪。
+///
+/// - Cairn 装的（版本文件里有 `cairn` 记录）：就是版本文件夹。
+/// - HMCL 装的：照它的 `hmclversion.cfg`（根目录、版本文件夹或者自定义的地方）。
+/// - 别的（PCL、官方启动器……）：看东西实际在哪。版本文件夹里有 mods、saves、config 这类
+///   就是它；没有、而 `.minecraft` 根目录有，就是没开「版本隔离」，用根目录。
+pub fn game_dir(root: &Root, name: &str) -> PathBuf {
+    let dir = root.version_dir(name);
+    if meta(root, name).is_some() {
+        return dir;
+    }
+    if let Some(found) = hmcl_game_dir(root, &dir) {
+        return found;
+    }
+    let has_data = |d: &Path| {
+        ["mods", "saves", "config", "options.txt", "resourcepacks"]
+            .iter()
+            .any(|n| d.join(n).exists())
+    };
+    if !has_data(&dir) && has_data(root.dir()) {
+        root.dir().to_path_buf()
+    } else {
+        dir
+    }
+}
+
+/// HMCL 每个版本的设置：`gameDirType` 是 0（根目录）、1（版本文件夹）或 2（自定义，见 `gameDir`）。
+/// 「跟随全局设置」时这里不管，交给上面按东西在哪判断。
+fn hmcl_game_dir(root: &Root, dir: &Path) -> Option<PathBuf> {
+    let text = std::fs::read(dir.join("hmclversion.cfg")).ok()?;
+    let value: Value = serde_json::from_slice(&text).ok()?;
+    if value.get("usesGlobal").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    let kind = value.get("gameDirType")?;
+    let kind = kind.as_u64().or_else(|| match kind.as_str()? {
+        "ROOT_FOLDER" => Some(0),
+        "VERSION_FOLDER" => Some(1),
+        "CUSTOM" => Some(2),
+        _ => None,
+    })?;
+    match kind {
+        0 => Some(root.dir().to_path_buf()),
+        1 => Some(dir.to_path_buf()),
+        2 => {
+            let custom = value.get("gameDir")?.as_str()?.trim();
+            if custom.is_empty() {
+                return None;
+            }
+            let custom = PathBuf::from(custom);
+            Some(if custom.is_absolute() {
+                custom
+            } else {
+                root.dir().join(custom)
+            })
+        }
+        _ => None,
+    }
 }
 
 /// 全部版本的名字（`versions/` 下有同名 JSON 的文件夹）。
@@ -731,6 +797,39 @@ mod tests {
             profile: "neoforge-21.1.209".into(),
             pack: None,
         }
+    }
+
+    #[test]
+    fn other_launchers_versions_find_their_game_folder() {
+        let root = temp_root("gamedir");
+        fake_store(&root);
+        // Cairn 装的：版本文件夹。
+        create(&root, "生存", "neoforge-21.1.209", neoforge_meta()).unwrap();
+        assert_eq!(game_dir(&root, "生存"), root.version_dir("生存"));
+        // PCL 没开版本隔离：东西在根目录。
+        write(
+            &root.version_json("1.20.1-Forge"),
+            br#"{"id":"1.20.1-Forge"}"#,
+        );
+        write(&root.dir().join("saves/家/level.dat"), b"w");
+        assert_eq!(game_dir(&root, "1.20.1-Forge"), root.dir());
+        // 开了版本隔离：版本文件夹里有东西。
+        write(&root.version_json("隔离"), r#"{"id":"隔离"}"#.as_bytes());
+        write(&root.version_dir("隔离").join("mods/a.jar"), b"m");
+        assert_eq!(game_dir(&root, "隔离"), root.version_dir("隔离"));
+        // HMCL：照它的设置。
+        write(&root.version_json("hmcl"), br#"{"id":"hmcl"}"#);
+        write(
+            &root.version_dir("hmcl").join("hmclversion.cfg"),
+            br#"{"usesGlobal":false,"gameDirType":1}"#,
+        );
+        assert_eq!(game_dir(&root, "hmcl"), root.version_dir("hmcl"));
+        write(
+            &root.version_dir("hmcl").join("hmclversion.cfg"),
+            br#"{"usesGlobal":false,"gameDirType":2,"gameDir":"/opt/games/mc"}"#,
+        );
+        assert_eq!(game_dir(&root, "hmcl"), PathBuf::from("/opt/games/mc"));
+        let _ = std::fs::remove_dir_all(root.dir());
     }
 
     #[test]

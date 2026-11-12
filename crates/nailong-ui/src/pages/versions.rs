@@ -278,6 +278,13 @@ impl App {
             self.start_launch();
         }
         ui.add_space(6.0);
+        if motion::secondary_sized(ui, "导出整合包", self.busy.is_none(), 96.0, 34.0, 12.0)
+            .on_hover_text("网上能下到的 Mod 只记地址，别的打包进去")
+            .clicked()
+        {
+            self.open_export(row);
+        }
+        ui.add_space(6.0);
         if motion::secondary_sized(ui, "打开目录", true, 78.0, 34.0, 12.0).clicked() {
             *open_dir = Some(row.game_dir.clone());
         }
@@ -385,6 +392,12 @@ impl App {
                                 if ui.add_enabled(!busy, egui::Button::new("改名")).clicked() {
                                     pick(RowAction::Rename);
                                 }
+                                if ui
+                                    .add_enabled(!busy, egui::Button::new("导出整合包"))
+                                    .clicked()
+                                {
+                                    pick(RowAction::Export);
+                                }
                                 ui.separator();
                                 if ui
                                     .add_enabled(
@@ -452,12 +465,12 @@ impl App {
                     return;
                 };
 
-                let compact = ui.available_width() < 800.0;
+                let compact = ui.available_width() < 900.0;
                 ui.horizontal(|ui| {
                     let title_w = if compact {
                         ui.available_width()
                     } else {
-                        (ui.available_width() - 196.0).max(240.0)
+                        (ui.available_width() - 300.0).max(240.0)
                     };
                     ui.allocate_ui_with_layout(
                         egui::vec2(title_w, 64.0),
@@ -614,10 +627,13 @@ impl App {
                                     }
                                 });
                                 ui.add_space(4.0);
+                                let own = row.game_dir == self.root.version_dir(&row.id);
                                 ui.label(
-                                    egui::RichText::new(
-                                        "Mod、存档、配置都在这个文件夹里，和别的版本互不影响",
-                                    )
+                                    egui::RichText::new(if own {
+                                        "Mod、存档、配置都在这个文件夹里，和别的版本互不影响"
+                                    } else {
+                                        "这个版本没开版本隔离：Mod、存档、配置在 .minecraft 里，和别的没隔离的版本共用"
+                                    })
                                     .size(13.0)
                                     .color(t::dim()),
                                 );
@@ -678,8 +694,12 @@ impl App {
                                 }
                             } else if self.delete_confirm.as_deref() == Some(row.id.as_str()) {
                                 let worlds = self.version_summary(&row).3;
+                                // 没开版本隔离的（别的启动器装的）：存档在 .minecraft 里，不跟着走。
+                                let own = row.game_dir == self.root.version_dir(&row.id);
                                 ui.label(
-                                    egui::RichText::new(if worlds > 0 {
+                                    egui::RichText::new(if !own {
+                                        format!("把「{}」移到回收站？存档和 Mod 在 .minecraft 里，不会动", row.id)
+                                    } else if worlds > 0 {
                                         format!("把「{}」连同 {worlds} 个世界移到回收站？", row.id)
                                     } else {
                                         format!("把「{}」移到回收站？", row.id)
@@ -739,6 +759,7 @@ impl App {
             match action {
                 RowAction::Launch => self.start_launch(),
                 RowAction::OpenFolder => open_dir = Some(row.game_dir.clone()),
+                RowAction::Export => self.open_export(&row),
                 RowAction::Rename => {
                     self.delete_confirm = None;
                     self.renaming = Some((row.id.clone(), row.id.clone()));
@@ -1456,6 +1477,7 @@ enum RowAction {
     Launch,
     OpenFolder,
     Rename,
+    Export,
     Delete,
 }
 

@@ -113,6 +113,82 @@ pub fn install_version_profile(
     Ok(version.id)
 }
 
+/// 本机找到的另一个 .minecraft：在哪、像是哪个启动器的、里面有几个版本。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OtherRoot {
+    pub dir: PathBuf,
+    /// 「PCL」「HMCL」「官方启动器」，认不出时是上一级文件夹的名字。
+    pub launcher: String,
+    pub versions: usize,
+}
+
+/// 本机别的启动器的 .minecraft（有版本的才算），给设置里「换数据目录」列出来。
+pub fn other_roots(current: &Root) -> Vec<OtherRoot> {
+    let here = std::fs::canonicalize(current.dir()).unwrap_or_else(|_| current.dir().to_path_buf());
+    let official = official_root();
+    let mut out: Vec<OtherRoot> = candidate_roots(current)
+        .into_iter()
+        .filter_map(|dir| {
+            let real = std::fs::canonicalize(&dir).ok()?;
+            if real == here {
+                return None;
+            }
+            let versions = std::fs::read_dir(real.join("versions"))
+                .ok()?
+                .flatten()
+                .filter(|entry| {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    entry.path().join(format!("{name}.json")).is_file()
+                })
+                .count();
+            (versions > 0).then(|| OtherRoot {
+                launcher: launcher_of(&real, official.as_deref()),
+                dir: real,
+                versions,
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.dir.cmp(&b.dir));
+    out.dedup_by(|a, b| a.dir == b.dir);
+    out
+}
+
+/// 看 .minecraft 旁边有什么，猜是哪个启动器的。
+fn launcher_of(dir: &Path, official: Option<&Path>) -> String {
+    if official
+        .and_then(|o| std::fs::canonicalize(o).ok())
+        .as_deref()
+        == Some(dir)
+    {
+        return "官方启动器".into();
+    }
+    let parent = dir.parent().unwrap_or(dir);
+    let names: Vec<String> = std::fs::read_dir(parent)
+        .map(|entries| {
+            entries
+                .flatten()
+                .take(256)
+                .map(|e| e.file_name().to_string_lossy().to_ascii_lowercase())
+                .collect()
+        })
+        .unwrap_or_default();
+    let path = parent.to_string_lossy().to_ascii_lowercase();
+    if names
+        .iter()
+        .any(|n| n.starts_with("plain craft launcher") || n == "pcl" || n.starts_with("pcl"))
+        || path.contains("pcl")
+    {
+        "PCL".into()
+    } else if names.iter().any(|n| n.starts_with("hmcl") || n == ".hmcl") || path.contains("hmcl") {
+        "HMCL".into()
+    } else {
+        parent
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| parent.display().to_string())
+    }
+}
+
 fn candidate_roots(current: &Root) -> Vec<PathBuf> {
     let mut roots = vec![current.dir().to_path_buf()];
     if let Some(parent) = current.dir().parent() {

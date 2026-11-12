@@ -758,7 +758,10 @@ impl Http {
             current: std::sync::Mutex::new((None, None)),
         };
         batch.emit(true);
-        let workers = specs.len().clamp(1, MAX_PARALLEL);
+        // 资源这类几 KB 的小文件开满 32 个连接才跑得满；Mod 这类几 MB 的大文件连接一多，
+        // 网络走代理时容易有一部分连不上，同时只下 12 个。
+        let big = total_bytes > 0 && total_bytes / specs.len() as u64 > 1024 * 1024;
+        let workers = specs.len().clamp(1, if big { 12 } else { MAX_PARALLEL });
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(workers)
             .build()
@@ -996,6 +999,7 @@ pub fn fallback_urls(original: &str, mirror_first: bool) -> Vec<String> {
 }
 
 fn mcim_url(url: &str) -> Option<String> {
+    // 只有接口走镜像：MCIM 的文件地址只是跳回官方 CDN，换过去也没用。
     let rules = [
         (
             "https://api.modrinth.com/",

@@ -203,6 +203,62 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// 玩家在设置里选的数据目录，记在 Cairn 自己的配置里（不放进任何一个 .minecraft）。
+fn chosen_root_file() -> Option<PathBuf> {
+    directories::BaseDirs::new().map(|d| d.config_dir().join(APP_DIR).join("data-dir.txt"))
+}
+
+/// 玩家选过的数据目录；没选过、或者那个文件夹已经不在了，返回 None（用默认的）。
+pub fn chosen_root() -> Option<PathBuf> {
+    let text = std::fs::read_to_string(chosen_root_file()?).ok()?;
+    let dir = PathBuf::from(text.trim());
+    (!text.trim().is_empty() && dir.is_dir()).then_some(dir)
+}
+
+/// 记下（`Some`）或忘掉（`None`，回到默认）选的数据目录。下次打开 Cairn 生效。
+pub fn choose_root(dir: Option<&Path>) -> Result<()> {
+    let Some(file) = chosen_root_file() else {
+        return Err(Error::Plain("找不到放设置的地方".into()));
+    };
+    match dir {
+        Some(dir) => write_atomic(&file, dir.to_string_lossy().as_bytes()),
+        None => match std::fs::remove_file(&file) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(io(&file, e)),
+        },
+    }
+}
+
+/// 换数据目录时一起带过去的：账户、界面设置、每个版本的启动参数、「测一下这台电脑」的结论。
+pub const CARRIED: [&str; 4] = [
+    "accounts.json",
+    "ui.json",
+    "launch-settings.json",
+    "bench.json",
+];
+
+/// 把 [`CARRIED`] 复制到新的数据目录；那边已经有的不覆盖。返回复制了几个。
+pub fn carry_settings(from: &Root, to: &Path) -> Result<usize> {
+    std::fs::create_dir_all(to).map_err(|e| io(to, e))?;
+    let mut copied = 0;
+    for name in CARRIED {
+        let source = from.dir().join(name);
+        let dest = to.join(name);
+        if source.is_file() && !dest.exists() {
+            std::fs::copy(&source, &dest).map_err(|e| io(&dest, e))?;
+            // 账户里有登录凭证：和原来一样只给自己读写。
+            #[cfg(unix)]
+            if name == "accounts.json" {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600));
+            }
+            copied += 1;
+        }
+    }
+    Ok(copied)
+}
+
 /// 移到回收站（不是直接删掉）。Linux 用 `gio trash`，Windows 用系统的回收站。
 pub fn to_trash(path: &Path) -> Result<()> {
     #[cfg(windows)]
@@ -251,6 +307,26 @@ pub fn to_trash(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod root_tests {
     use super::*;
+
+    #[test]
+    fn switching_folders_carries_settings_without_overwriting() {
+        let base = std::env::temp_dir().join(format!("cairn-carry-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let old = Root::new(base.join("old"));
+        std::fs::create_dir_all(old.dir()).unwrap();
+        std::fs::write(old.dir().join("accounts.json"), b"accounts").unwrap();
+        std::fs::write(old.dir().join("ui.json"), b"old ui").unwrap();
+        let new = base.join("pcl/.minecraft");
+        std::fs::create_dir_all(&new).unwrap();
+        std::fs::write(new.join("ui.json"), b"new ui").unwrap();
+        assert_eq!(carry_settings(&old, &new).unwrap(), 1);
+        assert_eq!(
+            std::fs::read(new.join("accounts.json")).unwrap(),
+            b"accounts"
+        );
+        assert_eq!(std::fs::read(new.join("ui.json")).unwrap(), b"new ui");
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn moves_the_old_data_dir_once() {

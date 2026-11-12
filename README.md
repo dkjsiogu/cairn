@@ -8,7 +8,7 @@
 
 **简体中文** | [English](README.en.md)
 
-> 当前版本：**0.42.5**（预览版）
+> 当前版本：**0.43.0**（预览版）
 >
 > 目标：小体积、少依赖、安装过程可见、中断可补。功能边界见 [实现状态](docs/design/14-implementation-status.md)。
 
@@ -26,6 +26,11 @@ Cairn 是登山者叠在路边的石堆：它不帮你走路，只标出回去�
 它不是“万能启动器”，也还不是 1.0。能做和不能做的，下文列清楚了。
 
 ## 界面
+
+0.43：导出整合包；能直接用别的启动器的 .minecraft。
+
+- 任何版本都能导出成 `.mrpack`。网上能下到的 Mod、资源包、光影只记下载地址，找不到的连同 config、kubejs、选中的世界打包进去。150 个 Mod 的整合包，Mod 共 901 MB，导出来 307 MB。详见 [28 · 导出整合包](docs/design/28-export.md)。
+- 设置里可以把数据目录换成 PCL、HMCL、官方启动器的 `.minecraft`，账户和设置一起带过去。没开版本隔离的版本、HMCL 自定义的游戏目录和 HMCL 的版本文件都认得。详见 [27 §10](docs/design/27-version-folders.md#10-别的启动器的-minecraft)。
 
 0.42：一个版本一个文件夹。
 
@@ -163,6 +168,8 @@ Cairn 是登山者叠在路边的石堆：它不帮你走路，只标出回去�
 
 把 `.mrpack` 或 `.zip` 拖进窗口即可开始导入。单个 mod `.jar` 目前不会被当成整合包处理。
 
+导出：版本详情里点「导出整合包」，得到一个 `.mrpack`。网上有的文件只记地址，其余打包。命令行是 `cairn-cli export <版本> <文件>`。
+
 ### 内容库：发现与已安装
 
 - 左侧「内容」是唯一的 Mod / 资源包 / 光影入口；页头的「已安装 / 发现」是同一个库的两种模式，不用在两个页面之间跳。
@@ -206,7 +213,7 @@ Cairn 是登山者叠在路边的石堆：它不帮你走路，只标出回去�
 | 平台 | 文件 | 大小 | 要求 |
 |---|---|---:|---|
 | Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | 约 9 MB | Windows 10/11，Java 21 |
-| Linux x64 (deb) | [cairn_0.42.5_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.42.5_amd64.deb) | 约 3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39，Java 21 |
+| Linux x64 (deb) | [cairn_0.43.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.43.0_amd64.deb) | 约 3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39，Java 21 |
 
 校验值：[SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS)。
 
@@ -233,7 +240,7 @@ sudo apt update && sudo apt install cairn
 或者下载 deb 安装，效果一样：deb 会自动加上这个 apt 源。
 
 ```bash
-sudo apt install ./cairn_0.42.5_amd64.deb
+sudo apt install ./cairn_0.43.0_amd64.deb
 ```
 
 也可以双击 deb 用软件中心安装。安装后应用菜单里会有 **Cairn**。装过旧的 `nailong` 包也没关系，`cairn` 会替换它。

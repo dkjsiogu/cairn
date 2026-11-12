@@ -409,6 +409,7 @@ impl App {
         let mut close = false;
         let mut open_account = false;
         let mut open_dir: Option<PathBuf> = None;
+        let mut open_data_dir = false;
         let mut refresh = false;
         let mut recheck_java = false;
         let mut download_java = false;
@@ -588,9 +589,12 @@ impl App {
                                 });
                                 ui.add_space(6.0);
                                 ui.horizontal(|ui| {
-                                    if path_row(ui, "数据目录", self.root.dir()) {
+                                    let (open, change) =
+                                        path_row_with(ui, "数据目录", self.root.dir(), Some("换"));
+                                    if open {
                                         open_dir = Some(self.root.dir().to_path_buf());
                                     }
+                                    open_data_dir |= change;
                                 });
                             });
                         ui.add_space(12.0);
@@ -747,6 +751,11 @@ impl App {
         }
         if let Some(dir) = open_dir {
             open_folder(&dir);
+        }
+        if open_data_dir {
+            self.save_ui_config();
+            self.show_settings = false;
+            self.open_data_dir();
         }
         if refresh {
             self.refresh();

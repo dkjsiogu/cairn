@@ -236,6 +236,7 @@ impl App {
                     self.content.quick = None;
                     self.content.error = Some(content_error(e));
                 }
+                Msg::ExportDone(result) => self.finish_export(result),
                 Msg::ContentDone(done) => {
                     self.busy = None;
                     self.cancel_requested = false;
@@ -541,6 +542,8 @@ pub(crate) enum Msg {
     ModsCancelled,
     /// 拖入导入或删除内容在后台做完了。
     ContentDone(ContentDone),
+    /// 导出整合包做完了。
+    ExportDone(Result<nailong_core::export::Report, String>),
     ModsInstalled(Result<Vec<installed::InstalledEntry>, String>),
     ModsUpdates(Result<Vec<installed::UpdateCandidate>, String>),
     Browse {

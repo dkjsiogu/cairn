@@ -2,6 +2,8 @@
 
 pub(crate) mod account;
 pub(crate) mod add_account;
+pub(crate) mod datadir;
+pub(crate) mod export;
 pub(crate) mod log;
 pub(crate) mod params;
 pub(crate) mod review;

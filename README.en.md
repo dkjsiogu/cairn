@@ -8,7 +8,7 @@ A small, native Minecraft: Java Edition launcher written in Rust. Renamed to **C
 
 [简体中文](README.md) | **English**
 
-> Current version: **0.42.5** (preview)
+> Current version: **0.43.0** (preview)
 >
 > Goals: small binaries, few dependencies, visible install progress, and a repair path after interruption. See [implementation status](docs/design/14-implementation-status.md) for exact boundaries.
 
@@ -26,6 +26,11 @@ A cairn is the pile of stones hikers leave by a trail: it does not walk for you,
 It is not a universal launcher, and it is not 1.0 yet. What works and what does not is laid out below.
 
 ## Interface
+
+0.43: export modpacks; use another launcher's .minecraft directly.
+
+- Export any version as a `.mrpack`. Mods, resource packs and shaders found on Modrinth or CurseForge are listed by download link; everything else — unlisted mods, config, kubejs, the worlds you pick — is packed. A 150-mod pack with 901 MB of mods exports to 307 MB. See [28 · Export](docs/design/28-export.md).
+- Settings can switch the data folder to the `.minecraft` of PCL, HMCL or the official launcher; accounts and settings come along. Versions without isolation, HMCL custom game folders and HMCL version files all work. See [27 §10](docs/design/27-version-folders.md).
 
 0.42: one folder per version.
 
@@ -163,6 +168,8 @@ Six formats are detected automatically:
 
 Drag a `.mrpack` or `.zip` into the window to start an import. A single mod `.jar` is not treated as a modpack.
 
+Export: click "导出整合包" on a version to get a `.mrpack`. Files available online are linked; the rest is packed. From the command line: `cairn-cli export <version> <file>`.
+
 ### Content library: discovery and installed
 
 - **Content** in the sidebar is the only place for mods, resource packs and shaders. The “Installed / Discover” tabs are two modes of the same library, not two pages.
@@ -205,7 +212,7 @@ Drag a `.mrpack` or `.zip` into the window to start an import. A single mod `.ja
 | Platform | File | Size | Requirements |
 |---|---|---:|---|
 | Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | ~9 MB | Windows 10/11, Java 21 |
-| Linux x64 (deb) | [cairn_0.42.5_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.42.5_amd64.deb) | ~3.4 MB | Ubuntu 24.04+ / glibc ≥ 2.39, Java 21 |
+| Linux x64 (deb) | [cairn_0.43.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.43.0_amd64.deb) | ~3.4 MB | Ubuntu 24.04+ / glibc ≥ 2.39, Java 21 |
 
 Checksums: [SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS).
 
@@ -232,7 +239,7 @@ sudo apt update && sudo apt install cairn
 Or install the deb; it adds the same apt repository:
 
 ```bash
-sudo apt install ./cairn_0.42.5_amd64.deb
+sudo apt install ./cairn_0.43.0_amd64.deb
 ```
 
 You can also double-click the deb in a software center. After installation, **Cairn** appears in the application menu. An installed `nailong` package is replaced automatically.

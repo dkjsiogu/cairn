@@ -336,6 +336,15 @@ pub fn relaunch() -> Result<()> {
     Ok(())
 }
 
+/// 重新打开 Cairn，不带命令行参数（换了数据目录以后用：新的数据目录从设置里读）。
+pub fn restart_fresh() -> Result<()> {
+    let exe = running_exe().ok_or_else(|| Error::Install("找不到正在运行的程序".into()))?;
+    std::process::Command::new(&exe)
+        .spawn()
+        .map_err(|e| Error::Install(format!("没能重新打开：{e}")))?;
+    Ok(())
+}
+
 /// 某个版本的发布页面。
 pub fn release_page(version: &str) -> String {
     format!("https://github.com/{REPO}/releases/tag/v{version}")

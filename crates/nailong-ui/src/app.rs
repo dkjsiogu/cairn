@@ -58,6 +58,8 @@ impl App {
                 name_edited: false,
                 repair_target: None,
             },
+            export: Default::default(),
+            data_dir: Default::default(),
             rollback: RollbackState {
                 open: false,
                 points: Vec::new(),
@@ -199,6 +201,28 @@ impl App {
                     app.show_manage = true;
                     app.show_install = false;
                 }
+                "export" | "export-done" => {
+                    if let Some(row) = &row {
+                        app.open_export(row);
+                        if screen == "export-done" {
+                            app.export.result = Some(Ok(nailong_core::export::Report {
+                                path: PathBuf::from(
+                                    "/home/player/下载/新：模拟大都市-1.0.0.mrpack",
+                                ),
+                                online: 150,
+                                packed: 6254,
+                                bytes: 322_000_000,
+                                not_found: vec![
+                                    "mods/aegis-1.4.0.jar".into(),
+                                    "mods/waimailaile-1.0.8.jar".into(),
+                                    "resourcepacks/新模拟大都市音频.zip".into(),
+                                ],
+                                warnings: Vec::new(),
+                            }));
+                        }
+                    }
+                }
+                "datadir" => app.open_data_dir(),
                 "rename" | "delete" => {
                     app.show_manage = true;
                     app.show_install = false;
@@ -484,6 +508,7 @@ impl App {
         match self.busy {
             Some(Task::Install) | Some(Task::Mods) => Some("正在安装，完成后再试"),
             Some(Task::Files) => Some("正在整理内容，完成后再试"),
+            Some(Task::Export) => Some("正在导出整合包，完成后再试"),
             Some(Task::Bench) => Some("正在测试这台电脑，完成后再试"),
             Some(Task::Java) => Some("正在下载 Java，完成后再试"),
             Some(Task::Launch)
@@ -609,6 +634,7 @@ impl App {
             Some(Task::Launch) => "游戏运行中，退出游戏后再安装",
             Some(Task::Bench) => "正在测试这台电脑，完成后再试",
             Some(Task::Java) => "正在下载 Java，完成后再试",
+            Some(Task::Export) => "正在导出整合包，完成后再试",
             _ => "正在安装，完成后再试",
         }
     }
@@ -732,7 +758,7 @@ impl App {
                 mc,
                 loader,
                 loader_version,
-                game_dir: self.root.version_dir(&name),
+                game_dir: versions::game_dir(&self.root, &name),
                 pack,
                 health: health::inspect(&self.root, &name),
             });
@@ -846,6 +872,10 @@ pub(crate) struct App {
     pub(crate) login: LoginState,
     /// 恢复点弹窗。
     pub(crate) rollback: RollbackState,
+    /// 导出整合包的弹窗。
+    pub(crate) export: crate::dialogs::export::ExportState,
+    /// 换数据目录的弹窗。
+    pub(crate) data_dir: crate::dialogs::datadir::DataDirState,
     /// 启动器自己的更新：检查结果、更新弹窗和下载进度。
     pub(crate) update: UpdateState,
     /// 等待确认的安装。
@@ -1087,6 +1117,8 @@ impl eframe::App for App {
         self.log_overlay(ui.ctx());
         self.launch_overlay(ui.ctx());
         self.update_overlay(ui.ctx());
+        self.export_overlay(ui.ctx());
+        self.data_dir_overlay(ui.ctx());
         if self.gallery.shots.as_ref().is_some_and(|s| s.viewing()) {
             let faces = self.player_faces(ui.ctx());
             if let Some(shots) = &mut self.gallery.shots {

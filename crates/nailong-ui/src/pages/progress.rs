@@ -16,6 +16,7 @@ impl App {
         let bench = matches!(self.busy, Some(Task::Bench));
         let verb = match self.busy {
             Some(Task::Mods) => "正在下载内容",
+            Some(Task::Export) => "正在导出整合包",
             Some(Task::Bench) => "正在测试",
             Some(Task::Java) => "正在下载 Java",
             _ => "正在安装",

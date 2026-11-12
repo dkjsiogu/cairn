@@ -57,6 +57,18 @@ enum Commands {
     },
     /// 给版本改名
     Rename { from: String, to: String },
+    /// 导出整合包（.mrpack）：网上能下到的 Mod 只记地址，别的打包进去
+    Export {
+        name: String,
+        /// 存到哪（.mrpack）
+        dest: PathBuf,
+        /// 整合包的版本号
+        #[arg(long, default_value = "1.0.0")]
+        version: String,
+        /// 只导出这些（例如 mods config saves/家）；不填就用默认勾选的
+        #[arg(long = "include")]
+        include: Vec<String>,
+    },
     /// 清理没有版本在用的运行库、资源和缓存；不加 --yes 只列出能释放多少
     Clean {
         #[arg(long)]
@@ -160,6 +172,50 @@ fn main() -> anyhow::Result<()> {
         Commands::Rename { from, to } => {
             let to = versions::rename(&root, &from, &to)?;
             println!("✓ 「{from}」改名为「{to}」");
+        }
+        Commands::Export {
+            name,
+            dest,
+            version,
+            include,
+        } => {
+            let game_dir = versions::game_dir(&root, &name);
+            let include = if include.is_empty() {
+                nailong_core::export::items(&game_dir, &name)
+                    .into_iter()
+                    .filter(|item| item.default_on)
+                    .map(|item| item.path)
+                    .collect()
+            } else {
+                include
+            };
+            println!("→ 导出：{}", include.join("、"));
+            let options = nailong_core::export::Options {
+                name: name.clone(),
+                version,
+                summary: String::new(),
+                include,
+            };
+            let start = std::time::Instant::now();
+            let report =
+                nailong_core::export::export(&root, &name, &options, &dest, &cli_progress())?;
+            println!(
+                "✓ {}：{} 个文件在线下载，{} 个打包进去，{:.1} MB，用时 {:.1} 秒",
+                report.path.display(),
+                report.online,
+                report.packed,
+                report.bytes as f64 / 1024.0 / 1024.0,
+                start.elapsed().as_secs_f64()
+            );
+            if !report.not_found.is_empty() {
+                println!("  网上找不到、打包进去的：");
+                for path in &report.not_found {
+                    println!("    {path}");
+                }
+            }
+            for warning in &report.warnings {
+                println!("  ! {warning}");
+            }
         }
         Commands::Clean { yes, list } => {
             let plan = versions::plan_cleanup(&root)?;
@@ -352,7 +408,7 @@ fn main() -> anyhow::Result<()> {
                 width,
                 height,
                 demo,
-                game_dir: Some(game_dir.unwrap_or_else(|| root.version_dir(&profile))),
+                game_dir: Some(game_dir.unwrap_or_else(|| versions::game_dir(&root, &profile))),
                 dry_run,
                 print_plan,
                 ..Default::default()

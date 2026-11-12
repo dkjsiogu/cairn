@@ -309,7 +309,42 @@ pub struct Resolved {
 pub fn load(root: &Root, id: &str) -> Result<VersionJson> {
     let path = root.version_json(id);
     let data = std::fs::read(&path).map_err(|e| crate::error::io(&path, e))?;
-    serde_json::from_slice(&data).map_err(|e| json(&path, e))
+    let version: VersionJson = serde_json::from_slice(&data).map_err(|e| json(&path, e))?;
+    Ok(apply_patches(version))
+}
+
+/// HMCL 的写法：顶层没有主类，原版和加载器各是 `patches` 里的一项，按 `priority` 从小到大
+/// 叠起来（原版在最下面，加载器在上面）。合并好的就是一个普通的版本文件。
+fn apply_patches(mut version: VersionJson) -> VersionJson {
+    if version.main_class.is_some() {
+        return version;
+    }
+    let Some(Value::Array(patches)) = version.extra.get("patches").cloned() else {
+        return version;
+    };
+    let mut parsed: Vec<(i64, VersionJson)> = patches
+        .into_iter()
+        .filter_map(|patch| {
+            let priority = patch.get("priority").and_then(Value::as_i64).unwrap_or(0);
+            serde_json::from_value::<VersionJson>(patch)
+                .ok()
+                .map(|v| (priority, v))
+        })
+        .collect();
+    if parsed.is_empty() {
+        return version;
+    }
+    parsed.sort_by_key(|(priority, _)| *priority);
+    let mut layers = parsed.into_iter().map(|(_, v)| v);
+    let Some(mut merged) = layers.next() else {
+        return version;
+    };
+    for layer in layers {
+        merged = merge(merged, layer);
+    }
+    version.extra.remove("patches");
+    // 顶层放在最上面：留下它的 id、jar 这些。
+    merge(merged, version)
 }
 
 /// Merge the inheritance chain without requiring the client jar to exist.
@@ -861,6 +896,71 @@ pub fn load_map(_root: &Root) -> HashMap<String, String> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn hmcl_patches_are_stacked_by_priority() {
+        let dir =
+            std::env::temp_dir().join(format!("cairn-hmcl-{}", uuid::Uuid::new_v4().simple()));
+        let root = Root::new(&dir);
+        let path = root.version_json("1.20.1-Forge");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "id": "1.20.1-Forge",
+                "patches": [
+                    {"id": "forge", "priority": 30000,
+                     "mainClass": "cpw.mods.bootstraplauncher.BootstrapLauncher",
+                     "arguments": {"game": ["--launchTarget", "forgeclient"]},
+                     "libraries": [{"name": "net.minecraftforge:forge:1.20.1-47.2.0:universal"}]},
+                    {"id": "game", "priority": 0,
+                     "mainClass": "net.minecraft.client.main.Main",
+                     "assetIndex": {"id": "5", "url": "https://x/5.json"},
+                     "arguments": {"game": ["--username", "${auth_player_name}"]},
+                     "libraries": [{"name": "org.lwjgl:lwjgl:3.3.1"}]}
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let version = load(&root, "1.20.1-Forge").unwrap();
+        assert_eq!(version.id, "1.20.1-Forge");
+        assert_eq!(
+            version.main_class.as_deref(),
+            Some("cpw.mods.bootstraplauncher.BootstrapLauncher")
+        );
+        assert_eq!(version.asset_index.unwrap().id, "5");
+        let names: Vec<&str> = version.libraries.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "net.minecraftforge:forge:1.20.1-47.2.0:universal",
+                "org.lwjgl:lwjgl:3.3.1"
+            ]
+        );
+        let game: Vec<String> = version
+            .arguments
+            .unwrap()
+            .game
+            .iter()
+            .filter_map(|a| match a {
+                Argument::Plain(s) => Some(s.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            game,
+            [
+                "--username",
+                "${auth_player_name}",
+                "--launchTarget",
+                "forgeclient"
+            ]
+        );
+        assert!(!version.extra.contains_key("patches"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     use super::*;
 
     fn linux() -> Context {

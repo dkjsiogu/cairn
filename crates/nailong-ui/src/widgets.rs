@@ -400,9 +400,21 @@ pub(crate) fn elide_middle(
 /// 「标签 · 路径 · 打开」一行：标签和按钮宽度固定，路径占剩下的地方，太长从中间省略；
 /// 悬停看全路径，点一下复制。返回「打开」是否被点了。
 pub(crate) fn path_row(ui: &mut egui::Ui, label: &str, path: &std::path::Path) -> bool {
+    path_row_with(ui, label, path, None).0
+}
+
+/// 和 `path_row` 一样，最右边多一个按钮。返回（点了打开，点了这个按钮）。
+pub(crate) fn path_row_with(
+    ui: &mut egui::Ui,
+    label: &str,
+    path: &std::path::Path,
+    extra: Option<&str>,
+) -> (bool, bool) {
     let full = path.display().to_string();
     let font = egui::FontId::proportional(13.0);
     let mut open = false;
+    let mut extra_clicked = false;
+    let extra_w = if extra.is_some() { 54.0 + 6.0 } else { 0.0 };
     ui.horizontal(|ui| {
         let row_w = ui.available_width();
         ui.allocate_ui_with_layout(
@@ -413,7 +425,7 @@ pub(crate) fn path_row(ui: &mut egui::Ui, label: &str, path: &std::path::Path) -
                 ui.label(egui::RichText::new(label).size(13.0).color(t::sub()));
             },
         );
-        let path_w = (row_w - 64.0 - 54.0 - 16.0).max(60.0);
+        let path_w = (row_w - 64.0 - 54.0 - 16.0 - extra_w).max(60.0);
         let shown = elide_middle(ui, &full, &font, path_w);
         let response = ui
             .allocate_ui_with_layout(
@@ -453,8 +465,13 @@ pub(crate) fn path_row(ui: &mut egui::Ui, label: &str, path: &std::path::Path) -
         if motion::secondary_sized(ui, "打开", true, 54.0, 24.0, 10.0).clicked() {
             open = true;
         }
+        if let Some(extra) = extra
+            && motion::secondary_sized(ui, extra, true, 54.0, 24.0, 10.0).clicked()
+        {
+            extra_clicked = true;
+        }
     });
-    open
+    (open, extra_clicked)
 }
 
 /// 搜索框：左边一个放大镜，有内容时右边一个清除按钮。

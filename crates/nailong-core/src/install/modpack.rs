@@ -1181,7 +1181,7 @@ fn import_files_and_overrides(
     mirror: &str,
     sink: &Sink,
 ) -> Result<()> {
-    let _ = (root, archive);
+    let _ = archive;
     let mut specs = Vec::new();
     for file in &index.files {
         if file.env.as_ref().and_then(|e| e.client.as_deref()) == Some("unsupported") {
@@ -1204,8 +1204,9 @@ fn import_files_and_overrides(
         });
     }
     if !specs.is_empty() {
+        // 先下到内容库（按 SHA-1 存）：有几个没下成、重新导入时，下好的不用再下。
         let http = Http::new(mirror)?;
-        http.download_many_with(specs, "下载整合包文件", sink)?;
+        crate::blob::download_specs(root, &http, specs, "下载整合包文件", sink)?;
     }
 
     (sink)(Progress::stage("解压整合包覆盖文件"));

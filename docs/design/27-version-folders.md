@@ -120,3 +120,21 @@ cairn-cli clean                  # 只算能释放多少；--list 列出文件�
   - 在 `/tmp`（tmpfs）上删除：`gio` 拒绝放进回收站，报「这个位置不能用回收站」，不会直接删。
 - **截图核对**：版本页（普通版本、整合包、旧数据）、改名、删除确认、安装页的名字、设置里的清理，深浅两种主题。
 - **还没实测**：Windows 上的回收站和改名；Forge（老的 `jar` 字段写法）；真实数据上的清理效果。
+
+## 10. 别的启动器的 .minecraft
+
+0.43 起，Cairn 可以直接用 PCL、HMCL、官方启动器的 `.minecraft` 当数据目录。版本照原样用，不改写、不搬家。
+
+- **换数据目录**：设置 → 数据目录 →「换」。
+  - 列出这台电脑上找到的 `.minecraft`：哪个启动器的、几个版本、在哪。也可以自己选文件夹，或者回到默认位置。
+  - 账户、界面设置、启动参数、测试结果（`accounts.json`、`ui.json`、`launch-settings.json`、`bench.json`）复制过去。那边已经有的不覆盖。
+  - 选的位置记在配置目录的 `cairn/data-dir.txt`。换好后 Cairn 重新打开。
+  - 命令行的 `--root`、启动时传的路径优先。
+- **游戏目录**：Mod、存档、配置在哪，按下面的顺序认：
+  1. 版本 JSON 里有 `cairn` 记录：版本文件夹。
+  2. HMCL 的 `hmclversion.cfg`：`gameDirType` 0 是 `.minecraft`，1 是版本文件夹，2 是 `gameDir` 写的地方。「跟随全局设置」时跳过这条。
+  3. 版本文件夹里有 `mods`、`saves`、`config`、`options.txt`、`resourcepacks` 之一：版本文件夹（PCL 的版本隔离）。
+  4. 都没有、而 `.minecraft` 里有：`.minecraft`（没开版本隔离）。
+- **HMCL 的版本 JSON**：顶层没有 `mainClass`、原版和加载器各是 `patches` 里的一项时，按 `priority` 从小到大叠起来，顶层放最上面。
+- **删除**：游戏目录不是版本文件夹的版本，删除时提示「存档和 Mod 在 .minecraft 里，不会动」，只移走版本文件夹。
+- **测试**：core 里有游戏目录的四种情况、HMCL patches 按优先级合并、换目录时带上设置不覆盖。换数据目录的弹窗用两个假的 `.minecraft`（PCL、HMCL）截图核对过。

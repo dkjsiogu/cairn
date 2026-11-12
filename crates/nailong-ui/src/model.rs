@@ -147,12 +147,17 @@ pub(crate) enum Task {
     Java,
     /// 导入或删除本地的内容文件（先建恢复点）。不占整页，页面照常能看。
     Files,
+    /// 导出整合包。
+    Export,
 }
 
 impl Task {
     /// 这些任务进行时整页显示进度，别的页面先锁住。
     pub(crate) fn shows_progress(self) -> bool {
-        matches!(self, Self::Install | Self::Mods | Self::Bench | Self::Java)
+        matches!(
+            self,
+            Self::Install | Self::Mods | Self::Bench | Self::Java | Self::Export
+        )
     }
 }
 

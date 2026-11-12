@@ -256,6 +256,7 @@ impl App {
                     if let Some(task) = task_card {
                         let verb = match task {
                             Task::Mods => "正在下载内容",
+                            Task::Export => "正在导出",
                             Task::Java => "正在下载 Java",
                             _ => "正在安装",
                         };
