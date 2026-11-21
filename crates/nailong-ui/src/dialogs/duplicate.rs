@@ -55,7 +55,6 @@ impl App {
         dup.progress = None;
         self.busy = None;
         self.activity = None;
-        cancel::reset();
         match result {
             Ok(name) => {
                 self.duplicate = None;
@@ -80,10 +79,10 @@ impl App {
         dup.rx = Some(rx);
         dup.error = None;
         self.busy = Some(Task::Files);
-        cancel::reset();
+        let token = cancel::reset();
         let root = self.root.clone();
         let ctx = self.ctx.clone();
-        std::thread::spawn(move || {
+        cancel::spawn(token, move || {
             let progress = tx.clone();
             let repaint = ctx.clone();
             let sink = from_fn(move |p| {

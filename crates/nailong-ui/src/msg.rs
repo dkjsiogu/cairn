@@ -100,7 +100,6 @@ impl App {
                 Msg::InstallDone(id) => {
                     self.busy = None;
                     self.cancel_requested = false;
-                    cancel::reset();
                     self.activity = None;
                     self.rx = None;
                     self.error = None;
@@ -118,7 +117,6 @@ impl App {
                 Msg::InstallFailed(e) => {
                     self.busy = None;
                     self.cancel_requested = false;
-                    cancel::reset();
                     self.activity = None;
                     self.rx = None;
                     self.page = Page::Install;
@@ -134,7 +132,6 @@ impl App {
                 Msg::InstallCancelled => {
                     self.busy = None;
                     self.cancel_requested = false;
-                    cancel::reset();
                     self.activity = None;
                     self.rx = None;
                     self.page = Page::Install;
@@ -219,7 +216,6 @@ impl App {
                 Msg::ModsDone(note) => {
                     self.busy = None;
                     self.cancel_requested = false;
-                    cancel::reset();
                     self.activity = None;
                     self.rx = None;
                     self.content.quick = None;
@@ -233,7 +229,6 @@ impl App {
                 Msg::ModsFailed(e) => {
                     self.busy = None;
                     self.cancel_requested = false;
-                    cancel::reset();
                     self.activity = None;
                     self.rx = None;
                     self.content.quick = None;
@@ -243,7 +238,6 @@ impl App {
                 Msg::ContentDone(done) => {
                     self.busy = None;
                     self.cancel_requested = false;
-                    cancel::reset();
                     self.activity = None;
                     self.rx = None;
                     self.finish_content(done);
@@ -251,7 +245,6 @@ impl App {
                 Msg::ModsCancelled => {
                     self.busy = None;
                     self.cancel_requested = false;
-                    cancel::reset();
                     self.activity = None;
                     self.rx = None;
                     self.content.quick = None;

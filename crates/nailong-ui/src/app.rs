@@ -11,16 +11,28 @@ impl App {
         let prefs = UiPrefs::load(&root);
         let accounts = load_accounts(&root, &prefs.username);
         let (icon_jobs, icon_job_rx) = mpsc::channel::<(String, String)>();
-        let (icon_done, icon_rx) = mpsc::channel::<(String, Vec<u8>)>();
-        std::thread::spawn(move || {
-            while let Ok((key, url)) = icon_job_rx.recv() {
-                if let Ok(bytes) = mods::fetch_icon(&url)
-                    && icon_done.send((key, bytes)).is_err()
-                {
-                    break;
+        let (icon_done, icon_rx) = mpsc::channel::<(String, Option<Vec<u8>>)>();
+        // 几个线程一起拉：一个慢的图标不挡住整页。失败也要回一声，不然它一直算“正在拉”，界面停不下重画。
+        let icon_job_rx = std::sync::Arc::new(std::sync::Mutex::new(icon_job_rx));
+        for _ in 0..6 {
+            let jobs = icon_job_rx.clone();
+            let done = icon_done.clone();
+            let repaint = ctx.clone();
+            std::thread::spawn(move || {
+                loop {
+                    let job = jobs.lock().map(|rx| rx.recv());
+                    let Ok(Ok((key, url))) = job else {
+                        break;
+                    };
+                    let bytes = mods::fetch_icon(&url).ok();
+                    if done.send((key, bytes)).is_err() {
+                        break;
+                    }
+                    repaint.request_repaint();
                 }
-            }
-        });
+            });
+        }
+        drop(icon_done);
         let mut app = Self {
             play: PlayState {
                 tuning_cache: HashMap::new(),
@@ -155,6 +167,7 @@ impl App {
             page: Page::Home,
             palette: None,
             duplicate: None,
+            chunks: None,
             notice_seen: None,
             delete_confirm: None,
             renaming: None,
@@ -402,6 +415,23 @@ impl App {
                         app.play.recovery_open = screen == "recovery-open";
                     }
                 }
+                "chunks" | "chunks-picked" => {
+                    if let Some(row) = &row {
+                        app.open_saves(row.clone());
+                        let world = app.worlds.selected.clone().unwrap_or_default();
+                        let newest = app
+                            .worlds
+                            .snapshots
+                            .get(&world)
+                            .and_then(|items| items.last().cloned());
+                        if let Some(snapshot) = newest {
+                            app.open_chunk_rollback(&world, &snapshot);
+                            if screen == "chunks-picked" {
+                                app.debug_pick_chunks();
+                            }
+                        }
+                    }
+                }
                 "duplicate" => {
                     app.page = Page::Versions;
                     if let Some(row) = &row {
@@ -603,6 +633,7 @@ impl App {
             || self.data_dir.open
             || self.palette.is_some()
             || self.duplicate.is_some()
+            || self.chunks.is_some()
             || self.play.recovery_open
             || self
                 .gallery
@@ -1037,6 +1068,7 @@ pub(crate) struct App {
     pub(crate) palette: Option<crate::dialogs::palette::Palette>,
     /// 「复制版本」的弹窗。
     pub(crate) duplicate: Option<crate::dialogs::duplicate::Duplicate>,
+    pub(crate) chunks: Option<crate::dialogs::chunks::ChunkRollback>,
     // ---- 开始游戏和这台电脑 ----
     /// 开始游戏：每个版本的启动参数、算好的调参、游玩记录，以及正在运行的游戏。
     pub(crate) play: PlayState,
@@ -1071,6 +1103,7 @@ impl eframe::App for App {
         self.tick_shots(&ctx);
         self.poll_update(&ctx);
         self.poll_duplicate();
+        self.poll_chunk_rollback();
         motion::set_reduced(self.prefs.reduce_motion);
         self.handle_shortcuts(&ctx);
         self.drain_icons(&ctx);
@@ -1179,6 +1212,7 @@ impl eframe::App for App {
         self.export_overlay(&ctx);
         self.data_dir_overlay(&ctx);
         self.duplicate_overlay(&ctx);
+        self.chunk_rollback_overlay(&ctx);
         self.recovery_overlay(&ctx);
         if self.gallery.shots.as_ref().is_some_and(|s| s.viewing()) {
             let faces = self.player_faces(&ctx);

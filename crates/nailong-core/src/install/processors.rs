@@ -116,8 +116,7 @@ pub fn install_client(
     vars.insert("MINECRAFT_VERSION".to_string(), mc.to_string());
     vars.insert(
         "INSTALLER".to_string(),
-        installer
-            .canonicalize()
+        crate::paths::canonical(installer)
             .unwrap_or_else(|_| installer.to_path_buf())
             .to_string_lossy()
             .to_string(),
@@ -144,7 +143,17 @@ pub fn install_client(
         .unwrap_or_default();
     let client_processors: Vec<&&Value> = processors.iter().filter(|p| is_client(p)).collect();
     let total = client_processors.len().max(1);
-    let java = find_java(root)?;
+    let java = match find_java(root) {
+        Ok(java) => java,
+        // 第一次用、电脑上一个 Java 都没有：和开始游戏时一样，下载官方的运行时来跑处理器。
+        Err(Error::JavaNotFound(_)) => {
+            (sink)(Progress::stage("下载 Java 21（运行安装处理器要用）"));
+            let offer = crate::runtime::find(&http, 21, None)?;
+            crate::runtime::install(root, &http, &offer, sink)?;
+            find_java(root)?
+        }
+        Err(e) => return Err(e),
+    };
     let log_path = root
         .cache()
         .join("logs")

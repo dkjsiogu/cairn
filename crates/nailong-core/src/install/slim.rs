@@ -417,6 +417,7 @@ fn fetch_entry(http: &Http, url: &str, entry: &CentralEntry, total: u64) -> Resu
         // ranges.  This is still one logical ZIP entry, so CRC/length checks
         // below validate the assembled result.
         let chunk = entry.compressed.div_ceil(RANGE_PARTS);
+        let token = crate::cancel::current();
         let parts: Vec<Result<Vec<u8>>> = (0..RANGE_PARTS)
             .into_par_iter()
             .map(|index| {
@@ -425,7 +426,7 @@ fn fetch_entry(http: &Http, url: &str, entry: &CentralEntry, total: u64) -> Resu
                     return Ok(Vec::new());
                 }
                 let end = (start + chunk - 1).min(data_end - 1);
-                required_range(http, url, start, end)
+                crate::cancel::with(token.clone(), || required_range(http, url, start, end))
             })
             .collect();
         let mut out = Vec::with_capacity(entry.compressed as usize);

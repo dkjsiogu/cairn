@@ -3,7 +3,6 @@ use crate::error::Result;
 use crate::install::{health, join_install, processors, reuse, slim, vanilla};
 use crate::paths::Root;
 use crate::progress::{Progress, Sink};
-use std::thread;
 
 pub fn profile_id(mc: &str, version: &str) -> String {
     format!("{mc}-forge-{version}")
@@ -52,7 +51,7 @@ pub fn install_with(
         let mc = mc.to_string();
         let mirror = mirror.to_string();
         let sink = sink.clone();
-        thread::spawn(move || vanilla::install_assets_with(&root, &mc, &mirror, &sink))
+        cancel::spawn_here(move || vanilla::install_assets_with(&root, &mc, &mirror, &sink))
     };
     // First try to reuse a verified patched client from another launcher.
     // This path downloads neither the 3 MB patch nor any processor jar.
@@ -105,7 +104,7 @@ pub fn install_with(
         let file = file.clone();
         let mirror = mirror.to_string();
         let sink = sink.clone();
-        thread::spawn(move || slim::prepare(&root, &url, &file, &mirror, "Forge", &sink))
+        cancel::spawn_here(move || slim::prepare(&root, &url, &file, &mirror, "Forge", &sink))
     };
 
     if let Err(e) = vanilla::install_client_libs(root, mc, mirror, &vj, sink) {

@@ -34,6 +34,8 @@ pub(crate) struct LoginState {
     pub(crate) jobs_rx: mpsc::Receiver<Msg>,
     /// 皮肤地址 → 脸。
     pub(crate) faces: HashMap<String, Face>,
+    /// 等浏览器回调的那个线程；关掉登录窗口时停下它，放开回调端口。
+    pub(crate) cancel: cancel::Token,
 }
 
 impl Default for LoginState {
@@ -51,6 +53,7 @@ impl Default for LoginState {
             jobs_tx,
             jobs_rx,
             faces: HashMap::new(),
+            cancel: cancel::Token::new(),
         }
     }
 }
@@ -512,9 +515,8 @@ impl App {
             open_url(&url);
         }
         if cancel_login {
-            // 登录和安装共用的是一个“前台任务取消”标志；登录窗口的取消
-            // 只是关闭等待，不能让之后的内容浏览误判成“操作已取消”。
-            cancel::reset();
+            // 登录有自己的取消标记，只停登录，不影响正在安装的任务。
+            self.login.cancel.cancel();
             self.login.url = None;
             self.login.rx = None;
             self.login.busy = false;
@@ -598,7 +600,8 @@ impl App {
         if self.login.busy {
             return;
         }
-        cancel::reset();
+        let token = cancel::Token::new();
+        self.login.cancel = token.clone();
         self.cancel_requested = false;
         self.login.busy = true;
         self.login.url = None;
@@ -607,7 +610,7 @@ impl App {
         self.error = None;
         let (tx, rx) = mpsc::channel();
         self.login.rx = Some(rx);
-        std::thread::spawn(move || {
+        cancel::spawn(token, move || {
             let result = auth::start_auth_code().and_then(|flow| {
                 let url = flow.url.clone();
                 let _ = tx.send(Msg::LoginBrowser(url.clone()));

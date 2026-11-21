@@ -28,6 +28,11 @@
   <url type="bugtracker">https://github.com/dkjsiogu/cairn/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.45.0" date="2026-11-21">
+      <description>
+        <p>World snapshots are stored per chunk, and a chunk map lets you roll back just the chunks you select, with terrain, entities and POI together and a safety snapshot first. Pruning no longer breaks snapshots of deleted worlds. Cancel stops only the current task. First Forge/NeoForge install downloads Java when needed. Fixes for Windows paths, native library extraction, cleanup sizes, login and GC logs.</p>
+      </description>
+    </release>
     <release version="0.44.0" date="2026-11-12">
       <description>
         <p>A running game no longer blocks the launcher: the sidebar shows each session, a stuck game can be ended, and different versions can run side by side. Start straight into a world. After a crash, undo the content changes made since the last good session in one step. Ctrl+K finds versions, worlds, pages and settings. Duplicate versions, drop worlds in to import them, play time tracking, tabbed settings, interface zoom, and the window and selected version are remembered.</p>

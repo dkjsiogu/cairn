@@ -245,6 +245,7 @@ impl App {
         let mut chosen_world: Option<String> = None;
         let mut new_snapshot: Option<String> = None;
         let mut restore: Option<(String, String)> = None;
+        let mut chunks: Option<(String, snapshots::Snapshot)> = None;
         let mut delete_world: Option<String> = None;
         let mut delete_snapshot: Option<(String, String)> = None;
         let mut wanted_row: Option<Row> = None;
@@ -601,6 +602,9 @@ impl App {
                                         if action.restore {
                                             restore = Some((world.clone(), snapshot.id.clone()));
                                         }
+                                        if action.chunks {
+                                            chunks = Some((world.clone(), snapshot.clone()));
+                                        }
                                         if action.ask_delete {
                                             self.worlds.confirm_backup = Some(snapshot.id.clone());
                                         }
@@ -652,6 +656,9 @@ impl App {
         if let Some((world, id)) = restore {
             self.start_restore(world, id);
         }
+        if let Some((world, snapshot)) = chunks {
+            self.open_chunk_rollback(&world, &snapshot);
+        }
         if let Some(world) = delete_world {
             match saves::delete_world(&game_dir, &world) {
                 Ok(()) => {
@@ -691,7 +698,9 @@ impl App {
                 let _ = tx.send(Msg::SavesDone(Ok(format!("已备份 {count} 个世界"))));
             });
         }
-        if prune {
+        if prune && self.worlds.busy {
+            self.worlds.error = Some("正在做快照，完成后再清理".into());
+        } else if prune {
             match snapshots::prune(&game_dir, self.worlds.backup.keep) {
                 Ok((removed, deleted)) => {
                     self.worlds.notice =
@@ -743,6 +752,7 @@ pub(crate) fn save_world_row(
 #[derive(Default)]
 pub(crate) struct SnapshotAction {
     pub(crate) restore: bool,
+    pub(crate) chunks: bool,
     pub(crate) ask_delete: bool,
     pub(crate) cancel_delete: bool,
     pub(crate) delete: bool,
@@ -785,11 +795,14 @@ pub(crate) fn snapshot_row(
                 .family(bold_family()),
         );
         ui.label(
-            egui::RichText::new(format!(
-                "{} 个文件 · {}",
-                snapshot.files.len(),
-                human_size(snapshot.bytes)
-            ))
+            egui::RichText::new(match &snapshot.note {
+                Some(note) => format!("{note} · {}", human_size(snapshot.bytes)),
+                None => format!(
+                    "{} 个文件 · {}",
+                    snapshot.files.len(),
+                    human_size(snapshot.bytes)
+                ),
+            })
             .size(13.0)
             .color(t::sub()),
         );
@@ -808,6 +821,9 @@ pub(crate) fn snapshot_row(
             }
             if small_accent(ui, "恢复").clicked() {
                 action.restore = true;
+            }
+            if tiny_button(ui, "回档区块").clicked() {
+                action.chunks = true;
             }
         }
     });

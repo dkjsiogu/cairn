@@ -75,7 +75,7 @@ impl App {
         let mc = row.mc.clone();
         let dir = game_dir.join(kind.folder());
         let loader_files = loader_state_files(&self.root, &row, &game_dir);
-        cancel::reset();
+        let token = cancel::reset();
         self.cancel_requested = false;
         self.busy = Some(Task::Mods);
         self.activity = Some(
@@ -93,7 +93,7 @@ impl App {
                 }
             })
         };
-        std::thread::spawn(move || {
+        cancel::spawn(token, move || {
             if let Err(e) = rollback::backup_extra(&game_dir, "更新内容前", &loader_files) {
                 if let Ok(tx) = tx.lock() {
                     let _ = tx.send(Msg::ModsFailed(format!("无法创建恢复点: {e}")));
@@ -708,7 +708,7 @@ impl App {
             self.content.error = Some(self.busy_reason().into());
             return;
         }
-        cancel::reset();
+        let token = cancel::reset();
         self.cancel_requested = false;
         self.busy = Some(Task::Files);
         let label = match deletes.as_slice() {
@@ -720,7 +720,7 @@ impl App {
         self.activity = Some(Activity::new(label, "创建恢复点"));
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
-        std::thread::spawn(move || {
+        cancel::spawn(token, move || {
             let mut done = ContentDone {
                 on_content: true,
                 ..Default::default()

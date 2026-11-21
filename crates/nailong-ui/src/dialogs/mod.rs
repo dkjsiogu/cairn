@@ -2,6 +2,7 @@
 
 pub(crate) mod account;
 pub(crate) mod add_account;
+pub(crate) mod chunks;
 pub(crate) mod datadir;
 pub(crate) mod duplicate;
 pub(crate) mod export;

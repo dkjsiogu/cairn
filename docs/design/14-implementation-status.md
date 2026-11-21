@@ -1,7 +1,7 @@
-# 14 · 原型实现状态（0.1 → 0.44.0）
+# 14 · 原型实现状态（0.1 → 0.45.0）
 
-> 日期：2026-11-12
-> 对应发布：GitHub Release `v0.44.0` 的 `cairn.exe`、`cairn_0.44.0_amd64.deb`，以及 apt 源 `https://dkjsiogu.github.io/cairn/apt`（0.37 起改名 Cairn）
+> 日期：2026-11-21
+> 对应发布：GitHub Release `v0.45.0` 的 `cairn.exe`、`cairn_0.45.0_amd64.deb`，以及 apt 源 `https://dkjsiogu.github.io/cairn/apt`（0.37 起改名 Cairn）
 > 目的：把「设计稿」和「已经跑起来的代码」分开记账，避免把计划当成已完成。
 
 ## 1. 一句话结论
@@ -49,6 +49,8 @@
 0.34.1 修复 26.x 无法安装和启动：版本文件 `default-user-jvm` 的首条没有 `rules`，解析失败；`${natives_directory}` 误指向 `java` 子目录，`java.library.path` 变成 `.../java/java`。实测 26.1、26.3 原版可安装并进入世界。调参在版本文件带官方默认时跟随官方（26.x 为 ZGC + 紧凑对象头 + 预先占用 + 字符串去重，初始堆 2 GB）。Java 选择改为够用里最低的大版本，同版本优先 64 位 OpenJDK。
 
 0.42.5 手感（见 [21](21-handling.md) §4）。文字默认不可选中（`selectable_labels = false`），整行可点的列表、卡片点在字上也算；`motion::pointer_on_clickables` 让所有能点的地方悬停变手形，egui 按钮也设了 `interact_cursor`；`list_row_fill` 看整个 Response，悬停渐变、按下加深、右键菜单开着时保持高亮；次按钮加按下颜色。版本列表右键菜单（启动、打开文件夹、改名、移到回收站）和 ↑ ↓ 切换；日志行可拖选，错误提示加「复制」；右下角单独一条细边写版本号，点它打开设置。
+
+0.45.0 按区块存快照、按区块回档（见 [30](30-chunk-snapshots.md)）。core：新模块 `region`（Anvil 区域文件拆/拼、只读文件头）；`snapshots` 把 `region/`、`entities/`、`poi/` 的区域文件按区块存（清单里一张 26 字节一行的区块表），对象写进 `repo/packs/<id>.pack` + `.idx`（旧的散对象照读），大小和修改时间没变的文件沿用上一份，记空文件夹；`chunk_map` 只读文件头比保存时间，`restore_chunks` 按选区换回地形、实体、兴趣点和 `.mcc`，有不同才先自动快照「回档区块前」；写快照、清理、回档区块共用一把锁。`prune` 按快照仓库里的目录算引用（以前只看还在的世界，删世界后它的快照对象被回收），有读不懂的清单时不回收，包按浪费比例重写。`cancel` 改成每个任务一个 `Token`，线程、rayon 池带上；后台图标、搜索不受前台取消影响，登录有自己的标记。`paths::canonical` 去掉 Windows `\\?\` 前缀；处理器找不到 Java 时先下 Java 21；`prepare_natives` 只换不一样的文件；Windows `freed_bytes` 按卷序列号 + 文件号认硬链接；自带应用登录用固定回调地址；GC 日志认逗号小数。界面：快照行「回档区块」（`dialogs/chunks.rs`：区块地图、维度切换、框选、平移、缩放、跳坐标），图标 6 个线程拉、失败也回报。实测：453 MB 模组世界第一份快照 0.44 秒、3 个文件（原来 48 580 个），不变时再快照 9 毫秒，回档 5×5 区块 32 毫秒，逐字节一致。
 
 0.44.0 玩的时候和找东西的时候（见 [29](29-play-and-find.md)）。core：`launch::start` 返回 `Game`（`wait()` 等退出并记下学到的内存，`handle()` 给别的线程结束它：Unix 先 `SIGTERM`、3 秒后强制，Windows 直接结束；从输出认出窗口出来了），`launch::launch` 包一层；`QuickPlay::{World, Server}` 按版本文件里的 `is_quick_play_*` 特性打开 `--quickPlaySingleplayer` / `--quickPlayMultiplayer`，没有这些条目的老版本连服务器用 `--server --port`；游戏输出按字节读（非 UTF-8 不再让读取线程停下、管道写满卡住游戏），加 `-Dstdout.encoding=UTF-8`；新模块 `played`（`played.json`：游玩秒数、次数、上次和上次正常玩完的时间，改名、删除跟着走）；`versions::duplicate`（不带日志、备份、恢复点，存档可选，游戏 jar 硬链接，`.part` 完成后改名，可取消）；`saves::{is_world, import_world}`（文件夹或 zip，找最浅的 `level.dat`，重名加 `(2)`）。界面：游戏不再是 `Task`，`play::Session` 一局一个（阶段、结束、日志），侧栏每局一行，启动台「查看日志 / 结束游戏」，可同时开不同版本；`Page` 枚举代替五个 `show_*`；`prefs.rs` 读写 `ui.json` 保留不认识的键，新增上次选的版本、窗口大小和最大化、缩放、游戏启动后收起；`modal_open()`、`widgets::dialog()`；`Ctrl+K` 命令面板（`dialogs/palette.rs`）；复制版本（`dialogs/duplicate.rs`）；崩溃退路（`dialogs/recovery.rs`，`play::Recovery::find` 取上次正常游戏之后最早的恢复点）；拖入世界；版本页搜索、「3 天前玩过」、数字可点；启动台「进入」、切换版本列表、起过名字的版本大字显示名字；存档页「进入」；设置分四栏、界面缩放；底部提示所有页面共用、完成提示 6 秒消失；窗口不在前台时任务做完或游戏退出请求注意。CLI：`launch --world / --server`。实测：Xvfb 里真实启动原版 1.21.1 到主菜单，状态从「正在启动」变「运行中」，结束游戏后进程退出、记下 66 秒。
 

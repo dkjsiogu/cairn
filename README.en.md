@@ -8,7 +8,7 @@ A small, native Minecraft: Java Edition launcher written in Rust. Renamed to **C
 
 [简体中文](README.md) | **English**
 
-> Current version: **0.44.0** (preview)
+> Current version: **0.45.0** (preview)
 >
 > Goals: small binaries, few dependencies, visible install progress, and a repair path after interruption. See [implementation status](docs/design/14-implementation-status.md) for exact boundaries.
 
@@ -26,6 +26,15 @@ A cairn is the pile of stones hikers leave by a trail: it does not walk for you,
 It is not a universal launcher, and it is not 1.0 yet. What works and what does not is laid out below.
 
 ## Interface
+
+0.45: chunk-level snapshots; roll back just a few chunks.
+
+- World snapshots are stored per chunk, so unchanged chunks are shared between snapshots. Snapshots go into pack files, and a snapshot of an unchanged world takes milliseconds.
+- "Roll back chunks" on a snapshot opens a chunk map per dimension showing changed, new and removed chunks. Select a few and put them back as they were; terrain, entities and POI go together, and the current world is snapshotted first. See [30](docs/design/30-chunk-snapshots.md).
+- Pruning after deleting a world no longer breaks that world's snapshots; full restores recreate empty folders.
+- Cancel stops only the current task, not icon or search requests; a failed icon fetch no longer keeps the UI repainting.
+- First Forge/NeoForge install downloads Java when none is found. Native libraries are no longer deleted and re-extracted on every launch.
+- Windows: paths no longer carry the `\\?\` prefix; cleanup sizes count hardlinks once. Login no longer probes redirect addresses. GC logs with decimal commas are read.
 
 0.44: while you play, and when you look for things.
 
@@ -209,7 +218,7 @@ Export: click "导出整合包" on a version to get a `.mrpack`. Files available
 - Settings: the sidebar footer opens one dialog for accounts, memory, Java status, game/data folders and logs; preferences persist in `ui.json`.
 - Automatic JVM tuning: memory defaults to Auto. Heap size comes from physical RAM, CPU threads, the Java version and the mod count, with tuned G1 flags; large modpacks on strong machines switch to generational ZGC. Settings shows the calculation and the full flag list, and you can still set memory, the collector or extra JVM arguments by hand. See [19 · JVM tuning](docs/design/19-jvm-tuning.md) (Chinese).
 - Versions: base versions required by a loader are hidden from the main picker and protected from deletion; this page only launches, repairs, reveals the folder and deletes. Content and saves live in their own sidebar places.
-- Saves: a first-class page with a version picker at the top; list worlds with size and modified time. Backups are **git-style snapshots**: content-defined chunking stores only changed chunks, so a second backup usually adds a few MB; restore, delete and prune by count.
+- Saves: a first-class page with a version picker at the top; list worlds with size and modified time. Backups are **git-style snapshots**: region files are stored per Minecraft chunk and other files by content-defined chunking, so a second backup usually adds a few MB; restore a whole world or roll back only selected chunks, delete, and prune by count.
 - Automatic backups: when enabled, every time you quit the game a snapshot of that version's worlds is taken, plus an optional run every 15/30/60/120 minutes; 5/10/20/50 snapshots are kept per world, and settings live in `backups.json` under the data directory.
 - The launcher stays usable while you play: every page can be browsed, and only the version in use is locked against content changes, save restores and deletion until the game exits.
 - Resource packs and shaders get the same enable/disable, delete, file-size and open-folder affordances as mods.
@@ -221,7 +230,7 @@ Export: click "导出整合包" on a version to get a `.mrpack`. Files available
 | Platform | File | Size | Requirements |
 |---|---|---:|---|
 | Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | ~9 MB | Windows 10/11, Java 21 |
-| Linux x64 (deb) | [cairn_0.44.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.44.0_amd64.deb) | ~3.4 MB | Ubuntu 24.04+ / glibc ≥ 2.39, Java 21 |
+| Linux x64 (deb) | [cairn_0.45.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.45.0_amd64.deb) | ~3.4 MB | Ubuntu 24.04+ / glibc ≥ 2.39, Java 21 |
 
 Checksums: [SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS).
 
@@ -248,7 +257,7 @@ sudo apt update && sudo apt install cairn
 Or install the deb; it adds the same apt repository:
 
 ```bash
-sudo apt install ./cairn_0.44.0_amd64.deb
+sudo apt install ./cairn_0.45.0_amd64.deb
 ```
 
 You can also double-click the deb in a software center. After installation, **Cairn** appears in the application menu. An installed `nailong` package is replaced automatically.

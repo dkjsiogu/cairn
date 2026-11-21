@@ -86,7 +86,7 @@ impl App {
         };
         let version = self.export.version.clone();
         self.export.open = false;
-        cancel::reset();
+        let token = cancel::reset();
         self.cancel_requested = false;
         self.busy = Some(Task::Export);
         self.activity = Some(
@@ -100,7 +100,7 @@ impl App {
         let sink: Sink = from_fn(move |p| {
             let _ = progress.send(Msg::Progress(p));
         });
-        std::thread::spawn(move || {
+        cancel::spawn(token, move || {
             let result =
                 export::export(&root, &version, &options, &dest, &sink).map_err(|e| e.to_string());
             let _ = tx.send(Msg::ExportDone(result));
@@ -111,7 +111,6 @@ impl App {
     pub(crate) fn finish_export(&mut self, result: Result<Report, String>) {
         self.busy = None;
         self.cancel_requested = false;
-        cancel::reset();
         self.activity = None;
         self.rx = None;
         if matches!(&result, Err(e) if e.contains("取消")) {

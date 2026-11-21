@@ -115,7 +115,7 @@ pub fn find_all(root: &crate::paths::Root) -> Vec<JavaRuntime> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for c in candidates {
-        let key = std::fs::canonicalize(&c).unwrap_or_else(|_| c.clone());
+        let key = crate::paths::canonical(&c).unwrap_or_else(|_| c.clone());
         if !seen.insert(key) {
             continue;
         }

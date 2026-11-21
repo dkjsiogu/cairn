@@ -23,7 +23,8 @@ impl App {
     pub(crate) fn java_at(&mut self, path: &std::path::Path) -> Option<java::JavaRuntime> {
         let same = |runtime: &java::JavaRuntime| {
             runtime.path == path
-                || std::fs::canonicalize(&runtime.path).ok() == std::fs::canonicalize(path).ok()
+                || nailong_core::paths::canonical(&runtime.path).ok()
+                    == nailong_core::paths::canonical(path).ok()
         };
         if let Some(found) = self
             .env
@@ -727,7 +728,7 @@ impl App {
         self.notice = None;
         self.busy = Some(Task::Java);
         self.cancel_requested = false;
-        cancel::reset();
+        let token = cancel::reset();
         self.play.launch_after_java = then_launch;
         self.activity = Some(
             Activity::new(format!("Java {required} · 官方运行时"), "查找官方的 Java")
@@ -738,7 +739,7 @@ impl App {
         let source = self.prefs.source.clone();
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
-        std::thread::spawn(move || {
+        cancel::spawn(token, move || {
             let progress = tx.clone();
             let sink = from_fn(move |p| {
                 let _ = progress.send(Msg::Progress(p));
@@ -763,7 +764,6 @@ impl App {
         self.rx = None;
         self.activity = None;
         self.cancel_requested = false;
-        cancel::reset();
         let then = self.play.launch_after_java.take();
         match result {
             Ok(label) => {

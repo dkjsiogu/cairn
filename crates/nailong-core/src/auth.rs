@@ -503,7 +503,12 @@ pub fn start_auth_code() -> Result<AuthCodeFlow> {
     let verifier = b64url(&random_bytes(32));
     let challenge = b64url(&Sha256::digest(verifier.as_bytes()));
     let state = b64url(&random_bytes(16));
-    let redirect_uri = pick_redirect_uri(port, &challenge, &state)?;
+    // 自带的应用注册的是 `http://localhost`（根路径），不用试；别人自己的应用才挨个试一遍。
+    let redirect_uri = if client_id() == DEFAULT_CLIENT_ID {
+        default_redirect_uri(port)
+    } else {
+        pick_redirect_uri(port, &challenge, &state)?
+    };
     let url = authorize_url(&redirect_uri, &state, &challenge, "select_account");
     Ok(AuthCodeFlow {
         url,
@@ -514,6 +519,10 @@ pub fn start_auth_code() -> Result<AuthCodeFlow> {
         listener,
         expires_at: now() + 300,
     })
+}
+
+fn default_redirect_uri(port: u16) -> String {
+    format!("http://localhost:{port}/")
 }
 
 fn authorize_url(redirect_uri: &str, state: &str, challenge: &str, prompt: &str) -> String {

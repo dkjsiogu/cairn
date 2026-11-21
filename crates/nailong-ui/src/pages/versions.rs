@@ -87,7 +87,7 @@ impl App {
         self.error = None;
         self.notice = None;
         self.page = Page::Install;
-        cancel::reset();
+        let token = cancel::reset();
         self.cancel_requested = false;
         self.busy = Some(Task::Install);
         self.activity = Some(
@@ -109,7 +109,7 @@ impl App {
                 }
             })
         };
-        std::thread::spawn(move || {
+        cancel::spawn(token, move || {
             let msg = match modpack::import_pack(&root, &path, &source, &sink) {
                 Ok(pack) => Msg::InstallDone(pack.id),
                 Err(Error::Cancelled) => Msg::InstallCancelled,
@@ -156,7 +156,7 @@ impl App {
         self.error = None;
         self.notice = None;
         self.page = Page::Install;
-        cancel::reset();
+        let token = cancel::reset();
         self.cancel_requested = false;
         self.busy = Some(Task::Install);
         self.activity = Some(
@@ -197,7 +197,7 @@ impl App {
                 }
             })
         };
-        std::thread::spawn(move || {
+        cancel::spawn(token, move || {
             // 补全或换加载器版本前留一份，恢复点里会带上版本 JSON 与 jar。
             if point_json.is_file()
                 && let Err(e) = rollback::backup_extra(&point_dir, "更新加载器前", &point_files)

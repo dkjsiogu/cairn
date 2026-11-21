@@ -415,7 +415,7 @@ pub fn check_updates(entries: &[InstalledEntry], mc: &str, loader: Loader) -> Ve
             .filter_map(|entry| check_update(entry, mc, loader).ok().flatten())
             .collect()
     };
-    match rayon::ThreadPoolBuilder::new().num_threads(16).build() {
+    match crate::cancel::pool(16) {
         Ok(pool) => pool.install(check),
         Err(_) => check(),
     }
@@ -435,7 +435,7 @@ pub fn plan_updates(
             .map(|candidate| mods::plan(&candidate.latest, mc, loader, &empty))
             .collect()
     };
-    match rayon::ThreadPoolBuilder::new().num_threads(16).build() {
+    match crate::cancel::pool(16) {
         Ok(pool) => pool.install(plan),
         Err(_) => plan(),
     }

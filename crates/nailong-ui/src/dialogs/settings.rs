@@ -17,13 +17,13 @@ impl App {
         self.notice = None;
         self.busy = Some(Task::Bench);
         self.cancel_requested = false;
-        cancel::reset();
+        let token = cancel::reset();
         self.activity = Some(Activity::new("这台电脑", "准备测试"));
         self.log.push("测一下这台电脑".into());
         let root = self.root.clone();
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
-        std::thread::spawn(move || {
+        cancel::spawn(token, move || {
             let progress = tx.clone();
             let sink = from_fn(move |p| {
                 let _ = progress.send(Msg::Progress(p));
@@ -42,7 +42,6 @@ impl App {
         self.rx = None;
         self.activity = None;
         self.cancel_requested = false;
-        cancel::reset();
         self.play.tuning_cache.clear();
     }
 

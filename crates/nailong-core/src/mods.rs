@@ -1123,10 +1123,15 @@ fn resolve_dependency(
         icon_url: None,
         categories: Vec::new(),
     };
+    let token = cancel::current();
     let (project, version) = rayon::join(
-        || project(dependency.source, &dependency.project_id, ContentKind::Mod).ok(),
+        || {
+            cancel::with(token.clone(), || {
+                project(dependency.source, &dependency.project_id, ContentKind::Mod).ok()
+            })
+        },
         || -> Result<Option<Version>> {
-            match &dependency.version_id {
+            cancel::with(token.clone(), || match &dependency.version_id {
                 Some(version_id) => version_from_id(
                     dependency.source,
                     &dependency.project_id,
@@ -1134,7 +1139,7 @@ fn resolve_dependency(
                     ContentKind::Mod,
                 ),
                 None => Ok(versions(&project_ref, mc, loader)?.into_iter().next()),
-            }
+            })
         },
     );
     Ok(Some((project, version?)))
@@ -1147,6 +1152,7 @@ pub fn dependency_choices(
 ) -> Result<Vec<DependencyChoice>> {
     use rayon::prelude::*;
     // 每个前置各自去取，同时进行。
+    let token = cancel::current();
     version
         .dependencies
         .par_iter()
@@ -1158,7 +1164,8 @@ pub fn dependency_choices(
         })
         .map(|dependency| {
             let (project, resolved) =
-                resolve_dependency(dependency, mc, loader)?.unwrap_or((None, None));
+                cancel::with(token.clone(), || resolve_dependency(dependency, mc, loader))?
+                    .unwrap_or((None, None));
             Ok(DependencyChoice {
                 dependency: dependency.clone(),
                 project,
@@ -1217,10 +1224,11 @@ pub fn plan(
         if steps > 128 {
             return Err(Error::Install("前置依赖过多，已停止解析".into()));
         }
+        let token = cancel::current();
         let resolved: Vec<Result<(Option<Project>, Option<Version>)>> = wanted
             .par_iter()
             .map(|dependency| {
-                resolve_dependency(dependency, mc, loader)?
+                cancel::with(token.clone(), || resolve_dependency(dependency, mc, loader))?
                     .ok_or_else(|| Error::Install("前置依赖解析失败".into()))
             })
             .collect();

@@ -5,7 +5,7 @@ use crate::paths::Root;
 use crate::tuning::{self, GcChoice, Machine, Workload};
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -1106,16 +1106,16 @@ fn prepare_natives(root: &Root, resolved: &Resolved, ctx: &Context) -> Result<Pa
             break;
         }
     }
-    if root_dir.exists() {
-        let _ = std::fs::remove_dir_all(&root_dir);
-    }
     std::fs::create_dir_all(&target).map_err(|e| io(&target, e))?;
     let jars = manifest::native_jars(root, resolved, ctx);
+    // 不再先删整个目录：Windows 上同一个版本还开着（或残留进程没退）时 dll 被锁着，删不掉也写不进。
+    // 内容一样的文件不动，不一样的先写临时文件再换过去，多出来的旧文件能删就删。
+    let mut wanted: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
     if jars.is_empty() {
         println!("→ 没有需要解压的 native 库");
-        return Ok(root_dir);
+    } else {
+        println!("→ 解压 native 库（{} 个 jar）…", jars.len());
     }
-    println!("→ 解压 native 库（{} 个 jar）…", jars.len());
     for jar in jars {
         let file = std::fs::File::open(&jar).map_err(|e| io(&jar, e))?;
         let mut zip = zip::ZipArchive::new(file)
@@ -1139,21 +1139,69 @@ fn prepare_natives(root: &Root, resolved: &Resolved, ctx: &Context) -> Result<Pa
                 continue;
             }
             let dest = target.join(&name_s);
+            wanted.insert(dest.clone());
+            if same_file(&dest, entry.size(), entry.crc32()) {
+                continue;
+            }
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| io(parent, e))?;
             }
-            let mut out = std::fs::File::create(&dest).map_err(|e| io(&dest, e))?;
-            std::io::copy(&mut entry, &mut out).map_err(|e| io(&dest, e))?;
+            let tmp = dest.with_file_name(format!(
+                "{}.part-{}",
+                dest.file_name().unwrap_or_default().to_string_lossy(),
+                std::process::id()
+            ));
+            let mut out = std::fs::File::create(&tmp).map_err(|e| io(&tmp, e))?;
+            std::io::copy(&mut entry, &mut out).map_err(|e| io(&tmp, e))?;
+            drop(out);
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 if name_s.ends_with(".so") || name_s.ends_with(".dylib") {
-                    let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755));
+                    let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
                 }
+            }
+            if let Err(e) = std::fs::rename(&tmp, &dest) {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(Error::Install(format!(
+                    "native 库 {} 被占用，换不了：关掉还开着的这个版本再试（{e}）",
+                    dest.display()
+                )));
             }
         }
     }
+    remove_stale(&root_dir, &wanted);
     Ok(root_dir)
+}
+
+/// 已经解压过、大小和 CRC 都一样的文件就不再写。
+fn same_file(path: &Path, size: u64, crc: u32) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    if meta.len() != size {
+        return false;
+    }
+    let Ok(data) = std::fs::read(path) else {
+        return false;
+    };
+    crc32fast::hash(&data) == crc
+}
+
+/// 删掉这次不需要的旧文件（换了版本、换了 LWJGL）；被占用的留着，不影响启动。
+fn remove_stale(dir: &Path, wanted: &std::collections::HashSet<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            remove_stale(&path, wanted);
+            let _ = std::fs::remove_dir(&path);
+        } else if !wanted.contains(&path) {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
 }
 
 #[cfg(test)]

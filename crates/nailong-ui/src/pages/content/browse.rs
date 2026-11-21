@@ -13,9 +13,6 @@ impl App {
     }
 
     pub(crate) fn start_mods_search_at(&mut self, offset: usize) {
-        if self.busy.is_none() {
-            cancel::reset();
-        }
         let loader = self.content.loader;
         let mc = self.content.mc.clone();
         let query = self.content.query.trim().to_string();
@@ -81,9 +78,6 @@ impl App {
 
     /// 按当前品类拉两排内容：热门 + 最新。
     pub(crate) fn start_browse(&mut self) {
-        if self.busy.is_none() {
-            cancel::reset();
-        }
         let kind = self.content.kind;
         let loader = self.content.loader;
         if self.content.category.is_some()
@@ -161,9 +155,6 @@ impl App {
     }
 
     pub(crate) fn start_shelf_more(&mut self, offset: usize) {
-        if self.busy.is_none() {
-            cancel::reset();
-        }
         let Some(sort) = self.content.shelf else {
             return;
         };
@@ -296,7 +287,7 @@ impl App {
         }
         for (key, bytes) in got {
             self.content.icons_pending.remove(&key);
-            let Ok(image) = image::load_from_memory(&bytes) else {
+            let Some(Ok(image)) = bytes.map(|bytes| image::load_from_memory(&bytes)) else {
                 continue;
             };
             let rgba = image.to_rgba8();

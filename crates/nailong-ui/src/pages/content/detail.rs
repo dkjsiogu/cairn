@@ -25,7 +25,7 @@ impl App {
             self.content.error = Some("目标目录无效".into());
             return;
         };
-        cancel::reset();
+        let token = cancel::reset();
         self.cancel_requested = false;
         self.content.quick = Some(project_key(&project));
         self.busy = Some(Task::Mods);
@@ -48,7 +48,7 @@ impl App {
                 }
             })
         };
-        std::thread::spawn(move || {
+        cancel::spawn(token, move || {
             if let Err(e) = rollback::backup_extra(
                 &game_dir,
                 &format!("安装 {} 前", project.name),
@@ -185,7 +185,7 @@ impl App {
             self.content.error = Some(format!("创建 mods 目录失败: {e}"));
             return;
         }
-        cancel::reset();
+        let token = cancel::reset();
         self.cancel_requested = false;
         self.busy = Some(Task::Mods);
         self.content.error = None;
@@ -210,7 +210,7 @@ impl App {
                 }
             })
         };
-        std::thread::spawn(move || {
+        cancel::spawn(token, move || {
             if let Err(e) = rollback::backup_extra(&rollback_dir, &rollback_reason, &loader_files) {
                 if let Ok(tx) = tx.lock() {
                     let _ = tx.send(Msg::ModsFailed(format!("无法创建恢复点: {e}")));

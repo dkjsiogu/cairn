@@ -984,10 +984,15 @@ fn import_curse_files(
     (sink)(Progress::stage("解析 CurseForge 文件"));
     let http = Http::new(mirror)?;
     let api_key = builtin::curseforge_api_key();
+    let token = cancel::current();
     let lookups: Vec<CurseFileLookup> = files
         .par_iter()
         .filter(|file| file.required != Some(false))
-        .map(|file| curse_file_spec(&http, file, game_dir, api_key.as_deref()))
+        .map(|file| {
+            cancel::with(token.clone(), || {
+                curse_file_spec(&http, file, game_dir, api_key.as_deref())
+            })
+        })
         .collect();
     let mut specs = Vec::new();
     let mut blocked = Vec::new();

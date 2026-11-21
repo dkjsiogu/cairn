@@ -190,6 +190,33 @@ pub fn sanitize(s: &str) -> String {
         .collect()
 }
 
+/// `fs::canonicalize`，但在 Windows 上去掉 `\\?\` 前缀（`\\?\C:\…` → `C:\…`，
+/// `\\?\UNC\server\share` → `\\server\share`）。
+///
+/// 带前缀的路径一旦写进配置或启动参数，ModLauncher、Java agent 和移到回收站的
+/// `SHFileOperationW` 都不认。比较两个路径是不是同一个时也用它，两边写法一致。
+pub fn canonical(path: &Path) -> std::io::Result<PathBuf> {
+    let real = std::fs::canonicalize(path)?;
+    Ok(strip_verbatim(real))
+}
+
+fn strip_verbatim(path: PathBuf) -> PathBuf {
+    let Some(text) = path.to_str() else {
+        return path;
+    };
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = text.strip_prefix(r"\\?\") {
+        let bytes = rest.as_bytes();
+        // 只去掉盘符路径的前缀；`\\?\Volume{…}` 这种去掉就不是合法路径了。
+        if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+            return PathBuf::from(rest);
+        }
+    }
+    path
+}
+
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| io(parent, e))?;
@@ -211,7 +238,8 @@ fn chosen_root_file() -> Option<PathBuf> {
 /// 玩家选过的数据目录；没选过、或者那个文件夹已经不在了，返回 None（用默认的）。
 pub fn chosen_root() -> Option<PathBuf> {
     let text = std::fs::read_to_string(chosen_root_file()?).ok()?;
-    let dir = PathBuf::from(text.trim());
+    // 0.43–0.44 在 Windows 上可能记下了带 `\\?\` 的路径，读的时候顺手去掉。
+    let dir = strip_verbatim(PathBuf::from(text.trim()));
     (!text.trim().is_empty() && dir.is_dir()).then_some(dir)
 }
 
@@ -307,6 +335,24 @@ pub fn to_trash(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod root_tests {
     use super::*;
+
+    #[test]
+    fn verbatim_prefix_is_dropped_only_for_drive_and_unc_paths() {
+        let strip = |s: &str| strip_verbatim(PathBuf::from(s));
+        assert_eq!(
+            strip(r"\\?\C:\Games\.minecraft"),
+            PathBuf::from(r"C:\Games\.minecraft")
+        );
+        assert_eq!(strip(r"\\?\UNC\nas\mc"), PathBuf::from(r"\\nas\mc"));
+        assert_eq!(
+            strip(r"\\?\Volume{abc}\x"),
+            PathBuf::from(r"\\?\Volume{abc}\x")
+        );
+        assert_eq!(
+            strip("/home/a/.minecraft"),
+            PathBuf::from("/home/a/.minecraft")
+        );
+    }
 
     #[test]
     fn switching_folders_carries_settings_without_overwriting() {

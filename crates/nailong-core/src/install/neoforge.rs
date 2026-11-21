@@ -3,7 +3,6 @@ use crate::error::Result;
 use crate::install::{health, join_install, processors, reuse, slim, vanilla};
 use crate::paths::Root;
 use crate::progress::{Progress, Sink, noop};
-use std::thread;
 
 pub fn installer_url(version: &str) -> (String, String) {
     // 1.20.1 的 NeoForge 走 net.neoforged:forge 的旧坐标
@@ -59,7 +58,7 @@ pub fn install_with(
         let mc = mc.to_string();
         let mirror = mirror.to_string();
         let sink = sink.clone();
-        thread::spawn(move || vanilla::install_assets_with(&root, &mc, &mirror, &sink))
+        cancel::spawn_here(move || vanilla::install_assets_with(&root, &mc, &mirror, &sink))
     };
     let mut reuse_version = None;
     match slim::fetch_metadata_any(&url, mirror) {
@@ -110,7 +109,7 @@ pub fn install_with(
         let file = file.clone();
         let mirror = mirror.to_string();
         let sink = sink.clone();
-        thread::spawn(move || slim::prepare(&root, &url, &file, &mirror, "NeoForge", &sink))
+        cancel::spawn_here(move || slim::prepare(&root, &url, &file, &mirror, "NeoForge", &sink))
     };
 
     if let Err(e) = vanilla::install_client_libs(root, mc, mirror, &vj, sink) {

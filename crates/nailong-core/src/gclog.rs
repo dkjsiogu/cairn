@@ -43,7 +43,8 @@ pub fn parse(text: &str) -> Vec<GcEvent> {
 fn parse_line(line: &str) -> Option<GcEvent> {
     let rest = line.strip_prefix('[')?;
     let (uptime, rest) = rest.split_once("s]")?;
-    let at: f64 = uptime.parse().ok()?;
+    // HotSpot 按系统区域写小数：德语、法语等系统上是 `12,345s`、`3,210ms`。
+    let at: f64 = uptime.replace(',', ".").parse().ok()?;
     let body = rest.trim();
     let gc_pos = body.find("GC(")?;
     let body = &body[gc_pos..];
@@ -58,7 +59,7 @@ fn parse_line(line: &str) -> Option<GcEvent> {
         body.rsplit(' ')
             .next()
             .and_then(|t| t.strip_suffix("ms"))
-            .and_then(|t| t.parse().ok())
+            .and_then(|t| t.replace(',', ".").parse().ok())
     } else {
         None
     };
@@ -155,5 +156,16 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(summarize(&events, 0.0, 99.0).evac_failures, 1);
         assert_eq!(events[1].after_mb, Some(1990));
+    }
+
+    #[test]
+    fn reads_logs_written_with_a_decimal_comma() {
+        let log = "\
+[30,500s] GC(7) Pause Young (Normal) (G1 Evacuation Pause) 900M->300M(3584M) 21,500ms";
+        let events = parse(log);
+        assert_eq!(events.len(), 1);
+        assert!((events[0].at - 30.5).abs() < 1e-9);
+        assert_eq!(events[0].pause_ms, Some(21.5));
+        assert_eq!(events[0].after_mb, Some(300));
     }
 }

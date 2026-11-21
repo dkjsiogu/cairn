@@ -322,10 +322,11 @@ fn export_with(
     let done = std::sync::atomic::AtomicU64::new(0);
     let hashed: Vec<Result<(String, String, u32, u64)>> = {
         use rayon::prelude::*;
+        let token = cancel::current();
         wanted
             .par_iter()
             .map(|&index| {
-                cancel::check()?;
+                token.check()?;
                 let result = hash_file(&sources[index].1);
                 let n = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                 (sink)(Progress {

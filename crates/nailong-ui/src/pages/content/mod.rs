@@ -620,7 +620,7 @@ pub(crate) struct ContentState {
     pub(crate) cf_loading: HashSet<mods::ContentKind>,
     pub(crate) cf_rx: Option<mpsc::Receiver<CfCategoryFetch>>,
     pub(crate) icon_jobs: mpsc::Sender<(String, String)>,
-    pub(crate) icon_rx: mpsc::Receiver<(String, Vec<u8>)>,
+    pub(crate) icon_rx: mpsc::Receiver<(String, Option<Vec<u8>>)>,
     /// 下一帧把焦点交给搜索框（Ctrl+F）。
     pub(crate) focus_search: bool,
     /// 拖着文件悬停时的预览：(这些文件, 说明, 能不能导入)。

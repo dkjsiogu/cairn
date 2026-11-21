@@ -124,12 +124,13 @@ pub struct OtherRoot {
 
 /// 本机别的启动器的 .minecraft（有版本的才算），给设置里「换数据目录」列出来。
 pub fn other_roots(current: &Root) -> Vec<OtherRoot> {
-    let here = std::fs::canonicalize(current.dir()).unwrap_or_else(|_| current.dir().to_path_buf());
+    let here =
+        crate::paths::canonical(current.dir()).unwrap_or_else(|_| current.dir().to_path_buf());
     let official = official_root();
     let mut out: Vec<OtherRoot> = candidate_roots(current)
         .into_iter()
         .filter_map(|dir| {
-            let real = std::fs::canonicalize(&dir).ok()?;
+            let real = crate::paths::canonical(&dir).ok()?;
             if real == here {
                 return None;
             }
@@ -156,7 +157,7 @@ pub fn other_roots(current: &Root) -> Vec<OtherRoot> {
 /// 看 .minecraft 旁边有什么，猜是哪个启动器的。
 fn launcher_of(dir: &Path, official: Option<&Path>) -> String {
     if official
-        .and_then(|o| std::fs::canonicalize(o).ok())
+        .and_then(|o| crate::paths::canonical(o).ok())
         .as_deref()
         == Some(dir)
     {

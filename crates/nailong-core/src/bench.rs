@@ -171,9 +171,9 @@ impl Store {
     pub fn find(&self, java: &JavaRuntime) -> Option<&JavaResult> {
         let same = |a: &Path, b: &Path| {
             a == b
-                || std::fs::canonicalize(a)
+                || crate::paths::canonical(a)
                     .ok()
-                    .zip(std::fs::canonicalize(b).ok())
+                    .zip(crate::paths::canonical(b).ok())
                     .is_some_and(|(a, b)| a == b)
         };
         self.javas

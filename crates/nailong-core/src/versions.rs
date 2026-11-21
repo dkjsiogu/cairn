@@ -769,7 +769,43 @@ fn freed_bytes(files: &[PathBuf]) -> u64 {
         .sum()
 }
 
-#[cfg(not(unix))]
+/// Windows 上用卷序列号 + 文件号认出同一份数据的硬链接（内容库和运行库之间就是硬链接）。
+#[cfg(windows)]
+fn freed_bytes(files: &[PathBuf]) -> u64 {
+    use std::collections::HashMap;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+    let mut ids: HashMap<(u32, u64), (u64, u32, u32)> = HashMap::new();
+    let mut unknown = 0u64;
+    for path in files {
+        let Ok(file) = std::fs::File::open(path) else {
+            continue;
+        };
+        // SAFETY: 句柄来自上面打开的文件，调用期间一直有效；结构体由系统填写。
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, &mut info) } != 0;
+        if !ok {
+            unknown += file.metadata().map_or(0, |m| m.len());
+            continue;
+        }
+        let len = ((info.nFileSizeHigh as u64) << 32) | info.nFileSizeLow as u64;
+        let index = ((info.nFileIndexHigh as u64) << 32) | info.nFileIndexLow as u64;
+        let entry =
+            ids.entry((info.dwVolumeSerialNumber, index))
+                .or_insert((len, info.nNumberOfLinks, 0));
+        entry.2 += 1;
+    }
+    unknown
+        + ids
+            .values()
+            .filter(|(_, links, deleting)| deleting >= links)
+            .map(|(len, _, _)| len)
+            .sum::<u64>()
+}
+
+#[cfg(not(any(unix, windows)))]
 fn freed_bytes(files: &[PathBuf]) -> u64 {
     files
         .iter()

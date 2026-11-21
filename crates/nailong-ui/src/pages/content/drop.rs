@@ -251,7 +251,7 @@ impl App {
         }
         let loader = loader_state_files(&self.root, &row, &game_dir);
         let count = fresh.len();
-        cancel::reset();
+        let token = cancel::reset();
         self.cancel_requested = false;
         self.busy = Some(Task::Files);
         self.activity = Some(Activity::new(format!("导入 {count} 个文件"), "创建恢复点"));
@@ -265,7 +265,7 @@ impl App {
         }
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
-        std::thread::spawn(move || {
+        cancel::spawn(token, move || {
             let mut done = ContentDone {
                 on_content,
                 skipped,

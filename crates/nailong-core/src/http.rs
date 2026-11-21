@@ -421,6 +421,7 @@ impl Http {
     ) -> Result<()> {
         cancel::check()?;
         let chunk = total.div_ceil(SEGMENT_COUNT);
+        let token = cancel::current();
         let results: Vec<Result<()>> = std::thread::scope(|scope| {
             let mut handles = Vec::new();
             for index in 0..SEGMENT_COUNT {
@@ -431,9 +432,12 @@ impl Http {
                 let end = (start + chunk - 1).min(total - 1);
                 let part = segment_path(dest, index);
                 let client = &self.client;
-                handles.push(
-                    scope.spawn(move || download_segment(client, url, &part, start, end, batch)),
-                );
+                let token = token.clone();
+                handles.push(scope.spawn(move || {
+                    cancel::with(token, || {
+                        download_segment(client, url, &part, start, end, batch)
+                    })
+                }));
             }
             handles
                 .into_iter()
@@ -762,10 +766,7 @@ impl Http {
         // 网络走代理时容易有一部分连不上，同时只下 12 个。
         let big = total_bytes > 0 && total_bytes / specs.len() as u64 > 1024 * 1024;
         let workers = specs.len().clamp(1, if big { 12 } else { MAX_PARALLEL });
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(workers)
-            .build()
-            .map_err(|e| Error::Install(e.to_string()))?;
+        let pool = cancel::pool(workers).map_err(|e| Error::Install(e.to_string()))?;
         let errors: Vec<String> = pool.install(|| {
             specs
                 .par_iter()
@@ -1288,7 +1289,7 @@ mod tests {
             }
         });
 
-        cancel::reset();
+        let token = cancel::reset();
         let root =
             std::env::temp_dir().join(format!("nailong-cancel-download-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -1307,7 +1308,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(60));
             cancel::cancel();
         });
-        let error = http.download(&spec).unwrap_err();
+        let error = cancel::with(token, || http.download(&spec)).unwrap_err();
         canceller.join().unwrap();
         server.join().unwrap();
         cancel::reset();
