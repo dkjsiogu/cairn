@@ -269,7 +269,7 @@ pub fn injector_jar(root: &Root) -> Result<PathBuf> {
         latest.get("download_url").and_then(Value::as_str),
         latest.pointer("/checksums/sha256").and_then(Value::as_str),
     ) else {
-        return local.ok_or_else(|| Error::Install("authlib-injector 的版本信息不完整".into()));
+        return local.ok_or_else(|| Error::Login("authlib-injector 的版本信息不完整".into()));
     };
     let bytes = match http.get_bytes(url) {
         Ok(bytes) => bytes,

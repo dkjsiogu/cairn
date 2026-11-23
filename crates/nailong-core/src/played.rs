@@ -2,7 +2,7 @@
 //!
 //! 界面用它排「最近玩过」、显示游玩时长；崩溃后用 `last_good` 找出「上次正常游戏之后改过什么」。
 
-use crate::error::{Error, Result, io};
+use crate::error::{Error, Result};
 use crate::paths::Root;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -46,9 +46,7 @@ pub fn load(root: &Root) -> Played {
 fn save(root: &Root, all: &Played) -> Result<()> {
     let path = root.dir().join(STORE);
     let bytes = serde_json::to_vec_pretty(all).map_err(|e| Error::Plain(e.to_string()))?;
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, bytes).map_err(|e| io(&tmp, e))?;
-    std::fs::rename(&tmp, &path).map_err(|e| io(&path, e))
+    crate::paths::write_atomic(&path, &bytes)
 }
 
 /// 记下一局：什么时候开始、玩了多久、怎么退出的。返回这个版本更新后的记录。

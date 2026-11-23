@@ -641,10 +641,10 @@ fn write_pack(
     let stored = SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Stored)
         .large_file(true);
-    let zip_err = |e: zip::result::ZipError| Error::Install(format!("写整合包失败：{e}"));
+    let zip_err = |e: zip::result::ZipError| Error::Plain(format!("写整合包失败：{e}"));
     zip.start_file("modrinth.index.json", deflated)
         .map_err(zip_err)?;
-    let text = serde_json::to_vec_pretty(index).map_err(|e| Error::Install(e.to_string()))?;
+    let text = serde_json::to_vec_pretty(index).map_err(|e| Error::Plain(e.to_string()))?;
     zip.write_all(&text).map_err(|e| io(dest, e))?;
 
     let total: u64 = packed

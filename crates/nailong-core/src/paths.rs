@@ -161,16 +161,14 @@ impl Root {
 
 fn remove_child(parent: &Path, id: &str) -> Result<()> {
     if id.is_empty() || id == "." || id == ".." || id.contains('/') || id.contains('\\') {
-        return Err(crate::error::Error::Install(format!(
-            "拒绝删除非法路径: {id}"
-        )));
+        return Err(Error::Plain(format!("拒绝删除非法路径: {id}")));
     }
     let path = parent.join(id);
     if !path.exists() {
         return Ok(());
     }
     if !path.is_dir() {
-        return Err(crate::error::Error::Install(format!(
+        return Err(Error::Plain(format!(
             "不是目录，拒绝删除: {}",
             path.display()
         )));
@@ -217,17 +215,64 @@ fn strip_verbatim(path: PathBuf) -> PathBuf {
     path
 }
 
+fn atomic_tmp_path(path: &Path) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let mut name = path.as_os_str().to_os_string();
+    name.push(format!(".tmp-{}-{seq}", std::process::id()));
+    PathBuf::from(name)
+}
+
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| io(parent, e))?;
     }
-    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+    let tmp = atomic_tmp_path(path);
     std::fs::write(&tmp, bytes).map_err(|e| io(&tmp, e))?;
     std::fs::rename(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         io(path, e)
     })?;
     Ok(())
+}
+
+/// 原子写入敏感文件（账户令牌等）：Unix 上在创建临时文件时就设为 0600，不留默认权限的窗口。
+pub fn write_atomic_private(path: &Path, bytes: &[u8]) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| io(parent, e))?;
+        }
+        let tmp = atomic_tmp_path(path);
+        let write_result = (|| -> std::io::Result<()> {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&tmp)?;
+            file.write_all(bytes)?;
+            file.flush()?;
+            // 兜底确保最终权限是 0600，即使 umask 更严格以外的情况也不放宽。
+            let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+            Ok(())
+        })();
+        if let Err(e) = write_result {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(io(&tmp, e));
+        }
+        std::fs::rename(&tmp, path).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            io(path, e)
+        })?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        write_atomic(path, bytes)
+    }
 }
 
 /// 玩家在设置里选的数据目录，记在 Cairn 自己的配置里（不放进任何一个 .minecraft）。
@@ -274,12 +319,12 @@ pub fn carry_settings(from: &Root, to: &Path) -> Result<usize> {
         let source = from.dir().join(name);
         let dest = to.join(name);
         if source.is_file() && !dest.exists() {
-            std::fs::copy(&source, &dest).map_err(|e| io(&dest, e))?;
-            // 账户里有登录凭证：和原来一样只给自己读写。
-            #[cfg(unix)]
             if name == "accounts.json" {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600));
+                // 账户里有登录凭证：创建时直接 0600，不先按默认权限复制再改权限。
+                let bytes = std::fs::read(&source).map_err(|e| io(&source, e))?;
+                write_atomic_private(&dest, &bytes)?;
+            } else {
+                std::fs::copy(&source, &dest).map_err(|e| io(&dest, e))?;
             }
             copied += 1;
         }
@@ -403,5 +448,62 @@ mod root_tests {
         let root = Root::new("relative/.minecraft");
         assert!(root.dir().is_absolute());
         assert!(root.dir().ends_with("relative/.minecraft"));
+    }
+
+    #[test]
+    fn write_atomic_avoids_temp_collisions_and_locks_private_mode() {
+        let base = std::env::temp_dir().join(format!(
+            "cairn-atomic-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+
+        // 同主名不同后缀的临时文件名互相独立。
+        let a = atomic_tmp_path(&base.join("1.21.1.json"));
+        let b = atomic_tmp_path(&base.join("1.21.1.jar"));
+        assert_ne!(a, b);
+        assert!(
+            a.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("1.21.1.json.tmp-")
+        );
+        assert!(
+            b.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("1.21.1.jar.tmp-")
+        );
+
+        // 并发写入同一个文件不会因临时文件撞名失败。
+        let target = base.join("shared.json");
+        std::thread::scope(|scope| {
+            for i in 0..8 {
+                let target = target.clone();
+                scope.spawn(move || {
+                    for round in 0..10 {
+                        write_atomic(&target, format!("{i}-{round}").as_bytes()).unwrap();
+                    }
+                });
+            }
+        });
+        assert!(target.is_file());
+
+        // 敏感文件在创建时即 0600。
+        let secret = base.join("accounts.json");
+        write_atomic_private(&secret, b"{\"secret\":true}").unwrap();
+        assert_eq!(std::fs::read(&secret).unwrap(), b"{\"secret\":true}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&secret).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

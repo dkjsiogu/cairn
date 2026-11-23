@@ -330,7 +330,7 @@ impl App {
             Install::Exe => update::apply_staged(&self.root.cache(), true).and_then(|applied| {
                 applied
                     .map(|_| ())
-                    .ok_or_else(|| nailong_core::Error::Install("下载的新版本不见了".into()))
+                    .ok_or_else(|| nailong_core::Error::Plain("下载的新版本不见了".into()))
             }),
             _ => update::relaunch(),
         };

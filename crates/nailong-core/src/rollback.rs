@@ -89,18 +89,18 @@ fn safe_relative(path: &str) -> Result<PathBuf> {
     for component in Path::new(path).components() {
         match component {
             Component::Normal(part) => out.push(part),
-            _ => return Err(Error::Install(format!("恢复点里有越界路径: {path}"))),
+            _ => return Err(Error::Plain(format!("恢复点里有越界路径: {path}"))),
         }
     }
     if out.as_os_str().is_empty() {
-        return Err(Error::Install("恢复点里有空路径".into()));
+        return Err(Error::Plain("恢复点里有空路径".into()));
     }
     Ok(out)
 }
 
 fn object_path(game_dir: &Path, hash: &str) -> Result<PathBuf> {
     if hash.len() < 3 {
-        return Err(Error::Install("恢复点里的文件哈希无效".into()));
+        return Err(Error::Plain("恢复点里的文件哈希无效".into()));
     }
     Ok(objects_dir(game_dir).join(&hash[..2]).join(&hash[2..]))
 }
@@ -234,7 +234,7 @@ pub fn backup_extra(game_dir: &Path, reason: &str, extra: &[String]) -> Result<S
     for name in extra {
         let relative = safe_relative(name)?;
         if relative.components().count() != 1 {
-            return Err(Error::Install(format!(
+            return Err(Error::Plain(format!(
                 "恢复点附加文件必须是直接子文件: {name}"
             )));
         }
@@ -266,7 +266,7 @@ pub fn backup_extra(game_dir: &Path, reason: &str, extra: &[String]) -> Result<S
     fs::create_dir_all(&dir).map_err(|e| crate::error::io(&dir, e))?;
     let path = dir.join(format!("{}.json", snapshot.id));
     let data = serde_json::to_vec(&snapshot)
-        .map_err(|e| Error::Install(format!("恢复点序列化失败: {e}")))?;
+        .map_err(|e| Error::Plain(format!("恢复点序列化失败: {e}")))?;
     crate::paths::write_atomic(&path, &data)?;
     if let Ok(cache) = serde_json::to_vec(&new_cache) {
         let _ = crate::paths::write_atomic(&hash_cache_path(game_dir), &cache);
@@ -303,7 +303,7 @@ pub fn restore(game_dir: &Path, id: &str) -> Result<usize> {
     let path = snapshots_dir(game_dir).join(format!("{id}.json"));
     let data = fs::read(&path).map_err(|e| crate::error::io(&path, e))?;
     let snapshot: Snapshot =
-        serde_json::from_slice(&data).map_err(|e| Error::Install(format!("恢复点损坏: {e}")))?;
+        serde_json::from_slice(&data).map_err(|e| Error::Plain(format!("恢复点损坏: {e}")))?;
     backup(game_dir, "恢复前自动留档")?;
     for root in ROOTS {
         let base = game_dir.join(root);
@@ -322,7 +322,7 @@ pub fn restore(game_dir: &Path, id: &str) -> Result<usize> {
     for name in &snapshot.extra_files {
         let relative = safe_relative(name)?;
         if relative.components().count() != 1 {
-            return Err(Error::Install(format!(
+            return Err(Error::Plain(format!(
                 "恢复点附加文件必须是直接子文件: {name}"
             )));
         }
@@ -340,7 +340,7 @@ pub fn restore(game_dir: &Path, id: &str) -> Result<usize> {
         let source = object_path(game_dir, &file.hash)?;
         let (hash, size) = hash_file(&source)?;
         if hash != file.hash || size != file.size {
-            return Err(Error::Install(format!("恢复点对象校验失败: {}", file.path)));
+            return Err(Error::Plain(format!("恢复点对象校验失败: {}", file.path)));
         }
         fs::copy(&source, &dest).map_err(|e| crate::error::io(&dest, e))?;
     }

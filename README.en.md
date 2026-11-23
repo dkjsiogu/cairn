@@ -4,249 +4,89 @@
 [![Release](https://img.shields.io/github/v/release/dkjsiogu/cairn?label=release)](https://github.com/dkjsiogu/cairn/releases/latest)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 
-A small, native Minecraft: Java Edition launcher written in Rust. Renamed to **Cairn** in 0.37 (formerly nailong). Windows ships as a single executable, Linux as a single `.deb`. No bundled Java runtime, and no installer needed on Windows either.
+A small, native Minecraft: Java Edition launcher written in Rust (formerly nailong before 0.37). Ships as a single executable on Windows (~9 MB) and a single `.deb` on Linux (~3.7 MB), with no bundled Java runtime and 0% idle CPU.
 
 [简体中文](README.md) | **English**
 
-> Current version: **0.45.0** (preview)
->
-> Goals: small binaries, few dependencies, visible install progress, and a repair path after interruption. See [implementation status](docs/design/14-implementation-status.md) for exact boundaries.
+> Current version: **0.45.1** (preview) · [Changelog](CHANGELOG.md) · [Implementation status](docs/design/14-implementation-status.md)
 
 ## Why Cairn
 
-Installing Minecraft is not the hard part — doing it cleanly is. Version JSON, asset indexes, loader processors, JVM flags, and a few hundred files per modpack: one mistake anywhere and the player just sees “launch failed”.
+**Clean installs, recoverable mistakes.** A cairn is the pile of stones hikers leave by a trail: it does not walk for you, it marks the way back.
 
-A cairn is the pile of stones hikers leave by a trail: it does not walk for you, it marks the way back. A launcher should do the same: install cleanly, and let you go back when something breaks. In practice:
-
-- Written in Rust; the launcher itself does not run on a JVM. One file on Windows, one package on Linux.
-- Installation is split into visible stages; if interrupted, the next run checks what is missing and resumes instead of restarting.
-- Forge/NeoForge client processors run directly — the official installer is never invoked or left on disk.
-- Drop in a modpack and Cairn detects the format, installs the loader, downloads files, and applies overrides.
-
-It is not a universal launcher, and it is not 1.0 yet. What works and what does not is laid out below.
+- **Native & small**: written in Rust with egui; does not run on a JVM.
+- **Visible, resumable installs**: staged pipeline with cancellation and repair; Forge/NeoForge client processors run directly without leaving the official installer on disk.
+- **Reversible changes & chunk-level saves**: automatic restore points before mod/config/loader edits; git-style chunk-level world snapshots let you roll back only the broken chunks.
+- **One folder per version**: each version lives in `versions/<name>/` with no cross-version dependencies, deletes go to the trash, and you can also point Cairn directly at an existing PCL / HMCL / official `.minecraft`.
 
 ## Interface
 
-0.45: chunk-level snapshots; roll back just a few chunks.
+![Motion demo: status ring, navigation, command palette, chunk rollback and light theme](docs/screenshots/motion.gif)
 
-- World snapshots are stored per chunk, so unchanged chunks are shared between snapshots. Snapshots go into pack files, and a snapshot of an unchanged world takes milliseconds.
-- "Roll back chunks" on a snapshot opens a chunk map per dimension showing changed, new and removed chunks. Select a few and put them back as they were; terrain, entities and POI go together, and the current world is snapshotted first. See [30](docs/design/30-chunk-snapshots.md).
-- Pruning after deleting a world no longer breaks that world's snapshots; full restores recreate empty folders.
-- Cancel stops only the current task, not icon or search requests; a failed icon fetch no longer keeps the UI repainting.
-- First Forge/NeoForge install downloads Java when none is found. Native libraries are no longer deleted and re-extracted on every launch.
-- Windows: paths no longer carry the `\\?\` prefix; cleanup sizes count hardlinks once. Login no longer probes redirect addresses. GC logs with decimal commas are read.
-
-0.44: while you play, and when you look for things.
-
-- While a game runs, the sidebar shows each session's state, and a stuck game can be ended. A running game no longer holds the launcher: install other versions and download mods as usual, and run different versions side by side.
-- "Enter": start the game straight into your latest world, or any world from the Saves page (1.20+).
-- If the game crashes and content changed since the last good session, the bottom bar offers "Undo changes" to go back in one step.
-- `Ctrl+K` finds anything: versions, worlds, pages, settings and common actions.
-- Duplicate a version; drop a world folder or zip to import it; play time is tracked and versions are sorted by last played.
-- Settings are split into Game, Launcher, Storage and About; the interface can be zoomed; window size and the last selected version are remembered. See [29](docs/design/29-play-and-find.md).
-
-0.43: export modpacks; use another launcher's .minecraft directly.
-
-- Export any version as a `.mrpack`. Mods, resource packs and shaders found on Modrinth or CurseForge are listed by download link; everything else — unlisted mods, config, kubejs, the worlds you pick — is packed. A 150-mod pack with 901 MB of mods exports to 307 MB. See [28 · Export](docs/design/28-export.md).
-- Settings can switch the data folder to the `.minecraft` of PCL, HMCL or the official launcher; accounts and settings come along. Versions without isolation, HMCL custom game folders and HMCL version files all work. See [27 §10](docs/design/27-version-folders.md).
-
-0.42: one folder per version.
-
-- Each version is one folder, `versions/<name>/`, holding a complete version file plus its mods, worlds and config. Versions do not depend on each other; deleting one never breaks another.
-- Name a version when you install it. The same Minecraft version and loader can be installed several times, e.g. "Survival" and "Testing". Versions can be renamed.
-- Deleting a version moves its folder, worlds included, to the trash.
-- Modpacks install as a version folder too.
-- Settings can clean up libraries and assets no version uses any more.
-- See [27 · One folder per version](docs/design/27-version-folders.md).
-
-0.41: automatic updates.
-
-- **Windows**: new versions download in the background and are swapped in when you close Cairn. You can turn this off in Settings.
-- **Linux**: the deb adds Cairn's apt repository. When Cairn finds a new version on open, it installs it in the background without asking for a password. You can also `sudo apt install cairn` directly; see the install steps below.
-- To update right away, click the hint in the sidebar. On Linux the system asks for your password.
-- See [26 · Automatic updates](docs/design/26-auto-update.md).
-
-0.40: multiple accounts and a Screenshots page.
-
-- **Accounts**: Microsoft, external login (authlib-injector, e.g. LittleSkin) and offline, switched from the bottom-left. Avatars show the skin. External login needs only the skin site address; pick a profile if there are several. Passwords are not stored; expired logins are caught before launch.
-- **Screenshots page**: the fifth sidebar entry, with Overview, Time, Places (version › world or server) and People, plus search.
-- **Screenshot info**: games started from Cairn write the world or server, account and version into the PNG text chunk when you take a screenshot. Pixels are untouched; this can be turned off. Older screenshots are inferred from game logs.
-- **Viewer**: zoom, 1:1, pan, paging; copy, set as world icon, move to trash.
-- Details: [25 · Accounts and screenshots](docs/design/25-accounts-and-shots.md) (Chinese).
-
-0.39 adds the community's public mirrors, so downloads keep working when the official servers do not answer:
-
-- **Automatic mirror fallback**: game files, libraries and loaders fall back to [BMCLAPI](https://bmclapidoc.bangbang93.com/); the Modrinth and CurseForge APIs fall back to [MCIM](https://github.com/mcmod-info-mirror). A host that failed is remembered for five minutes, so the next requests go straight to the mirror instead of waiting for a timeout each time. Every file is still checked against the official hashes.
-- **Choose the download source**: Settings offers "Official first" (default) or "Mirror first" (game files and loaders from BMCLAPI first, usually faster in mainland China). Modrinth and CurseForge always try the official API first.
-- **See which source is used**: the download page names the source; the Content page shows a quiet note, with the mirror's sync time, while MCIM is in use.
-- **Keys stay home**: the CurseForge API key is only sent to CurseForge and is dropped when falling back to a mirror. Rules and what we promised both mirrors: [24 · Download sources](docs/design/24-download-sources.md) (Chinese).
-
-0.38 makes downloading solid and gives the interface code a clear structure:
-
-- **See what is being downloaded**: the progress page lists the finished steps and how long each took, the current step, the last few files (asset files by their real names), whether they come from Mojang or the BMCLAPI mirror, the speed and the time left.
-- **Automatic Java**: if no suitable Java is installed when you press Launch, Cairn downloads Mojang's official runtime and then launches; nothing to hunt down and nothing changed on the system. The compressed files are preferred (about a third of the size) and every file is verified. Settings, first-run setup and launch settings can download it too.
-- **Launcher updates**: a quiet check only when Cairn opens shows a small badge in the sidebar when a new version exists. The dialog shows the release notes and verifies the download against SHA256SUMS; Windows restarts into the new version in one click, Linux gets a copyable install command. Settings has a manual "Check for updates".
-- **A framework for the UI code**: the 12,000-line `main.rs` is now modules per page and dialog, state is grouped by feature, and background tasks share one progress model. See [23 · UI framework](docs/design/23-ui-framework.md) (Chinese).
-- Long version names no longer cover the buttons on the Worlds page.
-
-0.37 renames the launcher to Cairn and smooths out what happens before and after you press Launch:
-
-- **Launch settings before you launch**: a row under **Launch** on Home shows the Java, memory, collector, window size and extra JVM flags this version will use. Click any of them to open per-version launch settings: pick any detected Java or a custom one, override memory, collector, flags and window size, and leave the rest following the global defaults. A full command-line preview, built by the same code that launches the game, can be copied in one click.
-- **Screenshot wall**: Home shows this version's screenshots like a store page, newest first. Left-click zooms the thumbnail into a full viewer (←/→ to browse); right-click copies the image itself to the clipboard, with a "Copied" badge. Thumbnails are generated in the background and cached; idle CPU stays at zero.
-- **Full version names**: long names shrink to fit and wrap onto two lines instead of being cut off; long paths in Settings are elided in the middle, show in full on hover and copy on click.
-- **Installed content opens instantly**: the last list shows at once while a background pass re-reads only files whose size or modification time changed. The mod count on Home is verified in the background as well.
-- **The exe has an icon and version info**, and so do the window and taskbar. The system clipboard works now (in 0.36 copies never reached it and text fields could not paste from other apps).
-- **Rename**: on Linux the data directory moves from `~/.local/share/nailong` to `~/.local/share/cairn` automatically, with nothing lost; Windows still uses `.minecraft` next to the exe. The deb package is now `cairn` and replaces the old `nailong` package.
-
-Why browsers say the exe "is not commonly downloaded" while HMCL does not trigger it: see [22 · Windows download warnings](docs/design/22-windows-trust.md) (Chinese).
-
-0.36 answers the two tuning questions separately and fixes several places where the interface showed something without letting you act on it.
-
-- **Test this computer**: no more per-version test instances or game windows. Click "Test" in Settings and the launcher runs a small built-in Java program (7 KB, Java 8 bytecode) that mimics the game: resident data, a chunk cache, worldgen threads, server ticks and an uncapped render thread. For every Java 21+ on the machine it compares G1 and ZGC in a standard and a large-modpack tier by average FPS, 1% lows, visible hitches and CPU. About 90 seconds per Java, no window, and the verdict is shared by every version. The CLI is `cairn-cli bench`.
-- **Memory learned from play**: every session writes its GC log to `logs/cairn-gc.log` in the game directory (`nailong-gc.log` in 0.36); after exit the launcher reads how much data really stays live once you are in the world and sizes Auto memory from it next time, adding headroom after full collections. Versions you have not played yet still use the formula.
-- **Content page**: counts such as "Disabled 3" or "Duplicates 4" are filters you can click; a real search box (`Ctrl+F`) combines with them; "Open folder" and "Show in folder" for every item; drag mods, resource packs and shaders straight from the file manager, many at once, with a hover hint saying where they will go; changes made outside the launcher show up when you switch back.
-- **Logs**: "View log" after a failed launch opens this run's game output directly, with any recognised cause on top (for example which required mod is missing), errors in red, an errors-only filter, search, copy and show-in-folder. `Ctrl+L` opens it any time.
-
-See [20 · test this computer, learn memory from play](docs/design/20-tuning-benchmark.md) and [21 · handling](docs/design/21-handling.md) (Chinese).
-
-0.35 added a tuning benchmark that built a test instance per version and flew through a test world; 0.36 replaces it with the approach above.
-
-0.34.1 fixes 26.x: version files from 26.1 on carry `default-user-jvm`, which used to break installation, and the natives directory gained an extra level so LWJGL was not found. 26.x now installs and runs, and Auto follows the official defaults Mojang puts in the version file (ZGC, compact object headers and so on). Java selection now picks the lowest sufficient major version and prefers OpenJDK over GraalVM within a version.
-
-0.34 adds automatic JVM tuning: memory defaults to Auto, and the heap size comes from RAM, CPU threads, the Java version and the mod count, with tuned G1 flags and generational ZGC for large modpacks on strong machines. The initial heap follows free memory at launch so a busy machine still starts. Settings shows the result, the reasoning and the full flag list, and everything can be overridden. In the same world with 100 s of sprinting, GC runs dropped from 15 to 8 and total pause time by about a third. See [19 · JVM tuning](docs/design/19-jvm-tuning.md).
-
-0.33 rebuilds the interface in its own **Fog Blue** style and stops imitating Minecraft: minimal and matte, with dark and light themes that follow the system by default. A status ring on Home shows file integrity, every mod and your world snapshots. It carries no text at rest; hovering a layer brings a small animation and an explanation, clicking jumps to the matching page, and it also works from the keyboard. A single muted accent replaces glow and gradients, and idle CPU stays at 0.0%. See the [design spec](docs/design/18-ui-fog.md).
-
-0.32 tears out the 0.31 aurora glass and rebuilds the launcher in a Minecraft-native **Deepslate** pixel language: the bundled Fusion Pixel 12 px CJK face, zero rounded corners, two-pixel hard borders, beveled block buttons, pixel icons and a deepslate brick shell. Home's centrepiece is an isometric voxel island assembled block by block in Rust: grass, a tree, a pond, ore, a tiny explorer on the edge, four stepped dirt/stone layers and floating gold blocks. Every page and dialog uses the same block components; the four-column content grid is back at 1120 px, while 900×620 hides the latest-world slot and status strip and makes Settings scroll. The backdrop is generated per size and cached as a texture; the island is painted as flat integer-aligned polygons. Idle CPU is still 0.0%.
-
-0.31 replaces the whole interface with an aurora / dragon-ridge night sky: deep ink-blue glass, serif display type, and a Home that reads as one poster — the current version and Play on the left, the latest world floating on the right, recent content and shortcuts below. The backdrop and hero are not bundled images: they are generated in Rust once per size (aurora ribbons, star field, moon, dragon constellation, stepped ridges) and cached as textures, so the 0.30 idle-CPU result holds. The four-column content grid is back at 1120 px, and Settings becomes scrollable at the 900×620 minimum instead of clipping its content and Done button.
-
-0.30 makes the ambient background static: gradients, dots and embers stay, but the window no longer redraws every 66 ms. On Xvfb + llvmpipe with the window focused, a five-second idle sample dropped from about 162% CPU for the process to 0%. This was the root cause of the “Home/page switch feels hot” reports.
-
-0.29 adds Reduce Motion, persisted in `ui.json`: page fades complete immediately, ambient embers freeze, cards stop lifting, buttons stop shifting, progress sheen is disabled, switches snap, and idle ambient repaints stop. Colour and border feedback remain, so the UI does not feel broken when motion is off.
-
-0.28 adds keyboard paths: Ctrl+1–4 switch Home/Versions/Content/Saves, Ctrl+, opens Settings, and F5 refreshes the version list. Shortcuts do not steal keys while a text field is focused or a dialog is open; the hint lives under Settings → Diagnostics.
-
-0.27 tightens the Settings dialog: memory is a 1 GB `− 4 GB +` stepper instead of a raw DragValue, the Java row shows the actual detected version with Recheck and a Download Java 21 link when missing, and name/memory/Java now use two rows instead of one crowded line.
-
-0.26 adds an update confirmation. “Update all” and a single row’s Update no longer overwrite files immediately: a checklist lists each project’s from → to version, the target instance, number of projects, download size, and notes that old files are cleaned up and a restore point is taken first. Updates and installs now share the same “look before writing” language.
-
-0.25 unifies the controls that were still default egui: version stats now put a 20 px bold number above a small muted label, and Auto Backup / Show Base Versions use the same warm 36×20 switch as the content list instead of checkboxes. The Saves toolbar reads left-to-right as auto-backup → interval → keep → back up all → prune. No new features, just a quieter, more consistent page.
-
-0.24 treats failure and dismissal as part of the interface. A failed login gets its own “login did not finish” result card with Retry and Close instead of dropping a raw AADSTS line behind the main window. Escape now closes Settings, Account, Restore Points, the login wait and the login-error card; content errors no longer expose raw URLs: an empty result shows a centered “content did not load” card with Reload, while a failed refresh keeps the list and adds a retry bar. Raw errors stay in the Settings log.
-
-0.23 fixes the first rough edges players actually hit. On Windows the login URL is no longer opened through `cmd`, so a `&` in the query string can no longer truncate `scope` and trigger AADSTS900144. Cancelling the login dialog no longer poisons the content browser with a stale “operation cancelled”. Home/version statistics are cached per page instead of rescanned every frame, and the page transition is shortened from 260 ms to 180 ms. Content loading gets a skeleton card, browse/search results fit four columns at 1120 px, and login failures show one actionable sentence while raw AADSTS details go to the log.
-
-0.22 makes restore points loader-aware: when content lives in an isolated version directory, the version JSON and patched client jar are stored with the point and restored exactly — the old patched jar is removed first, so rolling back to vanilla does not leave it behind. Reinstalling or repairing an existing loader takes a point first. Shared `libraries/` are not copied because old libraries are never deleted; world saves keep their own snapshot system, and custom external `gameDir` instances restore content only.
-
-0.21 adds a confirmation step before anything is written: the card `+` and the detail-page install button now show project, target version, actual destination directory, version/file, size, dependencies and a restore-point note. Nothing downloads until you confirm, and cancelling writes nothing. First launch no longer drops you straight into the install form; it walks through **Java → game directory → install your first version or import a modpack** in one page.
-
-0.20 makes “recoverable mistakes” real: every install, update, import or delete of mods/resource packs/shaders creates an instance **restore point** first. If something breaks, the Content page's restore-point dialog rolls back mods, configs, resource packs, shaders and the content index; it takes a safety point of the current state before restoring and verifies every object by SHA-1. Ten points are kept, whole files are deduplicated, and world saves remain on their own snapshot system.
-
-0.19 turns Home from a dashboard into a play surface: **current version, one play action, version details, the latest world and recent content**. Account, player name, memory, Java, game/data folders and logs move into a sidebar Settings dialog; player name and memory persist in the data directory. The product thesis lives in the [product brief](docs/product/00-brief.md): **clean installs, recoverable mistakes**.
-
-0.18 rearranges the UI around a player's daily path. A persistent sidebar holds four places — **Home, Versions, Content, Saves**. Content merges discovery and installed items into one library; Versions is only launch and maintenance; Saves is a first-class page with its own version picker. The theme is cream, white cards and orange/yellow accents. 0.18.1 adds a real bold CJK family, a matte amber primary action with optional play/download glyphs, and secondary buttons with warm borders and contact shadows.
-
-![Motion demo: sidebar, content library, card hover and detail return](docs/screenshots/motion.gif)
-
-| Home | Content · Discover |
+| Home | Chunk Rollback (0.45) |
 |---|---|
-| ![Home](docs/screenshots/01-home.png) | ![Content · Discover](docs/screenshots/05-discover.png) |
-| **Content · Installed** | **Saves** |
-| ![Content · Installed](docs/screenshots/04-library.png) | ![Saves](docs/screenshots/08-saves.png) |
+| ![Home](docs/screenshots/01-home.png) | ![Chunk Rollback](docs/screenshots/29-chunks.png) |
+| **Content · Discover** | **Screenshots (Time / Place / People)** |
+| ![Content · Discover](docs/screenshots/05-discover.png) | ![Screenshots](docs/screenshots/30-gallery.png) |
+| **Saves & Snapshots** | **Light Theme** |
+| ![Saves & Snapshots](docs/screenshots/08-saves.png) | ![Light Theme](docs/screenshots/25-light-home.png) |
 
-More screenshots (versions, install, search, detail, progress, first launch, settings, account and login, login failure, restore points, install confirmation, empty library, empty saves, six 900×620 narrow pages, plus four light-theme pages): [docs/screenshots](docs/screenshots). The 15-second clip covers the status ring, page switching and the light theme.
+All 32 screenshots (versions, install, content manager, search, details, install confirmation, restore points, accounts, tabbed settings, `Ctrl+K`, running sessions, 900×620 narrow layouts and light theme): [docs/screenshots](docs/screenshots).
 
-## Features
+## Highlights
 
-### Install and launch
+### Install, launch & JVM tuning
 
-- Vanilla, Fabric, NeoForge, Forge — versions come from the official manifests, no manual entry.
-- Native Forge/NeoForge install: we fetch only `install_profile`, `version.json`, and the client patch (~3 MB). The full installer is never kept.
-- Once the version JSON is ready, assets, client/libraries, loader patches, and processors run in parallel where possible.
-- Large files download in four ranged segments with resumable parts and automatic fallback to a mirror (BMCLAPI, MCIM) when the official host does not answer.
-- A machine-wide loader-patch cache; client/libraries use SHA1-addressed blobs and are hardlinked into place. Existing files only get a cheap size check.
-- Patched clients found locally are reused: we scan official / PCL / HMCL / Prism / MultiMC / Modrinth and sibling `.minecraft` roots; a matching SHA1 (or a valid NeoForge JAR shape) skips the patch and processors.
-- Reinstalling an intact Forge/NeoForge instance is a fast no-op — no re-download, no repeated processors.
-- Missing assets show up as a specific “repair resources” action instead of a generic launch failure.
-- Installs can be cancelled: downloads, extraction, and processors respond; completed parts stay on disk for the next repair/retry.
+- **Loaders & reuse**: vanilla, Fabric, NeoForge and Forge from official manifests; slim Forge/NeoForge installs (~3 MB core payload) plus automatic hardlink reuse of verified patched clients found in other local launchers.
+- **Resilient downloads**: 4-way ranged downloads for large files; automatic fallback to [BMCLAPI](https://bmclapidoc.bangbang93.com/) (game/loaders) and [MCIM](https://github.com/mcmod-info-mirror) (Modrinth/CurseForge APIs) when official hosts fail, with API keys stripped on mirrors and official hashes always verified.
+- **Automatic Java & preview**: downloads Mojang's official Java runtime (LZMA-compressed, SHA-1 verified) on demand when no compatible Java is found; per-version Java, heap, GC, resolution and flags with a copyable command-line preview.
+- **Measured JVM tuning**: automatic heap sizing plus tuned G1 / generational ZGC; a built-in 7 KB synthetic Java benchmark (`cairn-cli bench`) compares G1 vs ZGC per Java 21+ runtime without opening a game window, while real session GC logs teach Auto mode how much live data your world actually uses.
+- **Play-friendly**: running games never lock the launcher; multiple versions can run side by side with sidebar session tracking and a Stop button; 1.20+ Quick Play directly into a world; `Ctrl+K` command palette; `Ctrl+L` log viewer with automatic crash/missing-mod hints.
 
-### Modpacks
+### Recoverable mistakes
 
-Six formats are detected automatically:
+- **Instance restore points**: content installs, updates, local drops, deletes and loader repairs show a confirmation checklist and take a SHA-1 deduplicated restore point first; after a crash, Cairn can roll back content changes made since the last good session in one step.
+- **Chunk-level world snapshots**: Anvil region files (`region/`, `entities/`, `poi/`) are stored per chunk in pack files; unchanged worlds snapshot in milliseconds; an interactive per-dimension chunk map lets you select and restore specific chunks (terrain, entities, POI and `.mcc` together, with an automatic pre-rollback snapshot).
+
+### Modpacks & content library
+
+Six modpack formats are auto-detected on drag-and-drop, and any version can be exported to a minimal `.mrpack` (online files linked, custom files and selected worlds packed):
 
 | Format | Entry point | Notes |
 |---|---|---|
-| Modrinth | `.mrpack` | Direct URLs plus SHA1 |
-| CurseForge | zip with `manifest.json` | Resolve project/file IDs; official builds include a key for SHA1 checks |
-| Prism / MultiMC | `mmc-pack.json` (may sit inside one folder) | Components and overrides; instances with component patches (`patches/`) are built from those patches, including the instance's own libraries |
+| Modrinth | `.mrpack` | Direct URLs + SHA-1 |
+| CurseForge | zip with `manifest.json` | Official builds include a lightly XOR-obfuscated project key (shared quota, not a secret); respects disabled third-party distribution |
+| Prism / MultiMC | `mmc-pack.json` (nested folder supported) | Supports component `patches/` and bundled libraries |
 | MCBBS | `mcbbs.packmeta` | addons + files + overrides |
-| HMCL | `modpack.json` + `minecraft/pack.json` | Embedded manifest becomes a profile |
-| ATLauncher | `instance.json` | Embedded manifest becomes a profile |
+| HMCL | `modpack.json` + `minecraft/pack.json` | Embedded manifest converted to profile |
+| ATLauncher | `instance.json` | Embedded manifest converted to profile |
 
-Drag a `.mrpack` or `.zip` into the window to start an import. A single mod `.jar` is not treated as a modpack.
+The Content page unifies **Installed** and **Discover** for mods, resource packs and shaders (Modrinth + CurseForge real category tree), resolves `required` / `optional` / `incompatible` dependencies, supports batch drag-and-drop import, status filters, duplicate detection and confirmed updates.
 
-Export: click "导出整合包" on a version to get a `.mrpack`. Files available online are linked; the rest is packed. From the command line: `cairn-cli export <version> <file>`.
+### Accounts, screenshots & updates
 
-### Content library: discovery and installed
-
-- **Content** in the sidebar is the only place for mods, resource packs and shaders. The “Installed / Discover” tabs are two modes of the same library, not two pages.
-- Pick “install to: <installed version>” at the top right. Browsing and search then lock to that version's Minecraft version and loader, and `+` writes straight into its `mods/`, `resourcepacks/` or `shaderpacks/`.
-- Prefer window-shopping? Choose “browse only”, pick any version/loader; cards still open their details, and `+` asks for an install target first.
-- Content opens on **Installed**: counts, enable/disable switches, filtering, update checks, per-row/all updates and file import all live here. An empty library points straight at Discover.
-- Switch to **Discover** for the browse page: title, search, content type and “install to” stay pinned at the top; the content area is a row of category chips (optimization, technology, adventure, realistic, fantasy, …) plus “Popular” and “Newest” shelves. No keyword required.
-- Each card shows the icon, name, summary and download count, with a `+` in its bottom-right corner. It installs the latest build compatible with the selected version and loader, plus required dependencies, and then turns into “installed”.
-- Clicking the rest of a card opens a two-column project page: project/version info and dependencies on the left, the install panel and version history on the right. Pick a file version and review `required` / `optional` / `incompatible` dependencies; `required` is added automatically, `optional` is off by default, `incompatible` blocks the download.
-- Each shelf has “More ›” in its corner: it opens the full list for that shelf (24 per page) with “load more” pagination.
-- Category chips come from **CurseForge's real category tree**: the launcher fetches `/v1/categories` at runtime and translates it, keeping CurseForge-only categories under their own names and appending Modrinth-only ones after them.
-- Version and loader are optional: “all versions · all loaders” is the default, so window-shopping works without installing anything first.
-- Cards show a short description (name, summary, downloads); the detail page has the full summary plus author and download count.
-- The chip row shows 12 categories by default and folds the rest behind “more categories”. A source switch (All / Modrinth / CurseForge) lets you browse the CurseForge catalogue as-is, with its categories and sort orders. Downloads are still resolved and verified by the launcher; no website is involved.
-- Search stays in the top bar (Enter to run) and renders the same cards with pagination.
-- Files go into that version's `mods/`, `resourcepacks/` or `shaderpacks/`. A normal version gets an isolated `gameDir` (`versions/<id>/`) on first download; existing saves in the root are not migrated.
-- **Installed** mode is the content manager: filter by name, toggle files, check for updates, update one or all, and see duplicate warnings. Delete asks inline from the `⋯` menu, and updating a disabled file keeps it disabled.
-- **Install confirmation**: the card `+` and detail install both show target, destination directory, version/file, size, dependencies and the restore-point note before anything is written; cancelling leaves disk untouched.
-- **Restore points**: created automatically before content installs, updates, imports, deletes and loader reinstalls; the Content page's restore-point dialog can create, restore or delete points. In isolated instances the version JSON and patched client jar are stored too. Restoring takes a safety point first and verifies every stored object by SHA-1. A failed point creation aborts the operation instead of continuing silently.
-- Local `.jar` drag/import is supported, as is local `.zip` import for resource packs and shaders.
-- Identical existing files are skipped; conflicts are reported, never silently overwritten. Updates replace the old version and keep the index in sync.
-
-### Everyday use
-
-- Accounts: switch from the bottom of the sidebar; several Microsoft, external (authlib-injector) and offline accounts are supported. Microsoft uses browser authorization code + PKCE with automatic refresh; external accounts launch with authlib-injector attached (downloaded from the official site or the BMCLAPI mirror, verified by SHA-256).
-- Credentials live in `accounts.json` under the data directory (mode 0600 on Unix), never appear in logs, and passwords are never stored; removing an account deletes its credentials.
-- Screenshots: browse by time, place and person; place and player are written into the image when taken (optional).
-- Settings: the sidebar footer opens one dialog for accounts, memory, Java status, game/data folders and logs; preferences persist in `ui.json`.
-- Automatic JVM tuning: memory defaults to Auto. Heap size comes from physical RAM, CPU threads, the Java version and the mod count, with tuned G1 flags; large modpacks on strong machines switch to generational ZGC. Settings shows the calculation and the full flag list, and you can still set memory, the collector or extra JVM arguments by hand. See [19 · JVM tuning](docs/design/19-jvm-tuning.md) (Chinese).
-- Versions: base versions required by a loader are hidden from the main picker and protected from deletion; this page only launches, repairs, reveals the folder and deletes. Content and saves live in their own sidebar places.
-- Saves: a first-class page with a version picker at the top; list worlds with size and modified time. Backups are **git-style snapshots**: region files are stored per Minecraft chunk and other files by content-defined chunking, so a second backup usually adds a few MB; restore a whole world or roll back only selected chunks, delete, and prune by count.
-- Automatic backups: when enabled, every time you quit the game a snapshot of that version's worlds is taken, plus an optional run every 15/30/60/120 minutes; 5/10/20/50 snapshots are kept per world, and settings live in `backups.json` under the data directory.
-- The launcher stays usable while you play: every page can be browsed, and only the version in use is locked against content changes, save restores and deletion until the game exits.
-- Resource packs and shaders get the same enable/disable, delete, file-size and open-folder affordances as mods.
-- Install progress: stage, percentage, downloaded / total bytes, and file count.
-- GUI and CLI share the same core; the CLI is useful for scripts and debugging.
+- **Accounts**: multiple Microsoft (browser auth code + PKCE), external ([authlib-injector](https://github.com/yushijinhun/authlib-injector)) and offline accounts; passwords are never stored, and tokens are written atomically to `accounts.json` (mode `0600` on creation on Unix).
+- **Screenshots**: dedicated gallery by overview, time, place and person with search; in-game screenshots embed metadata in a PNG `iTXt` chunk (lossless, optional); viewer supports zoom, copy, set world icon and trash.
+- **Automatic updates**: background verified download + swap-on-exit on Windows; signed apt repository and background upgrade service on Linux.
 
 ## Download
 
 | Platform | File | Size | Requirements |
 |---|---|---:|---|
-| Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | ~9 MB | Windows 10/11, Java 21 |
-| Linux x64 (deb) | [cairn_0.45.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.45.0_amd64.deb) | ~3.4 MB | Ubuntu 24.04+ / glibc ≥ 2.39, Java 21 |
+| Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | ~9 MB | Windows 10/11 |
+| Linux x64 (deb) | [cairn_0.45.1_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.45.1_amd64.deb) | ~3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39 |
 
-Checksums: [SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS).
+Checksums: [SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS) (Cairn can download Mojang's Java runtime automatically if none is installed).
 
 ### Windows
 
-1. Download `cairn.exe`, put it anywhere, and double-click it. If you used `nailong.exe` before, put `cairn.exe` in the same folder to keep using the same `.minecraft`.
-2. The first screen is the setup page: choose a Minecraft version, then Fabric / NeoForge / Forge / vanilla, and click **Install**.
-3. When the progress finishes, return to the main screen and click **Launch**.
+Download `cairn.exe`, place it anywhere, and run it (portable `.minecraft` sits next to the exe; drop it alongside an old `nailong.exe` to keep existing data).
 
-Java 21 must be installed. Cairn searches for it automatically and shows a warning if none is found.
-
-> The executable is not code-signed yet. Right after a release, while few people have downloaded it, the browser may say it "is not commonly downloaded" and Windows may show "Unknown publisher": choose **Keep → Keep anyway** in the browser and **More info → Run anyway** when running it. You can verify the file against SHA256SUMS. See [22 · Windows download warnings](docs/design/22-windows-trust.md) for why and what is planned.
+> The executable is not code-signed yet, so browsers or SmartScreen may warn right after a release. Verify against `SHA256SUMS`; see [22 · Windows trust](docs/design/22-windows-trust.md) (Chinese).
 
 ### Linux (Debian / Ubuntu)
 
-Install from the apt repository and get updates with the rest of the system:
+Install via the signed apt repository (recommended):
 
 ```bash
 sudo wget -qO /usr/share/keyrings/cairn-archive-keyring.gpg https://dkjsiogu.github.io/cairn/apt/cairn-archive-keyring.gpg
@@ -254,149 +94,72 @@ sudo wget -qO /etc/apt/sources.list.d/cairn.sources https://dkjsiogu.github.io/c
 sudo apt update && sudo apt install cairn
 ```
 
-Or install the deb; it adds the same apt repository:
+Or install the `.deb` directly (adds the same apt source and replaces `nailong`):
 
 ```bash
-sudo apt install ./cairn_0.45.0_amd64.deb
+sudo apt install ./cairn_0.45.1_amd64.deb
 ```
 
-You can also double-click the deb in a software center. After installation, **Cairn** appears in the application menu. An installed `nailong` package is replaced automatically.
+Default data lives in `~/.local/share/cairn/.minecraft` (override with `--root` or in Settings). To disable system background upgrades: `sudo rm /etc/apt/apt.conf.d/52cairn-auto-update`. Uninstall: `sudo apt remove cairn`.
 
-When Cairn finds a new version on open, it starts `cairn-update.service`, which upgrades only the cairn package. You can turn this off in Settings; to stop the system from updating Cairn at all:
+> Release `.deb` packages are built on Ubuntu 24.04 / amd64 CI and require glibc ≥ 2.39 (Ubuntu 24.04+; 22.04 is not supported yet).
 
-```bash
-sudo rm /etc/apt/apt.conf.d/52cairn-auto-update
-```
+## Command line & build from source
 
-Uninstall:
+Requires Rust 1.95+. Building from source produces both `cairn` (GUI) and `cairn-cli`:
 
 ```bash
-sudo apt remove cairn
-```
-
-> The deb is built on Ubuntu 26.04 / amd64 and requires glibc ≥ 2.39. Ubuntu 24.04+ works; older systems such as 22.04 cannot install it yet.
-
-### Data directory
-
-- Windows: `.minecraft` next to `cairn.exe` (portable).
-- Linux: `~/.local/share/cairn/.minecraft`. The first 0.37 start renames an existing `~/.local/share/nailong` to it.
-
-Use `--root` to point at another directory.
-
-## CurseForge API (built in)
-
-Official releases include a project key, so CurseForge packs use the official API automatically and **regular users do not configure anything**. It is an application-level key, not a CurseForge account password.
-
-- The official API returns the file name, size, SHA1, and download URL, so downloads can be verified.
-- If the author has disabled third-party distribution, the import stops and lists the affected files. Cairn does not synthesize CDN URLs to bypass that setting.
-- Maintainers can override the built-in key with the `CURSEFORGE_API_KEY` environment variable, so rotating it does not require a code change.
-- The key is lightly XOR-obfuscated so a casual `strings` scan does not reveal it. **This is not encryption**: it can still be recovered from the binary and is only a shared default quota, not a secret.
-- A local build without an injected key still imports packs through the no-key cfwidget + official-page fallback, without official SHA1.
-
-## What has been verified
-
-Ran for real:
-
-- GUI: every page was walked at 1120×720 and the 900×620 minimum, including first launch, install confirmation, browse/search/detail, content manager, empty states, save snapshots, the settings dialog, content restore points, progress, and the account/login dialogs; 28 screenshots (24 dark, 4 light) and a 15-second motion GIF live in `docs/screenshots/`. The 0.33 pass re-measured idle CPU at 0.0% with the window focused and the pointer parked.
-- Linux (Xvfb + Mesa): Fabric 0.19.5, NeoForge 21.1.209, and Forge 52.1.20 on 1.21.1 reached the main menu.
-- Fabulously Optimized `.mrpack`: 151 mods loaded and launched.
-- CurseForge: a real file was downloaded through the no-key official-page fallback; the approved API key returned the official file name, size, SHA1, and download URL.
-- GUI cancellation: cancelled an install under Xvfb and returned to the “continue install” page without crashing.
-- Content library: real Modrinth + CurseForge APIs; mod/resource-pack/shader search; Jade plus its required dependency downloaded into the version-isolated `mods/`; installed scan, toggles, duplicate detection and update checks. 0.10.0 adds a real click-through test: the `+` button on a browse card downloaded Fabric API into the isolated `mods/` and wrote the content index.
-- Prism, MCBBS, HMCL, and ATLauncher: real or synthetic samples passed format detection and instance creation.
-
-Not verified yet:
-
-- Windows is built natively in CI but has not been launched on a real Windows machine.
-- macOS is not supported.
-
-## Command line
-
-The deb only contains the GUI; building from source also produces the CLI:
-
-```bash
-./target/release/cairn-cli --root /path/to/.minecraft list
-./target/release/cairn-cli --root /path/to/.minecraft java-install 21   # download the official Java 21 runtime
-./target/release/cairn-cli update                                     # check for a newer Cairn
-./target/release/cairn-cli --root /path/to/.minecraft install neoforge 1.21.1 21.1.209
-./target/release/cairn-cli --root /path/to/.minecraft install modpack ~/Downloads/pack.mrpack
-./target/release/cairn-cli --root /path/to/.minecraft install modpack ~/Downloads/pack.zip
-./target/release/cairn-cli --root /path/to/.minecraft launch neoforge-21.1.209 --username Steve --memory 4096
-# Omit --memory for automatic sizing; --dry-run prints the tuning steps
-./target/release/cairn-cli --root /path/to/.minecraft launch neoforge-21.1.209 --gc zgc --jvm-arg=-XX:+AlwaysPreTouch --dry-run
-```
-
-## Build from source
-
-Rust 1.95+ is required. On Linux, egui also needs system development packages:
-
-```bash
+# Linux build deps
 sudo apt install build-essential pkg-config \
   libgl1-mesa-dev libegl1-mesa-dev \
   libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev \
   libxkbcommon-dev libxkbcommon-x11-dev
-```
 
-Build the GUI and CLI:
-
-```bash
 cargo build --release -p nailong-ui -p nailong-cli
+# Build Linux deb: ./scripts/build-deb.sh
 ```
-
-Build the Linux deb:
 
 ```bash
-./scripts/build-deb.sh
-# output: dist/cairn_<version>_<arch>.deb
+cairn-cli --root /path/to/.minecraft list
+cairn-cli --root /path/to/.minecraft java-install 21
+cairn-cli --root /path/to/.minecraft install neoforge 1.21.1 21.1.209
+cairn-cli --root /path/to/.minecraft install modpack ~/Downloads/pack.mrpack
+cairn-cli --root /path/to/.minecraft export "1.21.1 NeoForge" ~/pack.mrpack
+cairn-cli --root /path/to/.minecraft launch "1.21.1 NeoForge" --gc zgc --dry-run
+cairn-cli bench
 ```
 
-Windows release builds use MSVC with the static CRT in GitHub Actions. `x86_64-pc-windows-gnu` can also be used for a local cross-compile check.
+> Local builds without `NAILONG_CURSEFORGE_API_KEY` disable the CurseForge content source (Modrinth is unaffected; CurseForge packs still use the no-key fallback). Override at runtime with `CURSEFORGE_API_KEY`. Live network smoke tests: `cargo test -p nailong-core --test live_modrinth -- --ignored --nocapture`.
 
-> Building from source without `NAILONG_CURSEFORGE_API_KEY` produces a binary with the **CurseForge source disabled** (Modrinth is unaffected). This is intentional: the key is obfuscated into the binary at build time and never read from a config file.
->
-> ```bash
-> NAILONG_CURSEFORGE_API_KEY=... cargo build --release -p nailong-ui
-> ```
->
-> Live network smoke tests (ignored by default):
->
-> ```bash
-> cargo test -p nailong-core --test live_modrinth -- --ignored --nocapture
-> ```
+## Verification & not implemented yet
 
-## Not implemented yet
-
-- Microsoft tokens are stored in a 0600 file instead of the OS keychain (Credential Manager / Secret Service).
-- Uploading or changing skins, and full modpack updates.
-- Stopping a running game / cancelling a launch.
-- Real Windows testing and macOS support.
+- **Verified**: Linux launches for 1.21.1 vanilla/Fabric/NeoForge/Forge, a 323-mod 1.7.10+LWJGL3 Prism pack, Fabulously Optimized (151 mods), and 26.x; 453 MB world chunk snapshots and rollback; BMCLAPI/MCIM fallback; LittleSkin ALI discovery; full dark/light/900×620 UI pass (0.0% idle CPU).
+- **Remaining**:
+  - Windows binaries are built in CI with static CRT, but **have not yet been tested on a real Windows machine**;
+  - Tokens live in a `0600` file rather than the OS keychain (Credential Manager / Secret Service);
+  - Skin upload/editing, full modpack updates, and macOS support.
 
 ## Project layout
 
 ```text
 crates/
-  nailong-core/   manifests, downloads, Java detection, launch, loaders, modpacks, content center
+  nailong-core/   manifests, downloads/mirrors, Java & JVM tuning, launch, modpacks, content, rollback, chunk snapshots
   nailong-cli/    command line
   nailong-ui/     egui desktop UI
-packaging/linux/  desktop file, icons, AppStream metadata, copyright
-scripts/          deb packaging
+packaging/        Linux deb/apt/polkit/desktop/icons and Windows icon
+scripts/          deb and apt repository build scripts
 docs/
-  design/         architecture and design notes
-  brief/          9-page project brief
+  design/         architecture and design notes (index: docs/design/00-overview.md)
+  product/        product brief (docs/product/00-brief.md)
+  screenshots/    dark, light and narrow screenshots
 ```
-
-See the [design index](docs/design/00-overview.md) and the [implementation status](docs/design/14-implementation-status.md).
 
 ## Thanks
 
-- [BMCLAPI](https://bmclapidoc.bangbang93.com/) (bangbang93) mirrors Minecraft and mod loader downloads.
-- [MCIM](https://github.com/mcmod-info-mirror) (mcmod-info-mirror) mirrors the Modrinth and CurseForge APIs.
-- [authlib-injector](https://github.com/yushijinhun/authlib-injector) (yushijinhun) makes external login possible.
-
-Both are free community services. Cairn uses them as they ask: official first, source shown, no re-wrapping. See [24](docs/design/24-download-sources.md).
+- [BMCLAPI](https://bmclapidoc.bangbang93.com/) (bangbang93) for Minecraft and mod loader mirrors.
+- [MCIM](https://github.com/mcmod-info-mirror) (mcmod-info-mirror) for Modrinth and CurseForge API mirrors.
+- [authlib-injector](https://github.com/yushijinhun/authlib-injector) (yushijinhun) for external login support.
 
 ## License
 
-GPL-3.0-or-later. See [LICENSE](LICENSE).
-
-This project is not affiliated with Mojang Studios or Microsoft, and it does not bundle or redistribute Minecraft game assets.
+GPL-3.0-or-later, see [LICENSE](LICENSE). Not affiliated with Mojang Studios or Microsoft; does not bundle or redistribute Minecraft game assets.

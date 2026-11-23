@@ -28,6 +28,11 @@
   <url type="bugtracker">https://github.com/dkjsiogu/cairn/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.45.1" date="2026-11-23">
+      <description>
+        <p>Reliability and polish pass: atomic file writes now use collision-free temp names and create credential files with 0600 permissions immediately on Unix; snapshot restore, delete and chunk-map reads now share the repository lock with backup and prune; non-install errors (login, saves, snapshots, updates) no longer carry a misleading install-failure prefix; Windows self-update handles locked backup executables more cleanly. Refreshed all documentation screenshots to Cairn 0.45.1 and moved full release history into CHANGELOG.md.</p>
+      </description>
+    </release>
     <release version="0.45.0" date="2026-11-21">
       <description>
         <p>World snapshots are stored per chunk, and a chunk map lets you roll back just the chunks you select, with terrain, entities and POI together and a safety snapshot first. Pruning no longer breaks snapshots of deleted worlds. Cancel stops only the current task. First Forge/NeoForge install downloads Java when needed. Fixes for Windows paths, native library extraction, cleanup sizes, login and GC logs.</p>

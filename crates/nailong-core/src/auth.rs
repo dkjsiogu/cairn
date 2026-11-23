@@ -75,18 +75,9 @@ pub fn load(root: &Root) -> Option<Account> {
 
 pub fn save(root: &Root, account: &Account) -> Result<()> {
     let path = account_file(root);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| crate::error::io(parent, e))?;
-    }
     let bytes = serde_json::to_vec_pretty(account)
-        .map_err(|e| Error::Install(format!("账户序列化失败: {e}")))?;
-    crate::paths::write_atomic(&path, &bytes)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
+        .map_err(|e| Error::Login(format!("账户序列化失败: {e}")))?;
+    crate::paths::write_atomic_private(&path, &bytes)
 }
 
 pub fn clear(root: &Root) -> Result<()> {
@@ -130,7 +121,7 @@ pub fn start_device_code() -> Result<DeviceCode> {
         &[("client_id", &client_id()), ("scope", SCOPE)],
     )?;
     if status != 200 {
-        return Err(Error::Install(oauth_error(&value, status)));
+        return Err(Error::Login(oauth_error(&value, status)));
     }
     Ok(DeviceCode {
         device_code: value
@@ -216,10 +207,10 @@ pub fn wait_for_device(
             DevicePoll::Pending => {}
             DevicePoll::SlowDown => interval += 5,
             DevicePoll::Ready(tokens) => return Ok(Some(tokens)),
-            DevicePoll::Failed(message) => return Err(Error::Install(message)),
+            DevicePoll::Failed(message) => return Err(Error::Login(message)),
         }
         if now() >= deadline {
-            return Err(Error::Install("验证码已过期，请重新登录".into()));
+            return Err(Error::Login("验证码已过期，请重新登录".into()));
         }
     }
 }
@@ -268,7 +259,7 @@ fn xbox_authenticate(msa_access: &str) -> Result<(String, String)> {
         ],
     )?;
     if status != 200 {
-        return Err(Error::Install(format!(
+        return Err(Error::Login(format!(
             "Xbox Live 登录失败（HTTP {status}），请稍后再试"
         )));
     }
@@ -301,7 +292,7 @@ fn xsts_authorize(xbl_token: &str) -> Result<(String, String, Option<String>)> {
     )?;
     if status != 200 {
         let xerr = value.get("XErr").and_then(|v| v.as_u64());
-        return Err(Error::Install(xsts_error_message(xerr)));
+        return Err(Error::Login(xsts_error_message(xerr)));
     }
     Ok((
         str_field(&value, "Token"),
@@ -337,14 +328,12 @@ fn minecraft_login(uhs: &str, xsts: &str) -> Result<MinecraftToken> {
         &[("Accept", "application/json")],
     )?;
     if status == 403 {
-        return Err(Error::Install(
+        return Err(Error::Login(
             "Minecraft 拒绝了启动器的 client id（未在 allowlist），这不是你的账户问题".into(),
         ));
     }
     if status != 200 {
-        return Err(Error::Install(format!(
-            "Minecraft 登录失败（HTTP {status}）"
-        )));
+        return Err(Error::Login(format!("Minecraft 登录失败（HTTP {status}）")));
     }
     Ok(MinecraftToken {
         access_token: str_field(&value, "access_token"),
@@ -367,7 +356,7 @@ fn ensure_entitlement(token: &str) -> Result<()> {
         .map(|items| !items.is_empty())
         .unwrap_or(false);
     if !owned {
-        return Err(Error::Install(
+        return Err(Error::Login(
             "该账户未拥有 Minecraft: Java Edition（或 Game Pass 已到期）".into(),
         ));
     }
@@ -383,11 +372,11 @@ fn minecraft_profile(token: &str) -> Result<(String, String, Option<String>)> {
     let id = value
         .get("id")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| Error::Install("找不到游戏档案（可能未购买或未创建角色）".into()))?;
+        .ok_or_else(|| Error::Login("找不到游戏档案（可能未购买或未创建角色）".into()))?;
     let name = value
         .get("name")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| Error::Install("游戏档案缺少用户名".into()))?;
+        .ok_or_else(|| Error::Login("游戏档案缺少用户名".into()))?;
     let skin = value
         .get("skins")
         .and_then(|v| v.as_array())
@@ -417,7 +406,7 @@ pub fn refresh_account(account: &Account) -> Result<Account> {
             .get("error")
             .and_then(|v| v.as_str())
             .unwrap_or_default();
-        return Err(Error::Install(match code {
+        return Err(Error::Login(match code {
             "invalid_grant" => "登录已过期，请重新登录".into(),
             _ => oauth_error(&value, status),
         }));
@@ -436,9 +425,7 @@ pub fn refresh_account(account: &Account) -> Result<Account> {
     };
     let renewed = login_with_msa(&msa)?;
     if renewed.uuid != account.uuid {
-        return Err(Error::Install(
-            "刷新后的账户与原来不一致，请重新登录".into(),
-        ));
+        return Err(Error::Login("刷新后的账户与原来不一致，请重新登录".into()));
     }
     Ok(renewed)
 }
@@ -492,13 +479,13 @@ pub struct AuthCodeFlow {
 pub fn start_auth_code() -> Result<AuthCodeFlow> {
     let listener = TcpListener::bind(("127.0.0.1", 39123))
         .or_else(|_| TcpListener::bind(("127.0.0.1", 0)))
-        .map_err(|e| Error::Install(format!("无法监听登录回调端口: {e}")))?;
+        .map_err(|e| Error::Login(format!("无法监听登录回调端口: {e}")))?;
     listener
         .set_nonblocking(true)
-        .map_err(|e| Error::Install(format!("设置回调端口失败: {e}")))?;
+        .map_err(|e| Error::Login(format!("设置回调端口失败: {e}")))?;
     let port = listener
         .local_addr()
-        .map_err(|e| Error::Install(format!("读取回调端口失败: {e}")))?
+        .map_err(|e| Error::Login(format!("读取回调端口失败: {e}")))?
         .port();
     let verifier = b64url(&random_bytes(32));
     let challenge = b64url(&Sha256::digest(verifier.as_bytes()));
@@ -551,7 +538,7 @@ fn pick_redirect_uri(port: u16, challenge: &str, state: &str) -> Result<String> 
         .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(25))
         .build()
-        .map_err(|e| Error::Install(format!("HTTP 客户端创建失败: {e}")))?;
+        .map_err(|e| Error::Login(format!("HTTP 客户端创建失败: {e}")))?;
     for candidate in candidates {
         let url = authorize_url(&candidate, state, challenge, "none");
         let Ok(response) = client.get(&url).send() else {
@@ -584,7 +571,7 @@ fn pick_redirect_uri(port: u16, challenge: &str, state: &str) -> Result<String> 
             }
         }
     }
-    Err(Error::Install(
+    Err(Error::Login(
         "微软拒绝了所有回环重定向地址：请确认 Azure 应用「身份验证」里 http://localhost 已保存（移动和桌面应用程序平台）。".into(),
     ))
 }
@@ -596,7 +583,7 @@ pub fn wait_for_code(flow: &AuthCodeFlow, cancelled: impl Fn() -> bool) -> Resul
             return Err(Error::Cancelled);
         }
         if now() > flow.expires_at {
-            return Err(Error::Install("登录超时，请重新发起".into()));
+            return Err(Error::Login("登录超时，请重新发起".into()));
         }
         match flow.listener.accept() {
             Ok((mut stream, _)) => {
@@ -609,12 +596,12 @@ pub fn wait_for_code(flow: &AuthCodeFlow, cancelled: impl Fn() -> bool) -> Resul
                     }
                     Callback::Error(message) => {
                         respond(&mut stream, 200, "登录未完成，可以关闭此页面");
-                        return Err(Error::Install(message));
+                        return Err(Error::Login(message));
                     }
                     Callback::Code { code, state } => {
                         if state != flow.state {
                             respond(&mut stream, 200, "登录状态校验失败");
-                            return Err(Error::Install("登录状态校验失败，请重新登录".into()));
+                            return Err(Error::Login("登录状态校验失败，请重新登录".into()));
                         }
                         respond(&mut stream, 200, "登录完成，可以关闭此页面");
                         return exchange_code(&code, &flow.verifier, &flow.redirect_uri);
@@ -624,7 +611,7 @@ pub fn wait_for_code(flow: &AuthCodeFlow, cancelled: impl Fn() -> bool) -> Resul
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 std::thread::sleep(Duration::from_millis(120));
             }
-            Err(e) => return Err(Error::Install(format!("登录回调失败: {e}"))),
+            Err(e) => return Err(Error::Login(format!("登录回调失败: {e}"))),
         }
     }
 }
@@ -641,7 +628,7 @@ fn exchange_code(code: &str, verifier: &str, redirect_uri: &str) -> Result<MsaTo
     ];
     let (status, value) = http.post_form(&format!("{AUTH_BASE}/token"), &form)?;
     if status != 200 {
-        return Err(Error::Install(oauth_error(&value, status)));
+        return Err(Error::Login(oauth_error(&value, status)));
     }
     Ok(MsaTokens {
         access_token: str_field(&value, "access_token"),

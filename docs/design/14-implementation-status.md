@@ -1,7 +1,7 @@
-# 14 · 原型实现状态（0.1 → 0.45.0）
+# 14 · 原型实现状态（0.1 → 0.45.1）
 
-> 日期：2026-11-21
-> 对应发布：GitHub Release `v0.45.0` 的 `cairn.exe`、`cairn_0.45.0_amd64.deb`，以及 apt 源 `https://dkjsiogu.github.io/cairn/apt`（0.37 起改名 Cairn）
+> 日期：2026-11-23
+> 对应发布：GitHub Release `v0.45.1` 的 `cairn.exe`、`cairn_0.45.1_amd64.deb`，以及 apt 源 `https://dkjsiogu.github.io/cairn/apt`（0.37 起改名 Cairn）
 > 目的：把「设计稿」和「已经跑起来的代码」分开记账，避免把计划当成已完成。
 
 ## 1. 一句话结论
@@ -49,6 +49,8 @@
 0.34.1 修复 26.x 无法安装和启动：版本文件 `default-user-jvm` 的首条没有 `rules`，解析失败；`${natives_directory}` 误指向 `java` 子目录，`java.library.path` 变成 `.../java/java`。实测 26.1、26.3 原版可安装并进入世界。调参在版本文件带官方默认时跟随官方（26.x 为 ZGC + 紧凑对象头 + 预先占用 + 字符串去重，初始堆 2 GB）。Java 选择改为够用里最低的大版本，同版本优先 64 位 OpenJDK。
 
 0.42.5 手感（见 [21](21-handling.md) §4）。文字默认不可选中（`selectable_labels = false`），整行可点的列表、卡片点在字上也算；`motion::pointer_on_clickables` 让所有能点的地方悬停变手形，egui 按钮也设了 `interact_cursor`；`list_row_fill` 看整个 Response，悬停渐变、按下加深、右键菜单开着时保持高亮；次按钮加按下颜色。版本列表右键菜单（启动、打开文件夹、改名、移到回收站）和 ↑ ↓ 切换；日志行可拖选，错误提示加「复制」；右下角单独一条细边写版本号，点它打开设置。
+
+0.45.1 底层可靠性清理与文档整理：`paths::write_atomic` 改用 `<文件名>.tmp-<pid>-<seq>` 避免并发与同主名文件撞车，新增 `write_atomic_private` 在 Unix 创建时直接设 `0600`（用于 `accounts.json`、`account.json` 及切换目录复制），`played.json` 改走 `write_atomic`；`snapshots` 的 `restore`、`delete`、`chunk_map` 补齐 `REPO_LOCK` 避免与后台 `prune`/`repack` 竞态；清理 `auth`、`accounts`、`saves`、`snapshots`、`region`、`rollback`、`update`、`shots`、`export`、`yggdrasil`、`paths` 中误用的 `Error::Install`；Windows `swap_exe` 在 `cairn.old.exe` 暂被占用时退到带进程号的备份名并在启动时一并清理；重拍 `0.45.1` 全套截图与动效并把 README 历史拆进 `CHANGELOG.md`。
 
 0.45.0 按区块存快照、按区块回档（见 [30](30-chunk-snapshots.md)）。core：新模块 `region`（Anvil 区域文件拆/拼、只读文件头）；`snapshots` 把 `region/`、`entities/`、`poi/` 的区域文件按区块存（清单里一张 26 字节一行的区块表），对象写进 `repo/packs/<id>.pack` + `.idx`（旧的散对象照读），大小和修改时间没变的文件沿用上一份，记空文件夹；`chunk_map` 只读文件头比保存时间，`restore_chunks` 按选区换回地形、实体、兴趣点和 `.mcc`，有不同才先自动快照「回档区块前」；写快照、清理、回档区块共用一把锁。`prune` 按快照仓库里的目录算引用（以前只看还在的世界，删世界后它的快照对象被回收），有读不懂的清单时不回收，包按浪费比例重写。`cancel` 改成每个任务一个 `Token`，线程、rayon 池带上；后台图标、搜索不受前台取消影响，登录有自己的标记。`paths::canonical` 去掉 Windows `\\?\` 前缀；处理器找不到 Java 时先下 Java 21；`prepare_natives` 只换不一样的文件；Windows `freed_bytes` 按卷序列号 + 文件号认硬链接；自带应用登录用固定回调地址；GC 日志认逗号小数。界面：快照行「回档区块」（`dialogs/chunks.rs`：区块地图、维度切换、框选、平移、缩放、跳坐标），图标 6 个线程拉、失败也回报。实测：453 MB 模组世界第一份快照 0.44 秒、3 个文件（原来 48 580 个），不变时再快照 9 毫秒，回档 5×5 区块 32 毫秒，逐字节一致。
 

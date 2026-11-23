@@ -4,250 +4,89 @@
 [![Release](https://img.shields.io/github/v/release/dkjsiogu/cairn?label=release)](https://github.com/dkjsiogu/cairn/releases/latest)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 
-轻量、原生的 Minecraft: Java Edition 启动器，使用 Rust 编写。0.37 起改名 **Cairn**（原名 nailong）。Windows 只有一个 exe，Linux 只有一个 deb；不捆绑 Java 运行时，Windows 端也不需要安装器。
+轻量、原生的 Minecraft: Java Edition 启动器，使用 Rust 编写（0.37 前原名 nailong）。Windows 只有一个 exe，Linux 只有一个 deb；不捆绑 Java 运行时，空闲 CPU 为 0%。
 
 **简体中文** | [English](README.en.md)
 
-> 当前版本：**0.45.0**（预览版）
->
-> 目标：小体积、少依赖、安装过程可见、中断可补。功能边界见 [实现状态](docs/design/14-implementation-status.md)。
+> 当前版本：**0.45.1**（预览版） · [完整更新日志](CHANGELOG.md) · [实现状态与边界](docs/design/14-implementation-status.md)
 
 ## 为什么是 Cairn
 
-装 Minecraft 本身不难，难的是装完以后干干净净：版本 JSON、资源索引、加载器 processor、Java 参数、整合包里的几百个文件，任何一环出错，玩家看到的都只是“启动失败”。
+**装得干净，坏了能救。** Cairn 是登山者叠在路边的石堆——它不帮你走路，只标出回去的路。
 
-Cairn 是登山者叠在路边的石堆：它不帮你走路，只标出回去的路。启动器也该这样——装得干净，坏了能退回去。思路很直：
-
-- Rust 编写，启动器自身不运行在 JVM 上；Windows 是单文件，Linux 是一个 deb。
-- 安装过程拆成可见的阶段；中途断了，重新打开会检查缺什么再补，不用从头再来。
-- Forge / NeoForge 直接执行客户端 processor，不调用官方 installer，也不会把完整安装器留在磁盘上。
-- 整合包拖进来就能识别，装加载器、下文件、解压覆盖一步到位。
-
-它不是“万能启动器”，也还不是 1.0。能做和不能做的，下文列清楚了。
+- **原生轻量**：Rust + egui 编写，不跑在 JVM 上；Windows 单文件约 9 MB，Linux deb 约 3.7 MB。
+- **过程可见、中断可补**：安装拆成清晰阶段，中途取消或断网后重新开始只补缺失部分；Forge / NeoForge 直接运行客户端 processor，不留完整安装器。
+- **改动可退、存档细到区块**：Mod/配置/加载器变更前自动建恢复点；世界存档走 git 式块级与区块级快照，能只回档出事的那几块区块。
+- **一版本一文件夹**：每个版本独立存放在 `versions/<名字>/`，互不依赖，删掉移入回收站；也兼容直接切换使用 PCL / HMCL / 官方启动器的 `.minecraft`。
 
 ## 界面
 
-0.45：快照细到区块，能只回档几个区块。
+![动效演示：状态圆环、切页、命令面板、区块回档与浅色主题](docs/screenshots/motion.gif)
 
-- 存档快照按区块存，没动过的区块各份快照共用；快照写进打包文件，世界没变时再快照只要几毫秒。
-- 快照行上的「回档区块」打开区块地图，按维度看改过、新生成、已删除的区块，框选几块换回快照里的样子；地形、实体、兴趣点一起换，回档前自动快照当前世界。详见 [30](docs/design/30-chunk-snapshots.md)。
-- 删掉世界之后清理旧快照，不再把它的快照弄坏；整份恢复会建回空文件夹。
-- 取消只停当前任务，不再误停图标、搜索这些后台请求；图标拉取失败不再让界面一直重画。
-- 第一次装 Forge/NeoForge 没有 Java 时先自动下载。启动时原生库不再每次删了重解压。
-- Windows：路径不再带 `\\?\` 前缀；清理体积认得硬链接。登录回调不再挨个试地址。GC 日志认得逗号小数。
-
-0.44：玩的时候和找东西的时候。
-
-- 游戏开着时侧栏显示每一局的状态，卡住了能「结束游戏」。游戏不再占着启动器：玩的时候照样能装别的版本、下 Mod，不同版本能同时开。
-- 「进入」：开游戏直接进最近的世界，存档页每个世界都有（1.20 起）。
-- 游戏崩了而上次正常玩之后改过内容，底部提示有「退回改动」，一步回到改之前。
-- `Ctrl+K` 找任何东西：版本、世界、页面、设置、常做的事。
-- 复制版本；世界文件夹或 zip 拖进来就导入；记游玩时长，版本按最近玩过排。
-- 设置分成游戏、启动器、存储、关于四栏；能缩放界面；记住窗口大小和上次选的版本。详见 [29](docs/design/29-play-and-find.md)。
-
-0.43：导出整合包；能直接用别的启动器的 .minecraft。
-
-- 任何版本都能导出成 `.mrpack`。网上能下到的 Mod、资源包、光影只记下载地址，找不到的连同 config、kubejs、选中的世界打包进去。150 个 Mod 的整合包，Mod 共 901 MB，导出来 307 MB。详见 [28 · 导出整合包](docs/design/28-export.md)。
-- 设置里可以把数据目录换成 PCL、HMCL、官方启动器的 `.minecraft`，账户和设置一起带过去。没开版本隔离的版本、HMCL 自定义的游戏目录和 HMCL 的版本文件都认得。详见 [27 §10](docs/design/27-version-folders.md#10-别的启动器的-minecraft)。
-
-0.42：一个版本一个文件夹。
-
-- 每个版本是 `versions/<名字>/` 一个文件夹，里面有完整的版本文件、Mod、存档和配置。版本之间没有依赖，删掉一个不影响别的。
-- 安装时可以起名。同一个 MC 版本和加载器可以装好几份，比如「生存」和「测试」。可以改名。
-- 删除版本是移到回收站，存档跟着一起。
-- 整合包也装成一个版本文件夹。
-- 设置里可以清理没有版本在用的运行库和资源。
-- 详见 [27 · 一个版本一个文件夹](docs/design/27-version-folders.md)。
-
-0.41：自动更新。
-
-- **Windows**：在后台下载新版本，关掉 Cairn 时换上。设置里可以关掉。
-- **Linux**：deb 装好后会加上 Cairn 的 apt 源。打开 Cairn 时发现新版本，就在后台装好，不用输密码。也可以直接 `sudo apt install cairn`，见下面的安装说明。
-- 想马上更新：点侧栏的提示。Linux 上会弹出系统的授权窗口。
-- 详见 [26 · 自动更新](docs/design/26-auto-update.md)。
-
-0.40：多账户和截图页。
-
-- **多账户**：支持微软正版、外置登录（authlib-injector，如 LittleSkin）和离线账户，在左下角切换。头像显示皮肤。外置登录只需填皮肤站地址，多角色时可选择。不保存密码；登录失效时启动前提示重新登录。
-- **截图页**：侧栏第 5 项，分总览、时间、地点（版本 › 存档或服务器）、人物四个视图，支持搜索。
-- **截图信息**：从 Cairn 启动的游戏，截图时把存档或服务器、账户和版本写入 PNG 文字块，不改像素，可在设置里关闭。旧截图从游戏日志推断。
-- **看图**：缩放、原尺寸、拖动、翻页；复制、设为世界图标、移到回收站。
-- 详见 [25 · 多账户和截图](docs/design/25-accounts-and-shots.md)。
-
-0.39 接上社区的公共镜像，官方连不上也能下：
-
-- **自动换镜像**：游戏文件、库和加载器连不上官方时换 [BMCLAPI](https://bmclapidoc.bangbang93.com/)；Modrinth 和 CurseForge 的接口连不上时换 [MCIM](https://github.com/mcmod-info-mirror)。连不上的主机记五分钟，这期间直接走镜像，不用每个文件都等超时。换了源也照样按官方的校验值核对。
-- **下载源可选**：设置里选「官方优先」（默认）或「镜像优先」（游戏文件和加载器先走 BMCLAPI，国内通常更快）。Modrinth 和 CurseForge 不论选哪种都先连官方。
-- **看得见用的是谁**：下载页写着来自哪个源；内容页在用 MCIM 时顶部有一行提示，带数据的同步时间。
-- **密钥不外发**：CurseForge 的密钥只发给 CurseForge，换到镜像时去掉。规则和答应两个镜像的事见 [24 · 下载源和镜像](docs/design/24-download-sources.md)。
-
-0.38 把下载体验做扎实，并把界面代码整理成清楚的框架：
-
-- **看得见在下什么**：下载页列出做完了哪几步、各用了多久，正在做哪一步，刚下载的几个文件（资源文件显示真名），来自 Mojang 官方还是 BMCLAPI 镜像，速度和剩余时间。
-- **Java 自动下载**：点「开始游戏」时如果没有合适的 Java，直接下载 Mojang 官方的运行时，下完接着启动，不用自己去找、也不改系统。优先下压缩版（约三分之一大小），每个文件都校验。设置、首次引导和启动参数里也能手动下。
-- **启动器更新**：只在打开时安静地查一次，有新版本时侧栏出现小提示；点开能看更新说明，下载后按 SHA256SUMS 校验。Windows 一键重启到新版本，Linux 给出能复制的安装命令。设置里也能手动「检查更新」。
-- **界面代码的框架**：12000 多行的 `main.rs` 拆成按页面和弹窗划分的模块，状态按功能分组，后台任务统一用一套进度模型。见 [23 · 界面代码的框架](docs/design/23-ui-framework.md)。
-- 顺带修了存档页的版本名太长时会压住按钮。
-
-0.37 改名 Cairn，并按实测反馈理顺启动前后的体验：
-
-- **启动前就看得见、改得了**：启动台「开始游戏」下面一排参数——用哪个 Java、多大内存、哪个回收器、多大窗口、几个额外 JVM 参数。点任何一个打开「启动参数」：按版本单独设置，Java 可以选本机任意一个或手动指定，没改的跟随全局；下面是完整命令行预览，和真正启动时由同一段代码生成，一键复制。
-- **截图墙**：启动台下方像商店游戏页那样排出这个版本的截图，最新的在前。左键从缩略图放大成大图（←/→ 翻页），右键直接把整张图片复制到剪贴板，缩略图上有「已复制」反馈；缩略图后台生成并缓存，空闲 CPU 仍为 0。
-- **版本名完整显示**：按宽度自动缩小字号，太长换成两行，不再截成「新：模拟大都…」；设置和版本页里的长路径从中间省略，悬停看全路径，点一下复制。
-- **已安装内容秒开**：先显示上次的列表，后台只重读大小或修改时间变了的文件；启动台的 Mod 数也在后台核对，不再显示过期的 0。
-- **exe 带图标和版本信息**，窗口和任务栏也有图标。修好了系统剪贴板（0.36 的复制其实到不了系统剪贴板，输入框也不能粘贴外面的文字）。
-- **改名**：Linux 的数据目录会从 `~/.local/share/nailong` 自动搬到 `~/.local/share/cairn`，什么都不丢；Windows 仍是程序旁边的 `.minecraft`。deb 包改叫 `cairn`，直接装会替换旧的 `nailong` 包。
-
-为什么下载 exe 时浏览器会提示「通常不会下载」、HMCL 却不会，见 [22 · Windows 下载提示](docs/design/22-windows-trust.md)。
-
-0.36 把调参的两个问题分开回答，并理顺了几处「看得见却点不了」的地方。
-
-- **测一下这台电脑**：不再给每个版本复制测试实例、开游戏飞行。设置里点「测一下」，启动器在后台跑一个内置的小 Java 程序（7 KB，Java 8 字节码），照游戏的样子造负载：常驻数据、区块缓存、生成线程、服务端 tick 和不封顶的渲染线程。对这台电脑上每个 Java 21+ 分常规和大型整合包两档比较 G1 和 ZGC 的平均帧率、1% 低帧、顿和 CPU，每个 Java 约 1 分半，不开窗口，结论所有版本共用。命令行是 `cairn-cli bench`。
-- **内存从游戏里学**：每局都把回收日志写进游戏目录的 `logs/cairn-gc.log`（0.36 叫 `nailong-gc.log`），退出后读出进世界以后真正常驻的数据，下次「自动」内存按它算；出现整堆回收就加大。没玩过的版本仍按公式。
-- **内容页**：「已禁用 3」「重复 4」这些数字可以点，点了就只看这些；带放大镜的搜索框（`Ctrl+F`）和状态筛选可以叠加；「打开文件夹」和每一项的「在文件夹中显示」；Mod、资源包、光影可以直接从文件管理器拖进窗口，一次拖很多个，悬停时就说会装到哪；在外面改了文件，回到窗口自动刷新。
-- **日志**：启动失败后的「查看日志」一步打开这次的游戏输出，能认出的原因写在最上面（例如缺哪个前置 Mod），错误行标红，可以只看错误、搜索、复制、在文件夹中显示；`Ctrl+L` 随时打开。
-
-设计见 [20 · 测一下这台电脑，内存从游戏里学](docs/design/20-tuning-benchmark.md) 和 [21 · 手感](docs/design/21-handling.md)。
-
-0.35 加入「实测调优」：给当前版本建测试实例、进测试世界飞行，量出内存和回收器。0.36 已换成上面的做法。
-
-0.34.1 修复 26.x：26.1 起的版本文件多了 `default-user-jvm`，以前会安装失败；natives 目录也会多套一层导致启动时找不到 LWJGL。现在 26.x 能装能玩，「自动」也改为跟随 Mojang 写在版本文件里的官方默认（ZGC、紧凑对象头等）。Java 改为选「够用里最低的」，同版本优先 OpenJDK 而不是 GraalVM。
-
-0.34 加入 JVM 自动调参：内存默认「自动」，按电脑内存、处理器、Java 版本和 Mod 数量算出堆大小，配好 G1 参数，大整合包配强机器时自动换分代 ZGC；初始堆看启动时的空闲内存，避免内存紧张时启动失败。设置里能看到结果、依据和完整参数，也能手动改。实测同一个世界里疾跑 100 秒，回收次数从 15 次降到 8 次，停顿总时长少约三分之一。详见 [19 · JVM 自动调参](docs/design/19-jvm-tuning.md)。
-
-0.33 把界面整体重做成自己的「雾蓝」风格，不再模仿 Minecraft：简洁、哑光，有深色和浅色两套，默认跟随系统。启动台右侧是一个状态圆环，文件完整度、每个 Mod 和存档快照都画在上面，平时不带文字，鼠标放上去才有动效和说明，点击可以跳到对应页面，也能用键盘操作。界面只用一个低饱和的雾蓝强调色，没有发光和渐变，空闲 CPU 仍为 0.0%。设计规范见 [18 · 雾蓝界面](docs/design/18-ui-fog.md)。
-
-0.32 把 0.31 的极光玻璃整体推倒，换成 Minecraft 原生的「深岩」像素语言：内置 Fusion Pixel 12px 中文字体，零圆角、2px 硬边、方块浮雕按钮、像素图标和深板岩砖背景；启动台主视觉是一块在 Rust 里逐块拼出的等距体素岛（草方块、树、水池、矿脉、站在边缘的小人、四层石/土裙边、悬浮金块）。所有页面与弹窗共用同一套方块组件；1120 宽恢复 4 列内容网格，900×620 隐藏最近世界槽和状态条、设置正文可滚动。背景按尺寸生成并缓存为纹理，体素岛以整数像素多边形直接绘制；空闲 CPU 仍为 0.0%。
-
-0.31 把整个界面换成了「极光 / 龙脊夜空」：深墨蓝底、衬线大标题、玻璃卡片；启动台变成一张完整的海报——左边是当前版本与「开始游戏」，右边浮着最近世界，下面接最近内容与快捷操作。背景和英雄区不是素材图，而是在 Rust 里按尺寸生成一次、缓存成纹理（极光、星场、月亮、龙形星座、方块山脊），所以画面更丰富，空闲时仍然不重绘；0.30 的空闲 0% CPU 保留。1120 宽恢复 4 列内容网格；设置弹窗在 900×620 下改为可滚动，内容和「完成」按钮不再被裁切。
-
-0.30 把环境光从“每 66 ms 重绘整窗”改成静态：渐变、点阵、微粒都还在，但只在切页、悬停、进度更新时出帧。Xvfb + llvmpipe、窗口聚焦、空闲 5 秒实测，单进程从约 162% CPU 降到 0%。这也是之前“首页/切页烫”的根因。
-
-0.29 加「减少动效」：设置里一个开关，写入 `ui.json`。开启后页面淡入直接完成、环境光粒子静止、卡片悬停不抬升、按钮不位移、进度条扫光关闭、开关立即到位；空闲时也不再为环境光重绘。颜色和描边反馈保留，不会“关掉动效就变呆”。
-
-0.28 补键盘路径：Ctrl+1–4 切启动台/版本/内容/存档，Ctrl+, 打开设置，F5 刷新版本列表；输入框聚焦或有弹窗时不抢键。快捷键提示放在设置弹窗诊断区下方，不占主界面。
-
-0.27 收设置弹窗：内存从裸输入框换成 `− 4 GB +` 的 1 GB 步进器；Java 行显示实际检测版本，可「重新检测」，缺失时直接给「下载 Java 21」；玩家名、内存、Java 拆成两行，不再挤在一条线上。
-
-0.26 给更新加确认：「全部更新」和单行「更新」不再直接覆盖文件，而是先弹确认清单——每个项目从哪个版本到哪个版本、目标版本、写入目录、项目数和下载大小，并说明旧文件会清理、更新前自动创建恢复点。更新和安装现在共用同一套“先看一眼再写盘”的语言。
-
-0.25 继续收页面里的控件：版本页统计改成大数字在上、标签在下；自动备份和「显示基础版本」不再用默认 checkbox，换成内容页同一套暖色开关；存档工具条按“自动备份 → 间隔 → 保留份数 → 备份全部 → 清理”排顺。没有加功能，只把已有的页面读起来更顺。
-
-0.24 把失败和关闭也当成界面：登录失败弹独立的「登录没有完成」结果卡，给「重新登录 / 关闭」，不再把一句 AADSTS 丢在首页背景里；设置、账户、恢复点、登录等待、登录失败、安装确认都支持 Esc 关闭；内容错误不再显示带完整 URL 的裸错误：没有内容时给「内容没有加载出来」居中卡，已有列表刷新失败只在顶部给重载条。原始错误只进设置日志。
-
-0.23 先修玩家第一眼就会碰到的毛刺：Windows 打开登录链接不再经过 `cmd`，避免 URL 里的 `&` 被当成命令分隔符、登录参数被截断而报 AADSTS900144；登录窗口的“取消”不再污染内容浏览的取消状态，“发现”不会莫名其妙显示“操作已取消”。启动台/版本页的统计改成按页缓存，切页从 260 ms 收到 180 ms；内容首次加载换成带骨架的加载卡；1120 宽下发现/搜索结果从 3 列变 4 列。登录失败只显示一句能行动的话，原始 AADSTS 进日志。
-
-0.22 让恢复点也管加载器：内容写进版本目录时，版本 JSON 和补丁 jar 会跟 Mod/配置一起进恢复点；恢复时先删掉这两个文件再按清单还原，不会出现“退回原版但还留着旧补丁 jar”。重装或修复已有加载器前也会自动留一份。共享 `libraries/` 不复制，旧库仍在；世界存档继续走独立快照。自定义外部 `gameDir` 的实例只恢复内容。
-
-0.21 把“装之前先看一眼”补上：卡片 `+` 和详情页「安装」都会先弹出确认清单——装到哪个版本、实际写哪个目录、版本/文件、预计大小、会一起装的前置，以及安装前会自动创建恢复点；确认后才下载，取消不写盘。首次启动不再直接进入安装表单，而是三步引导：**确认 Java → 确认游戏目录 → 安装第一个版本或导入整合包**。没有版本时，启动台就是这张引导页。
-
-0.20 把“坏了能救”做进内容库：安装、更新、导入、删除 Mod/资源包/光影前会自动留一个**恢复点**；装坏了在内容页点「恢复点」就能回到之前，恢复前还会为当前状态再留一份。恢复点存 Mod、配置、资源包、光影和内容索引，按整文件 SHA-1 去重，默认保留最近 10 份，不含世界存档（世界有自己的快照）。
-
-0.19 把启动台从“仪表盘”收成一个主行动：**当前版本、开始游戏、版本详情、最近世界、最近内容**。账户、玩家名、内存、Java、游戏目录、数据目录和日志全部收进侧边栏底部的「设置」，玩家名与内存会保存到数据目录，重启后还在。产品方向写在 [产品 brief](docs/product/00-brief.md)：**装得干净，坏了能救**。
-
-0.18 把界面按玩家的日常动线重新排了一遍：左边常驻四个入口——**启动台、版本、内容、存档**。内容库把「发现」和「已安装」合成一页，版本页只负责启动和维护，存档升为一级页面并自带版本选择器。视觉换成奶油白底、白卡片、橙黄强调的浅色主题；0.18.1 又补了字体与控制细节：真粗体、哑光琥珀主按钮、带播放/下载字形，次按钮也有独立的描边、悬停和接触阴影。
-
-![动效演示：状态圆环悬停、切页与深浅色](docs/screenshots/motion.gif)
-
-| 启动台 | 内容 · 发现 |
+| 启动台 | 区块级回档（0.45） |
 |---|---|
-| ![启动台](docs/screenshots/01-home.png) | ![内容 · 发现](docs/screenshots/05-discover.png) |
-| **内容 · 已安装** | **存档** |
-| ![内容 · 已安装](docs/screenshots/04-library.png) | ![存档](docs/screenshots/08-saves.png) |
+| ![启动台](docs/screenshots/01-home.png) | ![区块级回档](docs/screenshots/29-chunks.png) |
+| **内容 · 发现** | **截图（时间 / 地点 / 人物）** |
+| ![内容 · 发现](docs/screenshots/05-discover.png) | ![截图页](docs/screenshots/30-gallery.png) |
+| **存档与快照** | **浅色主题** |
+| ![存档与快照](docs/screenshots/08-saves.png) | ![浅色主题](docs/screenshots/25-light-home.png) |
 
-更多截图（版本、安装、搜索、详情、进度、首次启动、设置、账户与登录、登录失败、恢复点、安装确认、空内容库、空存档，以及 6 张 900×620 窄窗口）：[docs/screenshots](docs/screenshots)。中文使用系统字体（Linux 上的 Noto Sans CJK，Windows 上的微软雅黑）。
+更多 32 张全场景截图（版本、安装、内容管理、搜索、详情、安装确认、恢复点、多账户、四栏设置、`Ctrl+K`、运行中会话、900×620 窄窗及浅色主题）：[docs/screenshots](docs/screenshots)。中文使用系统字体（Linux 上的 Noto Sans CJK，Windows 上的微软雅黑）。
 
-## 特性
+## 核心特性
 
-### 安装与启动
+### 安装、启动与 JVM 调参
 
-- 原版、Fabric、NeoForge、Forge 都支持，版本从官方清单读，不用手输。
-- Forge / NeoForge 走原生安装：只取 `install_profile`、`version.json` 和客户端补丁（约 3 MB），完整安装器不落盘。
-- 安装拆成阶段：版本 JSON 就绪后，资源、client/libraries、加载器补丁和 processor 并行推进。
-- 大文件按 4 段 Range 下载，段文件可续传；官方连不上自动换镜像（BMCLAPI、MCIM），见 [24](docs/design/24-download-sources.md)。
-- 本机补丁缓存；客户端和运行库按 SHA1 存 blob，硬链接到目标路径；已有文件只做轻量检查。
-- 本机现成的 patched client 也能复用：自动扫官方 / PCL / HMCL / Prism / MultiMC / Modrinth 和相邻 `.minecraft`，SHA1 匹配（NeoForge 走 JAR 结构校验）后直接复用，跳过补丁和 processor。
-- 已完整安装的 Forge / NeoForge 再装一次等于 no-op，不会重复下载、重跑 processor。
-- 资源缺失时明确提示“补全资源”，修完再启动。
-- 安装可取消：下载、解压和 processor 都会响应；已下载部分保留，重新开始会检查补全。
+- **版本与加载器**：原版、Fabric、NeoForge、Forge 均从官方清单读取；原生精简安装 Forge/NeoForge（只取约 3 MB 核心数据），自动扫描并硬链接复用本机其他启动器已构建的 patched client。
+- **高速下载与镜像回退**：大文件 4 段 Range 并行续传；官方连不上自动切换 [BMCLAPI](https://bmclapidoc.bangbang93.com/)（游戏/加载器）与 [MCIM](https://github.com/mcmod-info-mirror)（Modrinth/CurseForge 接口），设置可选「官方优先 / 镜像优先」，密钥不发给镜像，下载后一律按官方哈希校验。详见 [24](docs/design/24-download-sources.md)。
+- **自动 Java 与参数预览**：缺合适 Java 时启动或安装加载器前自动下载 Mojang 官方运行时（优先 LZMA 压缩版、逐文件 SHA-1 校验）；启动台展示当前版本的 Java / 内存 / GC / 分辨率，可按版本覆写并复制完整命令行。
+- **科学 JVM 调参**：默认「自动」内存 + 调优 G1/分代 ZGC；内置 7 KB 合成基准（`cairn-cli bench`）免开窗口对比本机各 Java 下的 G1 与 ZGC，并从每局真实 GC 日志学习常驻堆。详见 [19](docs/design/19-jvm-tuning.md)、[20](docs/design/20-tuning-benchmark.md)。
+- **游玩体验**：游戏运行不锁启动器，支持多版本并行运行、侧栏状态查看与一键「结束游戏」；1.20+ 支持「进入」直达世界；`Ctrl+K` 全局命令面板；`Ctrl+L` 日志窗口自动诊断常见缺前置/崩溃原因。
 
-### 整合包
+### 坏了能救
 
-支持六种格式，自动识别，不需要先选格式：
+- **实例恢复点**：安装、更新、拖入、删除内容或重装加载器前先弹确认清单并自动创建恢复点（SHA-1 去重）；若游戏崩溃且上次正常游玩后改过内容，底部提示「退回改动」一步还原。
+- **区块级世界快照**：区域文件（`region/`、`entities/`、`poi/`）按 Minecraft 区块拆存进 pack 文件，未改动世界几毫秒完成增量快照；支持按维度查看改动热图、框选回档指定区块（地形、实体、POI 与 `.mcc` 联动，动前自动留档），也支持整份恢复和定时/退出自动备份。详见 [30](docs/design/30-chunk-snapshots.md)。
+
+### 整合包与内容库
+
+支持六种整合包格式自动识别，拖入 `.mrpack` 或 `.zip` 即可导入；也可将任意版本导出为最小 `.mrpack`（线上可下文件只写外链，其余打进 `overrides/`，见 [28](docs/design/28-export.md)）：
 
 | 格式 | 入口文件 | 说明 |
 |---|---|---|
-| Modrinth | `.mrpack` | 直链 + SHA1 |
-| CurseForge | `manifest.json` 的 zip | 按 project/file ID 解析；官方构建内置 key，校验 SHA1 |
-| Prism / MultiMC | `mmc-pack.json`（可以套在一层文件夹里） | 读取组件和 overrides；自带组件补丁（`patches/`）的实例按补丁合成版本，带上实例自己的库 |
+| Modrinth | `.mrpack` | 直链 + SHA-1 |
+| CurseForge | `manifest.json` 的 zip | 官方构建内置应用 key（XOR 混淆，仅作共享配额，可被提取）；遵守作者关闭第三方分发设置 |
+| Prism / MultiMC | `mmc-pack.json`（支持套一层目录） | 支持组件补丁（`patches/`）与自带库 |
 | MCBBS | `mcbbs.packmeta` | addons + files + overrides |
 | HMCL | `modpack.json` + `minecraft/pack.json` | 内嵌 manifest 转实例 |
 | ATLauncher | `instance.json` | 内嵌 manifest 转实例 |
 
-把 `.mrpack` 或 `.zip` 拖进窗口即可开始导入。单个 mod `.jar` 目前不会被当成整合包处理。
+内容页合并「已安装 / 发现」，锁定目标版本的 MC 版本与加载器，支持 Mod / 资源包 / 光影统一检索（Modrinth + CurseForge 真实品类树）、自动解析 `required` / `optional` / `incompatible` 前置、本地文件批量拖入、状态筛选、重复检测与带确认清单的一键更新。
 
-导出：版本详情里点「导出整合包」，得到一个 `.mrpack`。网上有的文件只记地址，其余打包。命令行是 `cairn-cli export <版本> <文件>`。
+### 账户、截图与自动更新
 
-### 内容库：发现与已安装
-
-- 左侧「内容」是唯一的 Mod / 资源包 / 光影入口；页头的「已安装 / 发现」是同一个库的两种模式，不用在两个页面之间跳。
-- 右上角先选「安装到：<已装版本>」：选定后浏览、搜索都锁定这个版本的 Minecraft 版本和加载器，`+` 直接下进该版本的 `mods/` / `resourcepacks/` / `shaderpacks/`，不会再下错地方。
-- 不想装也能纯逛：选「只浏览」，版本和加载器自己挑；卡片仍可看详情，点 `+` 会提示先选安装目标。
-- 打开内容页默认看已安装：数量、启用/禁用、筛选、检查更新、逐项/全部更新、导入文件都在这一屏；空的时候直接给「去发现」。
-- 切到「发现」就是浏览页：标题、搜索、内容类型和「安装到」固定在顶部，内容区是一排品类胶囊（优化、科技、冒险、写实、奇幻…）加「热门」「最新」两排卡片。不用先搜索，也不用先想关键词。
-- 每张卡片是一个项目：图标、名字、简介、下载量，右下角一个 `+` 直接装。点 `+` 会取当前 Minecraft/加载器下最新的兼容版本，自动带上必需的 Modrinth 前置，装完卡片变成「已装」。
-- 点卡片其它位置进详情：左边是项目信息、版本信息和前置，右边是安装面板与版本记录；挑具体版本，看 `required` / `optional` / `incompatible` 前置；`required` 自动加入，`optional` 是勾选项（默认不勾），`incompatible` 会阻止下载。
-- 每排右上角有「更多 ›」：进入该排的完整列表（每页 24 个），继续「加载更多」翻页。
-- 品类胶囊来自 **CurseForge 的真实品类树**：启动器运行时拉 `/v1/categories`，翻译成中文（科技、魔法、冒险、世界…），CurseForge 独有的品类照它的名字显示；Modrinth 有而 CurseForge 没有的品类补在后面。
-- 品类默认只铺前 12 个，其余收进「更多品类」；可按来源切换：全部 / Modrinth / CurseForge。
-- 版本和加载器都可以不选：默认「全部版本 · 全部加载器」，纯逛也能用；想看某个版本就切过去，切回全部不影响已装内容。
-- 卡片带一小段介绍（名称、简介、下载量），完整描述和作者信息在详情页。选 CurseForge 时列表就是它的目录，按它的品类和排序走；下载仍由启动器解析地址并校验，不走网页。
-- 搜索框还在右上角，回车即搜；搜索结果同样是卡片，也可以翻页。
-- 浏览和安装都锁定当前选中版本：Mod 跟随该版本的加载器，资源包/光影只跟随 Minecraft 版本。
-- 下载到该版本的 `mods/`、`resourcepacks/` 或 `shaderpacks/`。普通版本首次下载会启用独立 `gameDir`（`versions/<id>/`），不会和其他版本互相污染；根目录旧存档不会自动迁移。
-- 「已安装」模式就是内容管理：按名称筛选、开关启用、检查更新、逐项/全部更新、重复项目提醒；删除走 `⋯` 菜单里的行内二次确认，更新一个禁用项不会把它悄悄启用。
-- **安装确认**：卡片 `+` 和详情安装都先看清单（目标版本、写入目录、版本/大小、前置、恢复点说明），确认才下载；取消不写盘。
-- **恢复点**：安装、更新、导入、删除内容、重装加载器前自动创建；内容页「恢复点」可手动创建、恢复、删除。默认实例会连版本 JSON 和补丁 jar 一起保存；恢复前自动留一份当前状态，恢复时校验对象哈希。留点失败会中止操作，不静默继续。
-- 支持本地 `.jar` 拖入/导入，以及资源包/光影的本地 `.zip` 导入。
-- 同名文件内容相同则跳过，内容不同会报冲突，不静默覆盖；更新会替换旧版本并保留索引。
-
-### 日常使用
-
-- 账户：在侧边栏底部切换，支持多个微软正版、外置登录（authlib-injector）和离线账户。微软走浏览器授权码 + PKCE，令牌自动刷新；外置登录启动时自动加载 authlib-injector（官方或 BMCLAPI 镜像下载，SHA-256 校验）。
-- 凭证存在数据目录的 `accounts.json`（Unix 0600），不写日志，不存密码；移除账户会删掉它的凭证。
-- 截图：侧栏「截图」按时间、地点、人物浏览；截图时写入地点和人物（可关闭）。
-- 设置：侧边栏底部「设置」集中账户、内存、Java 状态、游戏/数据目录和日志；内存等偏好写入 `ui.json`，下次打开还在。
-- JVM 自动调参：内存默认「自动」，按电脑内存、处理器、Java 版本和 Mod 数量算出堆大小，并配好 G1 参数；大整合包配强机器时自动换分代 ZGC。设置里能看到计算过程和完整参数，也能手动指定内存、回收器或追加 JVM 参数。算法和依据见 [19 · JVM 自动调参](docs/design/19-jvm-tuning.md)。
-- 版本：加载器依赖的原版自动隐藏；被依赖的版本不能误删；只负责启动、补全、打开目录和删除，内容与存档分别去左侧对应入口。
-- 存档：一级页面，顶部可直接切换版本；列出世界、显示大小和最近修改时间；备份是 **git 式快照**——区域文件按区块存，其他文件按内容分块，只存改动过的部分，第二次备份通常只增加几 MB；可整份恢复，也能只回档选中的区块；可删除、按份数自动清理。
-- 自动备份：开启后每次退出游戏都会给这个版本的世界留一份快照，另外可设每 15/30/60/120 分钟一次；每个世界保留 5/10/20/50 份，配置存数据目录的 `backups.json`。
-- 游戏运行时启动器不会被锁住：各页都能查看，只是正在玩的版本要等退出后才能改内容、恢复存档或删除。
-- 资源包/光影：和 Mod 一样可以启用/停用、删除、看文件大小、一键打开所在目录。
-- 安装进度：阶段、百分比、已下载 / 总大小、文件数。
-- GUI 和 CLI 共用同一套 core；CLI 适合脚本和排障。
+- **多账户**：支持微软正版（浏览器授权码 + PKCE）、外置登录（[authlib-injector](https://github.com/yushijinhun/authlib-injector)，如 LittleSkin）和离线账户，不保存密码，凭证以 Unix `0600` 原子写入 `accounts.json`。
+- **截图管理**：独立「截图」页支持总览、时间、地点、人物四个视图和搜索；游戏内截图自动写入 PNG `iTXt` 信息块（不改像素，可关闭），看图支持缩放、复制、设为世界图标与移入回收站。
+- **自动更新**：Windows 后台下载并按 `SHA256SUMS` 校验、关闭时替换；Linux deb 自动配置签名 apt 源，打开时静默升级或通过系统授权立即更新（见 [26](docs/design/26-auto-update.md)）。
 
 ## 下载
 
 | 平台 | 文件 | 大小 | 要求 |
 |---|---|---:|---|
-| Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | 约 9 MB | Windows 10/11，Java 21 |
-| Linux x64 (deb) | [cairn_0.45.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.45.0_amd64.deb) | 约 3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39，Java 21 |
+| Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | 约 9 MB | Windows 10/11 |
+| Linux x64 (deb) | [cairn_0.45.1_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.45.1_amd64.deb) | 约 3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39 |
 
-校验值：[SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS)。
+校验值：[SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS)（缺少 Java 时启动器可自动下载官方运行时）。
 
 ### Windows
 
-1. 下载 `cairn.exe`，放到任意目录，双击运行。以前用 `nailong.exe` 的，把 `cairn.exe` 放到同一个目录就能接着用原来的 `.minecraft`。
-2. 第一次打开是三步引导：确认 Java、确认目录，再点“安装第一个版本”；选 Minecraft 版本和 Fabric / NeoForge / Forge / 原版，点“安装”。
-3. 进度走完后回到主页，点“启动游戏”。
+下载 `cairn.exe` 放到任意目录双击运行（便携数据默认存在同目录 `.minecraft`；从 `nailong.exe` 升级直接放同目录即可）。
 
-需要系统里有 **Java 21**。启动器会自动查找；没找到时界面会提示。
-
-> exe 还没有代码签名。新版本刚发布、下载的人还少时，浏览器可能提示「通常不会下载」，Windows 可能提示「未知发布者」：浏览器里选「保留 → 仍然保留」，运行时选「更多信息 → 仍要运行」。可以用 SHA256SUMS 核对文件。原因和打算见 [22 · Windows 下载提示](docs/design/22-windows-trust.md)。
+> exe 暂未代码签名，新版本刚发布时浏览器可能提示「通常不会下载」、Windows 可能提示「未知发布者」，可用 `SHA256SUMS` 核对文件。原因和计划见 [22 · Windows 下载提示](docs/design/22-windows-trust.md)。
 
 ### Linux（Debian / Ubuntu）
 
-用 apt 源安装，以后跟着系统更新：
+通过 apt 源安装（推荐，随系统更新）：
 
 ```bash
 sudo wget -qO /usr/share/keyrings/cairn-archive-keyring.gpg https://dkjsiogu.github.io/cairn/apt/cairn-archive-keyring.gpg
@@ -255,139 +94,67 @@ sudo wget -qO /etc/apt/sources.list.d/cairn.sources https://dkjsiogu.github.io/c
 sudo apt update && sudo apt install cairn
 ```
 
-或者下载 deb 安装，效果一样：deb 会自动加上这个 apt 源。
+或直接安装 `.deb`（会自动添加上述 apt 源，并替换旧的 `nailong` 包）：
 
 ```bash
-sudo apt install ./cairn_0.45.0_amd64.deb
+sudo apt install ./cairn_0.45.1_amd64.deb
 ```
 
-也可以双击 deb 用软件中心安装。安装后应用菜单里会有 **Cairn**。装过旧的 `nailong` 包也没关系，`cairn` 会替换它。
+数据默认位于 `~/.local/share/cairn/.minecraft`（启动器也可用 `--root <目录>` 指定目录，或在设置中切换至已有 `.minecraft`）。如需彻底关闭系统后台更新：`sudo rm /etc/apt/apt.conf.d/52cairn-auto-update`；卸载：`sudo apt remove cairn`。
 
-打开 Cairn 时发现新版本，会在后台启动 `cairn-update.service`，只升级 Cairn 这一个包。设置里可以关掉；想彻底不让系统自动更新 Cairn：
+> 官方 deb 在 Ubuntu 24.04 / amd64 CI 上构建，要求 glibc ≥ 2.39（Ubuntu 24.04+ 可直接安装，22.04 暂不支持）。
 
-```bash
-sudo rm /etc/apt/apt.conf.d/52cairn-auto-update
-```
+## 命令行与源码构建
 
-卸载：
+deb 只含 GUI；从源码构建（需要 Rust 1.95+）会同时生成 GUI `cairn` 和 CLI `cairn-cli`：
 
 ```bash
-sudo apt remove cairn
-```
-
-> deb 在 Ubuntu 26.04 / amd64 上构建，要求 glibc ≥ 2.39；Ubuntu 24.04+ 可以直接安装，22.04 等更旧的系统暂时装不上。
-
-### 数据目录
-
-- Windows：`cairn.exe` 同目录下的 `.minecraft`（便携）。
-- Linux：`~/.local/share/cairn/.minecraft`。第一次启动 0.37 时，旧的 `~/.local/share/nailong` 会整个改名过来。
-
-可以用 `--root` 指定其他目录。
-
-## CurseForge API（内置）
-
-官方 Release 已内置项目 key，导入 CurseForge 整合包时自动走官方 API，**普通用户无需设置**。这不是 CurseForge 账号密码，而是应用级 key。
-
-- 官方 API 返回文件名、大小、SHA1 和下载地址，下载后可以校验。
-- 作者关闭第三方分发：停止导入并列出文件，不会手拼 CDN 链接绕过。
-- 维护者或调试时可以用环境变量 `CURSEFORGE_API_KEY` 覆盖内置值，下一版换 key 不需要改代码。
-- 内置 key 做了简单的 XOR 混淆，避免 `strings` 直接看到；**这不是加密**，仍然可以从二进制里还原，只作为共享默认配额，不能当秘密。
-- 如果你自己构建且没有注入 key，仍然可以导入，只是走 cfwidget + 官方下载页回退，没有官方 SHA1。
-
-## 验证范围
-
-已经实际跑过的：
-
-- GUI：1120×720 与最小 900×620 下逐页走查，覆盖侧边栏四入口、首次启动引导、安装确认、内容发现/已安装、搜索、详情、空状态、存档快照、设置弹窗、内容恢复点、进度页和账户/登录弹窗；28 张截图（深色 24 张、浅色 4 张）和 15 秒动效 GIF 在 `docs/screenshots/`。0.33 复测窗口聚焦、鼠标移开后的空闲 CPU 为 0.0%。
-- Linux（Xvfb + Mesa）：Fabric 0.19.5、NeoForge 21.1.209、Forge 52.1.20 在 1.21.1 启动到主菜单。
-- Fabulously Optimized `.mrpack`：151 个模组加载并启动。
-- CurseForge：真实文件通过无 key 的官方下载页回退下载成功；官方 API key 实测返回文件名、大小、SHA1 和下载地址。
-- GUI 取消安装：Xvfb 下安装中点取消，回到“继续安装”页，进程未崩溃。
-- 内容库：真实 Modrinth + CurseForge API；Mod/资源包/光影检索；Jade 及必需前置下载到版本独立 `mods/`；已安装扫描/启停/重复检测/更新检查；0.10.0 实测浏览页卡片 `+` 一键装 Fabric API 到版本独立 `mods/` 并写入内容索引。
-- Prism、MCBBS、HMCL、ATLauncher：真实或合成样例包跑通格式识别与实例创建。
-
-还没验证的：
-
-- Windows 由 CI 原生编译，但尚未在 Windows 实机启动。
-- 微软登录的令牌存储还是 0600 文件，没有接系统钥匙串（Windows Credential Manager / Secret Service）。
-- macOS 未支持，也没有验证。
-
-## 命令行
-
-deb 只装 GUI；自己构建会同时得到 CLI：
-
-```bash
-./target/release/cairn-cli --root /path/to/.minecraft list
-./target/release/cairn-cli --root /path/to/.minecraft java-install 21   # 下载官方 Java 21 到数据目录
-./target/release/cairn-cli update                                     # 查有没有新版本
-./target/release/cairn-cli --root /path/to/.minecraft install neoforge 1.21.1 21.1.209
-./target/release/cairn-cli --root /path/to/.minecraft install modpack ~/Downloads/pack.mrpack
-./target/release/cairn-cli --root /path/to/.minecraft install modpack ~/Downloads/pack.zip
-./target/release/cairn-cli --root /path/to/.minecraft launch neoforge-21.1.209 --username Steve --memory 4096
-# 不写 --memory 就自动算；--dry-run 会打印调参过程
-./target/release/cairn-cli --root /path/to/.minecraft launch neoforge-21.1.209 --gc zgc --jvm-arg=-XX:+AlwaysPreTouch --dry-run
-```
-
-## 从源码构建
-
-需要 Rust 1.95+。Linux 还需要编译 egui 的系统依赖：
-
-```bash
+# Linux 依赖
 sudo apt install build-essential pkg-config \
   libgl1-mesa-dev libegl1-mesa-dev \
   libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev \
   libxkbcommon-dev libxkbcommon-x11-dev
-```
 
-构建 GUI + CLI：
-
-```bash
 cargo build --release -p nailong-ui -p nailong-cli
+# 构建 Linux deb：./scripts/build-deb.sh（产物在 dist/）
 ```
 
-Linux 构建 deb：
+常用 CLI 示例：
 
 ```bash
-./scripts/build-deb.sh
-# 产物: dist/cairn_<version>_<arch>.deb
+cairn-cli --root /path/to/.minecraft list
+cairn-cli --root /path/to/.minecraft java-install 21
+cairn-cli --root /path/to/.minecraft install neoforge 1.21.1 21.1.209
+cairn-cli --root /path/to/.minecraft install modpack ~/Downloads/pack.mrpack
+cairn-cli --root /path/to/.minecraft export "1.21.1 NeoForge" ~/pack.mrpack
+cairn-cli --root /path/to/.minecraft launch "1.21.1 NeoForge" --gc zgc --dry-run
+cairn-cli bench
 ```
 
-Windows 发布版由 GitHub Actions 使用 MSVC + 静态 CRT 构建；也可以用 `x86_64-pc-windows-gnu` 交叉编译做本地检查。
+> 本地构建未设置 `NAILONG_CURSEFORGE_API_KEY` 时会禁用 CurseForge 源（Modrinth 不受影响，整合包仍走无 key 回退）；运行时可用 `CURSEFORGE_API_KEY` 覆盖。联网冒烟测试：`cargo test -p nailong-core --test live_modrinth -- --ignored --nocapture`。
 
-> 自己从源码构建时，如果没有设置 `NAILONG_CURSEFORGE_API_KEY`，构建出的程序会**禁用 CurseForge 源**（Modrinth 不受影响），这是有意的：key 在构建期混淆进二进制，不读配置文件。
->
-> ```bash
-> NAILONG_CURSEFORGE_API_KEY=... cargo build --release -p nailong-ui
-> ```
->
-> 想验证真实接口，跑被忽略的联网冒烟测试：
->
-> ```bash
-> cargo test -p nailong-core --test live_modrinth -- --ignored --nocapture
-> ```
+## 验证范围与还没做
 
-## 还没做
+- **已实际验证**：Linux 下 1.21.1 原版/Fabric/NeoForge/Forge、1.7.10+LWJGL3 大型 Prism 包（323 Mod）、Fabulously Optimized（151 Mod）及 26.x 实装与进游戏；453 MB 世界区块快照与回档；BMCLAPI / MCIM 镜像降级；LittleSkin 外置登录探测；全页深浅色与 900×620 窄窗走查（空闲 CPU 0.0%）。
+- **尚未完成 / 待验证**：
+  - Windows 由 CI 原生静态 CRT 构建，但**尚未在 Windows 实机完整验证**；
+  - 账户令牌目前为 Unix `0600` 文件存储，尚未接入系统钥匙串（Windows Credential Manager / Linux Secret Service）；
+  - 皮肤上传/更换、整合包增量更新、macOS 支持。
 
-- 皮肤上传和更换、完整整合包更新。
-- 启动后的停止游戏 / 启动取消。
-- Windows 实机验证、macOS 支持。
-
-
-## 代码结构
+## 代码结构与文档
 
 ```text
 crates/
-  nailong-core/   版本解析、下载、Java 检测、启动、加载器安装、整合包导入、内容库
+  nailong-core/   版本解析、下载/镜像、Java 与 JVM 调参、启动、整合包、内容库、恢复点、区块快照
   nailong-cli/    命令行
   nailong-ui/     egui 图形界面
-packaging/linux/  desktop、图标、AppStream 元数据、版权文件
-scripts/          deb 打包脚本
+packaging/        Linux deb/apt/polkit/desktop/图标 与 Windows 图标
+scripts/          deb 与 apt 仓库构建脚本
 docs/
-  design/         架构与设计文档
-  brief/          9 页项目简报
+  design/         30 篇架构与设计文档（索引见 docs/design/00-overview.md）
+  product/        产品 brief（docs/product/00-brief.md）
+  screenshots/    全套深浅色与窄窗截图
 ```
-
-详细设计见 [设计文档索引](docs/design/00-overview.md)；实现进度与已知偏差见 [实现状态](docs/design/14-implementation-status.md)。
 
 ## 致谢
 
@@ -395,10 +162,8 @@ docs/
 - [MCIM](https://github.com/mcmod-info-mirror)（mcmod-info-mirror）提供 Modrinth 和 CurseForge 的接口镜像。
 - [authlib-injector](https://github.com/yushijinhun/authlib-injector)（yushijinhun）让外置登录成为可能。
 
-两者都是免费的社区服务，Cairn 按它们的要求使用：官方优先、写明来源、不做二次封装，见 [24](docs/design/24-download-sources.md)。
+Cairn 按社区镜像约定使用：官方优先、标明来源、不做二次封装（见 [24](docs/design/24-download-sources.md)）。
 
 ## 许可
 
-GPL-3.0-or-later，见 [LICENSE](LICENSE)。
-
-本项目与 Mojang Studios、Microsoft 无隶属关系；不附带、不分发任何 Minecraft 游戏资源。
+GPL-3.0-or-later，见 [LICENSE](LICENSE)。本项目与 Mojang Studios、Microsoft 无隶属关系，不附带、不分发任何 Minecraft 游戏资源。

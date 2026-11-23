@@ -114,11 +114,11 @@ pub fn build(slots: &[Slot]) -> Result<Vec<u8>> {
     let mut out = vec![0u8; HEADER];
     for slot in sorted {
         if slot.index >= 1024 || slot.payload.is_empty() {
-            return Err(Error::Install("区块数据无效".into()));
+            return Err(Error::Plain("区块数据无效".into()));
         }
         let sectors = (4 + slot.payload.len()).div_ceil(SECTOR);
         if sectors > 255 {
-            return Err(Error::Install("区块太大，放不进区域文件".into()));
+            return Err(Error::Plain("区块太大，放不进区域文件".into()));
         }
         let offset = out.len() / SECTOR;
         let i = slot.index as usize;

@@ -198,18 +198,9 @@ impl Accounts {
 
     pub fn save(&self, root: &Root) -> Result<()> {
         let path = store_path(root);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| crate::error::io(parent, e))?;
-        }
         let bytes = serde_json::to_vec_pretty(self)
-            .map_err(|e| Error::Install(format!("账户序列化失败: {e}")))?;
-        crate::paths::write_atomic(&path, &bytes)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        }
-        Ok(())
+            .map_err(|e| Error::Login(format!("账户序列化失败: {e}")))?;
+        crate::paths::write_atomic_private(&path, &bytes)
     }
 
     pub fn current(&self) -> Option<&Account> {

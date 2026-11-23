@@ -73,7 +73,7 @@ pub fn latest(http: &Http) -> Result<Release> {
         &format!("https://api.github.com/repos/{REPO}/releases/latest"),
         &[("Accept", "application/vnd.github+json")],
     )?;
-    parse_release(&value).ok_or_else(|| Error::Install("读不懂 GitHub 返回的版本信息".into()))
+    parse_release(&value).ok_or_else(|| Error::Plain("读不懂 GitHub 返回的版本信息".into()))
 }
 
 fn numbers(version: &str) -> Vec<u64> {
@@ -140,9 +140,9 @@ pub fn download(
         .assets
         .iter()
         .find(|a| a.name == "SHA256SUMS")
-        .ok_or_else(|| Error::Install("这个版本没有发布校验值，不安全，没有下载".into()))?;
+        .ok_or_else(|| Error::Plain("这个版本没有发布校验值，不安全，没有下载".into()))?;
     let expected = expected_sha256(&http.get_text(&sums.url)?, &asset.name)
-        .ok_or_else(|| Error::Install(format!("校验值里没有 {}", asset.name)))?;
+        .ok_or_else(|| Error::Plain(format!("校验值里没有 {}", asset.name)))?;
     let dest = dir.join(&asset.name);
     let _ = std::fs::remove_file(&dest);
     http.download_with(
@@ -160,7 +160,7 @@ pub fn download(
     let actual = sha256_file(&dest)?;
     if actual != expected {
         let _ = std::fs::remove_file(&dest);
-        return Err(Error::Install(
+        return Err(Error::Plain(
             "下载的文件和发布的校验值对不上，已删除；请稍后重试".into(),
         ));
     }
@@ -281,12 +281,12 @@ pub fn install_deb(deb: &Path) -> Result<()> {
         .args(["/usr/bin/apt-get", "install", "-y"])
         .arg(deb)
         .output()
-        .map_err(|e| Error::Install(format!("没能运行 pkexec：{e}")))?;
+        .map_err(|e| Error::Plain(format!("没能运行 pkexec：{e}")))?;
     if out.status.success() {
         return Ok(());
     }
     let stderr = String::from_utf8_lossy(&out.stderr);
-    Err(Error::Install(match out.status.code() {
+    Err(Error::Plain(match out.status.code() {
         Some(126) => "没有授权".into(),
         Some(127) => "没能弹出授权窗口".into(),
         _ => apt_error(&stderr),
@@ -319,6 +319,17 @@ fn old_exe(current: &Path) -> PathBuf {
 pub fn cleanup(cache: &Path) {
     if let Some(current) = running_exe() {
         let _ = std::fs::remove_file(old_exe(&current));
+        // 若上次替换时 cairn.old.exe 被杀软短暂占用而退到了带 pid 的名字，这里一并清理。
+        if let Some(dir) = current.parent()
+            && let Ok(entries) = std::fs::read_dir(dir)
+        {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+                if name.starts_with("cairn.old-") && name.ends_with(".exe") {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
     }
     if cfg!(windows) && staged(cache).is_none() {
         let _ = std::fs::remove_file(staged_path(cache));
@@ -328,20 +339,20 @@ pub fn cleanup(cache: &Path) {
 
 /// 重新打开 Cairn（用磁盘上的程序，也就是新版本），参数照旧。调用方随后应退出。
 pub fn relaunch() -> Result<()> {
-    let exe = running_exe().ok_or_else(|| Error::Install("找不到正在运行的程序".into()))?;
+    let exe = running_exe().ok_or_else(|| Error::Plain("找不到正在运行的程序".into()))?;
     std::process::Command::new(&exe)
         .args(std::env::args_os().skip(1))
         .spawn()
-        .map_err(|e| Error::Install(format!("没能重新打开：{e}")))?;
+        .map_err(|e| Error::Plain(format!("没能重新打开：{e}")))?;
     Ok(())
 }
 
 /// 重新打开 Cairn，不带命令行参数（换了数据目录以后用：新的数据目录从设置里读）。
 pub fn restart_fresh() -> Result<()> {
-    let exe = running_exe().ok_or_else(|| Error::Install("找不到正在运行的程序".into()))?;
+    let exe = running_exe().ok_or_else(|| Error::Plain("找不到正在运行的程序".into()))?;
     std::process::Command::new(&exe)
         .spawn()
-        .map_err(|e| Error::Install(format!("没能重新打开：{e}")))?;
+        .map_err(|e| Error::Plain(format!("没能重新打开：{e}")))?;
     Ok(())
 }
 
@@ -367,12 +378,20 @@ pub fn can_replace_exe() -> bool {
 /// Windows：用新程序替换正在运行的程序。`relaunch` 时再启动新的，调用方随后应退出。
 fn swap_exe(new_exe: &Path, relaunch: bool) -> Result<()> {
     if !cfg!(windows) {
-        return Err(Error::Install("只有 Windows 能自动替换程序".into()));
+        return Err(Error::Plain("只有 Windows 能自动替换程序".into()));
     }
-    let current = running_exe().ok_or_else(|| Error::Install("找不到正在运行的程序".into()))?;
-    let old = old_exe(&current);
-    let _ = std::fs::remove_file(&old);
-    std::fs::rename(&current, &old).map_err(|e| io(&current, e))?;
+    let current = running_exe().ok_or_else(|| Error::Plain("找不到正在运行的程序".into()))?;
+    let primary = old_exe(&current);
+    let _ = std::fs::remove_file(&primary);
+    let old = match std::fs::rename(&current, &primary) {
+        Ok(()) => primary,
+        Err(_) => {
+            // cairn.old.exe 可能还在被杀软扫描占用，退到带进程号的备份名再试。
+            let fallback = current.with_file_name(format!("cairn.old-{}.exe", std::process::id()));
+            std::fs::rename(&current, &fallback).map_err(|e| io(&current, e))?;
+            fallback
+        }
+    };
     if let Err(e) = std::fs::copy(new_exe, &current) {
         // 放不进去就把旧程序改回来，至少还能用。
         let _ = std::fs::rename(&old, &current);
@@ -382,7 +401,7 @@ fn swap_exe(new_exe: &Path, relaunch: bool) -> Result<()> {
         std::process::Command::new(&current)
             .args(std::env::args_os().skip(1))
             .spawn()
-            .map_err(|e| Error::Install(format!("新版本没能启动：{e}")))?;
+            .map_err(|e| Error::Plain(format!("新版本没能启动：{e}")))?;
     }
     Ok(())
 }
@@ -408,7 +427,7 @@ pub fn stage(cache: &Path, version: &str, file: &Path) -> Result<Staged> {
     };
     let path = staged_path(cache);
     std::fs::create_dir_all(cache.join("update")).map_err(|e| io(cache, e))?;
-    let bytes = serde_json::to_vec_pretty(&staged).map_err(|e| Error::Install(e.to_string()))?;
+    let bytes = serde_json::to_vec_pretty(&staged).map_err(|e| Error::Plain(e.to_string()))?;
     std::fs::write(&path, bytes).map_err(|e| io(&path, e))?;
     Ok(staged)
 }
@@ -433,7 +452,7 @@ pub fn apply_staged(cache: &Path, relaunch: bool) -> Result<Option<String>> {
     let _ = std::fs::remove_file(staged_path(cache));
     if sha256_file(&staged.file)? != staged.sha256 {
         let _ = std::fs::remove_file(&staged.file);
-        return Err(Error::Install("下载的新版本被改动过，已删除".into()));
+        return Err(Error::Plain("下载的新版本被改动过，已删除".into()));
     }
     swap_exe(&staged.file, relaunch)?;
     let _ = std::fs::remove_file(&staged.file);

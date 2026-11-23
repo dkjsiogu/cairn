@@ -39,7 +39,7 @@ fn safe_name(name: &str) -> Result<&str> {
     let mut components = path.components();
     match (components.next(), components.next()) {
         (Some(Component::Normal(_)), None) => Ok(name),
-        _ => Err(Error::Install(format!("非法的存档名: {name}"))),
+        _ => Err(Error::Plain(format!("非法的存档名: {name}"))),
     }
 }
 
@@ -70,7 +70,7 @@ pub fn delete_world(game_dir: &Path, name: &str) -> Result<()> {
     let name = safe_name(name)?;
     let dir = saves_dir(game_dir).join(name);
     if !dir.join("level.dat").is_file() {
-        return Err(Error::Install(format!("找不到存档: {name}")));
+        return Err(Error::Plain(format!("找不到存档: {name}")));
     }
     fs::remove_dir_all(&dir).map_err(|e| crate::error::io(&dir, e))
 }
@@ -79,7 +79,7 @@ pub fn backup_world(game_dir: &Path, name: &str) -> Result<PathBuf> {
     let name = safe_name(name)?;
     let source = saves_dir(game_dir).join(name);
     if !source.join("level.dat").is_file() {
-        return Err(Error::Install(format!("找不到存档: {name}")));
+        return Err(Error::Plain(format!("找不到存档: {name}")));
     }
     let dir = backups_dir(game_dir);
     fs::create_dir_all(&dir).map_err(|e| crate::error::io(&dir, e))?;
@@ -90,7 +90,7 @@ pub fn backup_world(game_dir: &Path, name: &str) -> Result<PathBuf> {
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     add_dir(&mut zip, &source, Path::new(name), options)?;
     zip.finish()
-        .map_err(|e| Error::Install(format!("备份写入失败: {e}")))?;
+        .map_err(|e| Error::Plain(format!("备份写入失败: {e}")))?;
     Ok(path)
 }
 
@@ -135,45 +135,45 @@ pub fn restore_backup(game_dir: &Path, name: &str) -> Result<String> {
     let path = backups_dir(game_dir).join(name);
     let file = File::open(&path).map_err(|e| crate::error::io(&path, e))?;
     let mut archive =
-        ZipArchive::new(file).map_err(|e| Error::Install(format!("备份包损坏: {e}")))?;
+        ZipArchive::new(file).map_err(|e| Error::Plain(format!("备份包损坏: {e}")))?;
     if archive.is_empty() {
-        return Err(Error::Install("备份包是空的".into()));
+        return Err(Error::Plain("备份包是空的".into()));
     }
     let mut world = None;
     for index in 0..archive.len() {
         let entry = archive
             .by_index(index)
-            .map_err(|e| Error::Install(format!("读取备份失败: {e}")))?;
+            .map_err(|e| Error::Plain(format!("读取备份失败: {e}")))?;
         let Some(inner) = entry.enclosed_name() else {
-            return Err(Error::Install("备份包里有越界路径".into()));
+            return Err(Error::Plain("备份包里有越界路径".into()));
         };
         let Some(Component::Normal(first)) = inner.components().next() else {
-            return Err(Error::Install("备份包结构异常".into()));
+            return Err(Error::Plain("备份包结构异常".into()));
         };
         let first = first.to_string_lossy().to_string();
         match &world {
             Some(existing) if *existing != first => {
-                return Err(Error::Install("备份包里包含多个存档".into()));
+                return Err(Error::Plain("备份包里包含多个存档".into()));
             }
             None => world = Some(first),
             _ => {}
         }
     }
     let Some(world) = world else {
-        return Err(Error::Install("备份包结构异常".into()));
+        return Err(Error::Plain("备份包结构异常".into()));
     };
     let target = saves_dir(game_dir).join(&world);
     if target.exists() {
-        return Err(Error::Install(format!("存档 {world} 已存在，未覆盖")));
+        return Err(Error::Plain(format!("存档 {world} 已存在，未覆盖")));
     }
     let saves = saves_dir(game_dir);
     fs::create_dir_all(&saves).map_err(|e| crate::error::io(&saves, e))?;
     for index in 0..archive.len() {
         let mut entry = archive
             .by_index(index)
-            .map_err(|e| Error::Install(format!("读取备份失败: {e}")))?;
+            .map_err(|e| Error::Plain(format!("读取备份失败: {e}")))?;
         let Some(inner) = entry.enclosed_name() else {
-            return Err(Error::Install("备份包里有越界路径".into()));
+            return Err(Error::Plain("备份包里有越界路径".into()));
         };
         let dest = saves.join(&inner);
         if entry.is_dir() {
@@ -264,7 +264,7 @@ pub fn import_world(game_dir: &Path, source: &Path) -> Result<String> {
     };
     if source.is_dir() {
         if !source.join("level.dat").is_file() {
-            return Err(Error::Install(
+            return Err(Error::Plain(
                 "这个文件夹不是世界：里面没有 level.dat".into(),
             ));
         }
@@ -285,11 +285,9 @@ pub fn import_world(game_dir: &Path, source: &Path) -> Result<String> {
     }
     let file = File::open(source).map_err(|e| crate::error::io(source, e))?;
     let mut archive =
-        ZipArchive::new(file).map_err(|e| Error::Install(format!("压缩包打不开: {e}")))?;
+        ZipArchive::new(file).map_err(|e| Error::Plain(format!("压缩包打不开: {e}")))?;
     let Some(prefix) = world_prefix(&mut archive) else {
-        return Err(Error::Install(
-            "压缩包里没有世界（找不到 level.dat）".into(),
-        ));
+        return Err(Error::Plain("压缩包里没有世界（找不到 level.dat）".into()));
     };
     let wanted = match prefix.file_name() {
         Some(name) => name.to_string_lossy().to_string(),
@@ -303,9 +301,9 @@ pub fn import_world(game_dir: &Path, source: &Path) -> Result<String> {
             crate::cancel::check()?;
             let mut entry = archive
                 .by_index(index)
-                .map_err(|e| Error::Install(format!("读取压缩包失败: {e}")))?;
+                .map_err(|e| Error::Plain(format!("读取压缩包失败: {e}")))?;
             let Some(inner) = entry.enclosed_name() else {
-                return Err(Error::Install("压缩包里有越界路径".into()));
+                return Err(Error::Plain("压缩包里有越界路径".into()));
             };
             let Ok(relative) = inner.strip_prefix(&prefix) else {
                 continue;
@@ -372,18 +370,18 @@ fn add_dir(
         if meta.is_dir() {
             let dir_name = format!("{}/", inner.to_string_lossy().replace('\\', "/"));
             zip.add_directory(dir_name, options)
-                .map_err(|e| Error::Install(format!("备份写入失败: {e}")))?;
+                .map_err(|e| Error::Plain(format!("备份写入失败: {e}")))?;
             add_dir(zip, &path, &inner, options)?;
         } else if meta.is_file() {
             let file_name = inner.to_string_lossy().replace('\\', "/");
             zip.start_file(file_name, options)
-                .map_err(|e| Error::Install(format!("备份写入失败: {e}")))?;
+                .map_err(|e| Error::Plain(format!("备份写入失败: {e}")))?;
             let mut file = File::open(&path).map_err(|e| crate::error::io(&path, e))?;
             let mut buffer = Vec::new();
             file.read_to_end(&mut buffer)
                 .map_err(|e| crate::error::io(&path, e))?;
             zip.write_all(&buffer)
-                .map_err(|e| Error::Install(format!("备份写入失败: {e}")))?;
+                .map_err(|e| Error::Plain(format!("备份写入失败: {e}")))?;
         }
     }
     Ok(())

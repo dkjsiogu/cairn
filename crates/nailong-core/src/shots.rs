@@ -115,7 +115,7 @@ pub fn read_meta(path: &Path) -> Option<Meta> {
 pub fn write_meta(path: &Path, meta: &Meta) -> Result<()> {
     let bytes = std::fs::read(path).map_err(|e| crate::error::io(path, e))?;
     let out = with_meta(&bytes, meta)
-        .ok_or_else(|| Error::Install(format!("不是完整的 PNG: {}", path.display())))?;
+        .ok_or_else(|| Error::Plain(format!("不是完整的 PNG: {}", path.display())))?;
     let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok();
     crate::paths::write_atomic(path, &out)?;
     if let Some(time) = modified

@@ -72,7 +72,7 @@ pub fn load_config(root: &Root) -> Config {
 pub fn save_config(root: &Root, config: &Config) -> Result<()> {
     let path = root.dir().join("backups.json");
     let bytes = serde_json::to_vec_pretty(config)
-        .map_err(|e| Error::Install(format!("备份配置序列化失败: {e}")))?;
+        .map_err(|e| Error::Plain(format!("备份配置序列化失败: {e}")))?;
     crate::paths::write_atomic(&path, &bytes)
 }
 
@@ -110,7 +110,7 @@ fn safe_name(name: &str) -> Result<&str> {
     let mut components = path.components();
     match (components.next(), components.next()) {
         (Some(Component::Normal(_)), None) => Ok(name),
-        _ => Err(Error::Install(format!("非法的存档名: {name}"))),
+        _ => Err(Error::Plain(format!("非法的存档名: {name}"))),
     }
 }
 
@@ -286,18 +286,18 @@ impl Store {
             }
         };
         if sha1(&data) != *hash {
-            return Err(Error::Install(format!("快照数据损坏: {}", hex(hash))));
+            return Err(Error::Plain(format!("快照数据损坏: {}", hex(hash))));
         }
         Ok(Some(data))
     }
 
     fn get(&mut self, hash: &Hash) -> Result<Vec<u8>> {
         self.get_opt(hash)?
-            .ok_or_else(|| Error::Install(format!("快照缺少数据块: {}", hex(hash))))
+            .ok_or_else(|| Error::Plain(format!("快照缺少数据块: {}", hex(hash))))
     }
 
     fn get_hex(&mut self, text: &str) -> Result<Vec<u8>> {
-        let hash = unhex(text).ok_or_else(|| Error::Install("快照里的块哈希无效".into()))?;
+        let hash = unhex(text).ok_or_else(|| Error::Plain("快照里的块哈希无效".into()))?;
         self.get(&hash)
     }
 
@@ -395,7 +395,7 @@ fn encode_table(rows: &[Row]) -> Vec<u8> {
 
 fn decode_table(data: &[u8]) -> Result<Vec<Row>> {
     if data.len() < 4 || &data[..4] != TABLE_MAGIC || !(data.len() - 4).is_multiple_of(TABLE_ROW) {
-        return Err(Error::Install("快照里的区块表损坏".into()));
+        return Err(Error::Plain("快照里的区块表损坏".into()));
     }
     Ok(data[4..]
         .as_chunks::<TABLE_ROW>()
@@ -453,7 +453,7 @@ fn saved_slots(store: &mut Store, entry: &FileEntry) -> Result<BTreeMap<u16, Sav
     }
     let bytes = assemble(store, entry)?;
     let slots = region::parse(&bytes)
-        .ok_or_else(|| Error::Install(format!("快照里的 {} 不是完整的区域文件", entry.path)))?;
+        .ok_or_else(|| Error::Plain(format!("快照里的 {} 不是完整的区域文件", entry.path)))?;
     for slot in slots {
         out.insert(
             slot.index,
@@ -473,7 +473,7 @@ fn assemble(store: &mut Store, entry: &FileEntry) -> Result<Vec<u8>> {
         bytes.extend_from_slice(&store.get_hex(hash)?);
     }
     if bytes.len() as u64 != entry.size {
-        return Err(Error::Install(format!("快照文件大小不符: {}", entry.path)));
+        return Err(Error::Plain(format!("快照文件大小不符: {}", entry.path)));
     }
     Ok(bytes)
 }
@@ -514,7 +514,7 @@ fn backup_locked(game_dir: &Path, world: &str, note: Option<&str>) -> Result<Sna
     let world = safe_name(world)?;
     let source = saves::saves_dir(game_dir).join(world);
     if !source.join("level.dat").is_file() {
-        return Err(Error::Install(format!("找不到存档: {world}")));
+        return Err(Error::Plain(format!("找不到存档: {world}")));
     }
     let previous: HashMap<String, FileEntry> = list(game_dir, world)?
         .into_iter()
@@ -608,8 +608,8 @@ fn backup_locked(game_dir: &Path, world: &str, note: Option<&str>) -> Result<Sna
     let dir = snapshots_dir(game_dir, world);
     fs::create_dir_all(&dir).map_err(|e| crate::error::io(&dir, e))?;
     let path = dir.join(format!("{}.json", snapshot.id));
-    let data = serde_json::to_vec(&snapshot)
-        .map_err(|e| Error::Install(format!("快照序列化失败: {e}")))?;
+    let data =
+        serde_json::to_vec(&snapshot).map_err(|e| Error::Plain(format!("快照序列化失败: {e}")))?;
     crate::paths::write_atomic(&path, &data)?;
     Ok(snapshot)
 }
@@ -644,7 +644,7 @@ fn load(game_dir: &Path, world: &str, id: &str) -> Result<Snapshot> {
     let id = safe_name(id)?;
     let path = snapshots_dir(game_dir, world).join(format!("{id}.json"));
     let data = fs::read(&path).map_err(|e| crate::error::io(&path, e))?;
-    serde_json::from_slice(&data).map_err(|e| Error::Install(format!("快照损坏: {e}")))
+    serde_json::from_slice(&data).map_err(|e| Error::Plain(format!("快照损坏: {e}")))
 }
 
 /// 只看文件名统计快照：份数和最新一份的时间（秒）。
@@ -677,6 +677,7 @@ pub fn summary(game_dir: &Path, world: &str) -> Result<(usize, Option<u64>)> {
 
 /// 整个世界恢复到 `saves/<world>`；目录已存在时改名为 `<world>-restored-<时间>`。
 pub fn restore(game_dir: &Path, world: &str, id: &str) -> Result<PathBuf> {
+    let _guard = lock();
     let snapshot = load(game_dir, world, id)?;
     let saves = saves::saves_dir(game_dir);
     fs::create_dir_all(&saves).map_err(|e| crate::error::io(&saves, e))?;
@@ -728,6 +729,7 @@ pub fn repo_stats(game_dir: &Path) -> (usize, u64) {
 }
 
 pub fn delete(game_dir: &Path, world: &str, id: &str) -> Result<()> {
+    let _guard = lock();
     let world = safe_name(world)?;
     let id = safe_name(id)?;
     let path = snapshots_dir(game_dir, world).join(format!("{id}.json"));
@@ -881,7 +883,7 @@ fn repack(game_dir: &Path, referenced: &HashSet<Hash>) -> Result<usize> {
                     .and_then(|_| file.read_exact(&mut data))
                     .map_err(|e| crate::error::io(&pack, e))?;
                 if sha1(&data) != *hash {
-                    return Err(Error::Install(format!("快照数据损坏: {}", hex(hash))));
+                    return Err(Error::Plain(format!("快照数据损坏: {}", hex(hash))));
                 }
                 // 旧包还在索引里，put 会以为已经有了；先从索引里拿掉。
                 store.index.remove(hash);
@@ -999,6 +1001,7 @@ fn check_dim(dim: &str) -> Result<()> {
 
 pub fn chunk_map(game_dir: &Path, world: &str, id: &str, dim: &str) -> Result<ChunkMap> {
     check_dim(dim)?;
+    let _guard = lock();
     let snapshot = load(game_dir, world, id)?;
     let world_dir = saves::saves_dir(game_dir).join(&snapshot.world);
     let prefix = format!("{}/", join_dir(dim, "region"));
@@ -1105,12 +1108,12 @@ pub fn restore_chunks(game_dir: &Path, world: &str, id: &str, area: &Area) -> Re
     let snapshot = load(game_dir, world, id)?;
     let world_dir = saves::saves_dir(game_dir).join(&snapshot.world);
     if !world_dir.join("level.dat").is_file() {
-        return Err(Error::Install(
+        return Err(Error::Plain(
             "这个世界已经不在了，先整份恢复再回档区块".into(),
         ));
     }
     if world_in_use(&world_dir) {
-        return Err(Error::Install(
+        return Err(Error::Plain(
             "游戏正在用这个世界，退出到标题画面再回档".into(),
         ));
     }
@@ -1139,7 +1142,7 @@ pub fn restore_chunks(game_dir: &Path, world: &str, id: &str, area: &Area) -> Re
                 if path.is_file() {
                     let data = fs::read(&path).map_err(|e| crate::error::io(&path, e))?;
                     let slots = region::parse(&data)
-                        .ok_or_else(|| Error::Install(format!("{rel} 读不懂，没有改动任何文件")))?;
+                        .ok_or_else(|| Error::Plain(format!("{rel} 读不懂，没有改动任何文件")))?;
                     current = slots.into_iter().map(|s| (s.index, s)).collect();
                 }
                 let mut touched = false;
@@ -1168,9 +1171,9 @@ pub fn restore_chunks(game_dir: &Path, world: &str, id: &str, area: &Area) -> Re
                                 if region::is_external(&payload) {
                                     let mcc =
                                         format!("{dir_rel}/{}", region::external_name(cx, cz));
-                                    let entry = by_path.get(mcc.as_str()).ok_or_else(|| {
-                                        Error::Install(format!("快照里缺少 {mcc}"))
-                                    })?;
+                                    let entry = by_path
+                                        .get(mcc.as_str())
+                                        .ok_or_else(|| Error::Plain(format!("快照里缺少 {mcc}")))?;
                                     writes.push((external, Some(file_bytes(&mut store, entry)?)));
                                 }
                                 current.insert(
@@ -1242,11 +1245,11 @@ fn safe_relative(path: &str) -> Result<PathBuf> {
     for component in Path::new(path).components() {
         match component {
             Component::Normal(part) => out.push(part),
-            _ => return Err(Error::Install(format!("快照里有越界路径: {path}"))),
+            _ => return Err(Error::Plain(format!("快照里有越界路径: {path}"))),
         }
     }
     if out.as_os_str().is_empty() {
-        return Err(Error::Install("快照里有空路径".into()));
+        return Err(Error::Plain("快照里有空路径".into()));
     }
     Ok(out)
 }
@@ -1718,5 +1721,44 @@ mod tests {
         let labels: Vec<&str> = dims.iter().map(|d| d.label.as_str()).collect();
         assert_eq!(labels, ["主世界", "下界", "mod:sky"]);
         assert_eq!(dims[2].dir, "dimensions/mod/sky");
+    }
+
+    #[test]
+    fn restore_chunk_map_and_prune_can_run_concurrently() {
+        let game = temp_dir("concurrent");
+        let mut slots: Vec<region::Slot> =
+            (0..6).map(|i| slot(i, 1, chunk(i as u8, 1500))).collect();
+        write_region(&game, "World", "region", "r.0.0.mca", &slots);
+        let kept = backup(&game, "World").unwrap();
+        for round in 0..4u8 {
+            slots[0] = slot(0, round as u32 + 2, chunk(100 + round, 1500));
+            write_region(&game, "World", "region", "r.0.0.mca", &slots);
+            backup(&game, "World").unwrap();
+        }
+        let latest = list(&game, "World").unwrap().remove(0);
+        // 并发做清理、读区块图和整份恢复：共享仓库锁不会读到正在被 repack 删除的包。
+        std::thread::scope(|scope| {
+            let g1 = game.clone();
+            let h1 = scope.spawn(move || {
+                for _ in 0..5 {
+                    prune(&g1, 2).unwrap();
+                }
+            });
+            let g2 = game.clone();
+            let id = latest.id.clone();
+            let h2 = scope.spawn(move || {
+                for _ in 0..5 {
+                    let map = chunk_map(&g2, "World", &id, "").unwrap();
+                    assert!(!map.chunks.is_empty());
+                }
+            });
+            h1.join().unwrap();
+            h2.join().unwrap();
+        });
+        assert!(kept.id != latest.id);
+        // 报错不再带误导性的“安装失败:”前缀。
+        let err = backup(&game, "../bad").unwrap_err().to_string();
+        assert!(!err.contains("安装失败"), "{err}");
+        let _ = fs::remove_dir_all(&game);
     }
 }
