@@ -230,46 +230,40 @@ impl App {
             }
         }
 
-        ui.add_space(11.0);
+        ui.add_space(12.0);
         let mut mode: Option<bool> = None;
         let mut wanted_kind: Option<mods::ContentKind> = None;
         ui.horizontal(|ui| {
-            if content_tab(ui, "已安装", installed_count, self.content.show_installed).clicked()
-            {
-                mode = Some(true);
-            }
-            ui.add_space(4.0);
-            if content_tab(ui, "发现", 0, !self.content.show_installed).clicked() {
-                mode = Some(false);
-            }
+            segmented_bar(ui, |ui| {
+                if content_tab(ui, "已安装", installed_count, self.content.show_installed).clicked()
+                {
+                    mode = Some(true);
+                }
+                if content_tab(ui, "发现", 0, !self.content.show_installed).clicked() {
+                    mode = Some(false);
+                }
+            });
             ui.add_space(14.0);
+            let (sep, _) = ui.allocate_exact_size(egui::vec2(1.0, 20.0), egui::Sense::hover());
+            ui.painter().rect_filled(sep, 0.0, t::hairline());
+            ui.add_space(10.0);
+            ui.spacing_mut().item_spacing.x = 4.0;
             for candidate in [
                 mods::ContentKind::Mod,
                 mods::ContentKind::ResourcePack,
                 mods::ContentKind::Shader,
             ] {
                 let selected = self.content.kind == candidate;
-                let (fill, text, stroke) = if selected {
-                    (t::tint(t::accent(), 0.17), t::ink(), t::accent())
-                } else {
-                    (egui::Color32::TRANSPARENT, t::sub(), t::hairline())
-                };
-                let button = egui::Button::new(
-                    egui::RichText::new(candidate.label())
-                        .size(13.0)
-                        .family(bold_family())
-                        .color(text),
-                )
-                .fill(fill)
-                .stroke(egui::Stroke::new(1.0, stroke))
-                .corner_radius(motion::R)
-                .min_size(egui::vec2(72.0, 30.0));
                 let tip = match candidate {
                     mods::ContentKind::Mod => "模组",
                     mods::ContentKind::ResourcePack => "材质与资源包",
                     mods::ContentKind::Shader => "光影",
                 };
-                if ui.add(button).on_hover_text(tip).clicked() && !selected {
+                if underline_tab(ui, candidate.label(), selected)
+                    .on_hover_text(tip)
+                    .clicked()
+                    && !selected
+                {
                     wanted_kind = Some(candidate);
                 }
             }

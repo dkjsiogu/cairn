@@ -132,7 +132,7 @@ impl App {
 
     pub(crate) fn sidebar(&mut self, ui: &mut egui::Ui) {
         let wide = ui.ctx().content_rect().width() >= 1080.0;
-        let width = if wide { 190.0 } else { 64.0 };
+        let width = if wide { 196.0 } else { 64.0 };
         let active = self.nav_active();
         let current = self.current_account().cloned();
         let face = self.face(ui.ctx(), current.as_ref().and_then(|a| a.skin.as_deref()));
@@ -145,41 +145,47 @@ impl App {
         let update_badge = self.update.badge(&self.prefs.update_skip);
         let mut settings_clicked = false;
         let mut open_progress = false;
+        let mut open_palette = false;
         let mut open_game: Option<String> = None;
 
         egui::Panel::left("shell_nav")
             .resizable(false)
             .exact_size(width)
-            .frame(egui::Frame::new().fill(t::bg()).inner_margin(egui::Margin {
-                left: if wide { 12 } else { 10 },
-                right: if wide { 12 } else { 10 },
-                top: 20,
-                bottom: 14,
-            }))
+            .frame(
+                egui::Frame::new()
+                    .fill(t::rail())
+                    .inner_margin(egui::Margin {
+                        left: if wide { 12 } else { 10 },
+                        right: if wide { 12 } else { 10 },
+                        top: 18,
+                        bottom: 14,
+                    }),
+            )
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.spacing_mut().item_spacing.y = 3.0;
                 if wide {
                     ui.horizontal(|ui| {
-                        ui.add_space(12.0);
+                        ui.add_space(10.0);
+                        cairn_mark(ui, 18.0);
+                        ui.add_space(6.0);
                         ui.label(
                             egui::RichText::new("Cairn")
-                                .size(21.0)
+                                .size(20.0)
                                 .family(light_family())
                                 .color(t::ink()),
                         );
                     });
                 } else {
                     ui.vertical_centered(|ui| {
-                        ui.label(
-                            egui::RichText::new("C")
-                                .size(24.0)
-                                .family(light_family())
-                                .color(t::ink()),
-                        );
+                        cairn_mark(ui, 22.0);
                     });
                 }
-                ui.add_space(20.0);
+                ui.add_space(12.0);
+                if sidebar_search(ui, wide, enabled).clicked() {
+                    open_palette = true;
+                }
+                ui.add_space(10.0);
 
                 for nav in Nav::ALL {
                     if sidebar_item(ui, nav, active == nav, wide, enabled).clicked() {
@@ -206,24 +212,34 @@ impl App {
                     .filter(|task| task.shows_progress() && *task != Task::Bench)
                     .filter(|_| !self.progress_open);
                 let locked = login_busy || matches!(self.busy, Some(Task::Bench));
-                let footer = if update_badge.is_some() && !locked {
-                    38.0
-                } else {
-                    0.0
-                } + if locked {
-                    40.0
-                } else {
-                    78.0 + if task_card.is_some() {
-                        if wide { 62.0 } else { 44.0 }
+                let footer =
+                    14.0 + if update_badge.is_some() && !locked {
+                        38.0
                     } else {
                         0.0
-                    }
-                } + if locked {
-                    0.0
-                } else {
-                    games.len() as f32 * 38.0 + if games.is_empty() { 0.0 } else { 6.0 }
-                };
+                    } + if locked {
+                        40.0
+                    } else {
+                        80.0 + if task_card.is_some() {
+                            if wide { 64.0 } else { 44.0 }
+                        } else {
+                            0.0
+                        }
+                    } + if locked {
+                        0.0
+                    } else {
+                        games.len() as f32 * 39.0 + if games.is_empty() { 0.0 } else { 6.0 }
+                    };
                 ui.add_space((ui.available_height() - footer).max(10.0));
+                let div_y = ui.cursor().top();
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(ui.min_rect().left() + 4.0, div_y),
+                        egui::pos2(ui.min_rect().right() - 4.0, div_y),
+                    ],
+                    egui::Stroke::new(1.0, t::hairline()),
+                );
+                ui.add_space(10.0);
                 if !locked {
                     // 正在运行的游戏：一个一行，点它看这一局的输出。
                     for (row_id, status) in &games {
@@ -304,6 +320,9 @@ impl App {
         if let Some(nav) = go {
             self.nav_go(nav);
         }
+        if open_palette && !self.page_locked() {
+            self.open_palette();
+        }
         if open_progress {
             self.progress_open = true;
         }
@@ -325,7 +344,105 @@ impl App {
     }
 }
 
-/// 侧栏里一个正在运行的游戏：圆点、版本名和状态。点它看这一局的输出。
+/// 三块叠放的哑光石堆图形：Cairn（路标石堆）的几何品牌标记。
+fn cairn_mark(ui: &mut egui::Ui, size: f32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    let cx = rect.center().x;
+    let bottom = rect.bottom() - 1.5;
+    let s = size / 20.0;
+    let painter = ui.painter();
+    // 底层宽石
+    painter.rect_filled(
+        egui::Rect::from_center_size(
+            egui::pos2(cx, bottom - 2.6 * s),
+            egui::vec2(16.0 * s, 4.4 * s),
+        ),
+        2.2 * s,
+        t::dim(),
+    );
+    // 中层石
+    painter.rect_filled(
+        egui::Rect::from_center_size(
+            egui::pos2(cx, bottom - 8.2 * s),
+            egui::vec2(11.4 * s, 4.0 * s),
+        ),
+        2.0 * s,
+        t::sub(),
+    );
+    // 顶层雾蓝路标石
+    painter.rect_filled(
+        egui::Rect::from_center_size(
+            egui::pos2(cx, bottom - 13.4 * s),
+            egui::vec2(6.6 * s, 3.6 * s),
+        ),
+        1.8 * s,
+        t::accent(),
+    );
+}
+
+/// 侧栏顶部的全局搜索入口（打开 `Ctrl+K` 命令面板）。
+fn sidebar_search(ui: &mut egui::Ui, wide: bool, enabled: bool) -> egui::Response {
+    let sense = if enabled {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 32.0), sense);
+    let hover = motion::hover_amount(
+        ui,
+        response.id.with("ssearch"),
+        enabled && response.hovered(),
+    );
+    ui.painter().rect(
+        rect,
+        motion::R,
+        motion::mix(t::bg(), t::surface(), hover),
+        egui::Stroke::new(1.0, motion::mix(t::hairline(), t::control(), hover)),
+        egui::StrokeKind::Inside,
+    );
+    let icon_color = motion::mix(t::dim(), t::ink(), hover);
+    let c = if wide {
+        egui::pos2(rect.left() + 14.0, rect.center().y - 1.0)
+    } else {
+        egui::pos2(rect.center().x - 1.0, rect.center().y - 1.0)
+    };
+    ui.painter()
+        .circle_stroke(c, 4.2, egui::Stroke::new(1.3, icon_color));
+    ui.painter().line_segment(
+        [c + egui::vec2(3.1, 3.1), c + egui::vec2(6.0, 6.0)],
+        egui::Stroke::new(1.4, icon_color),
+    );
+    if wide {
+        ui.painter().text(
+            egui::pos2(rect.left() + 26.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            "快速搜索",
+            egui::FontId::proportional(12.5),
+            motion::mix(t::dim(), t::sub(), hover),
+        );
+        let badge = egui::Rect::from_center_size(
+            egui::pos2(rect.right() - 25.0, rect.center().y),
+            egui::vec2(38.0, 18.0),
+        );
+        ui.painter().rect(
+            badge,
+            4,
+            t::rail(),
+            egui::Stroke::new(1.0, t::hairline()),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().text(
+            badge.center(),
+            egui::Align2::CENTER_CENTER,
+            "Ctrl+K",
+            egui::FontId::proportional(10.5),
+            t::dim(),
+        );
+    }
+    response.on_hover_text("快速搜索版本、世界、页面与操作（Ctrl+K）")
+}
+
+/// 侧栏里一个正在运行的游戏：实时圆点、版本名和状态。点它看这一局的输出。
 fn game_row(ui: &mut egui::Ui, name: &str, status: &str, wide: bool) -> egui::Response {
     let (rect, response, color) = nav_row(ui, 36.0, false, true);
     let center = if wide {
@@ -333,7 +450,9 @@ fn game_row(ui: &mut egui::Ui, name: &str, status: &str, wide: bool) -> egui::Re
     } else {
         rect.center()
     };
-    ui.painter().circle_filled(center, 4.0, t::accent());
+    ui.painter()
+        .circle_filled(center, 6.5, t::tint(t::ok(), 0.20));
+    ui.painter().circle_filled(center, 3.5, t::ok());
     if wide {
         let font = egui::FontId::proportional(13.0);
         let width = rect.right() - 12.0 - (rect.left() + 40.0);
@@ -451,9 +570,10 @@ pub(crate) fn nav_row(
     let hover = motion::hover_amount(ui, response.id.with("hover"), enabled && response.hovered());
     if active {
         ui.painter().rect_filled(rect, motion::R, t::wash());
+        active_accent_bar(ui.painter(), rect);
     } else if hover > 0.0 {
         ui.painter()
-            .rect_filled(rect, motion::R, t::tint(t::wash(), hover));
+            .rect_filled(rect, motion::R, t::tint(t::wash(), 0.72 * hover));
     }
     let color = if !enabled {
         t::dim()
@@ -475,17 +595,29 @@ pub(crate) fn sidebar_item(
 ) -> egui::Response {
     let (rect, response, color) = nav_row(ui, 36.0, active, enabled);
     let icon = if wide {
-        egui::pos2(rect.left() + 21.0, rect.center().y)
+        egui::pos2(rect.left() + 22.0, rect.center().y)
     } else {
         rect.center()
     };
-    nav_glyph(ui.painter(), icon, nav, color);
+    let icon_color = if active && enabled {
+        t::accent()
+    } else {
+        color
+    };
+    nav_glyph(ui.painter(), icon, nav, icon_color);
     if wide {
         ui.painter().text(
-            egui::pos2(rect.left() + 40.0, rect.center().y),
+            egui::pos2(rect.left() + 41.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
             nav.label(),
-            egui::FontId::proportional(14.0),
+            egui::FontId::new(
+                14.0,
+                if active {
+                    bold_family()
+                } else {
+                    egui::FontFamily::Proportional
+                },
+            ),
             color,
         );
     }

@@ -8,8 +8,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::theme as t;
 
-/// 控件和卡片的圆角。
-pub const R: u8 = 4;
+/// 统一圆角刻度：基础控件 7、卡片/缩略图 10、弹窗 12。
+pub const R: u8 = 7;
+pub const R_CARD: u8 = 10;
+pub const R_MODAL: u8 = 12;
 
 pub fn ease_out_cubic(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
@@ -88,11 +90,22 @@ pub fn pointer_on_clickables(ctx: &egui::Context) {
     }
 }
 
+/// 标记自带聚焦边框的输入框，避免再套一层外部焦点框。
+pub fn mark_custom_focus(ctx: &egui::Context, id: egui::Id) {
+    ctx.data_mut(|d| d.insert_temp(id.with("cairn_custom_focus"), true));
+}
+
 /// 键盘聚焦的外框。每帧统一画一次，所有控件都能用上。
 pub fn focus_ring(ctx: &egui::Context) {
     let Some(id) = ctx.memory(|memory| memory.focused()) else {
         return;
     };
+    if ctx.data(|d| {
+        d.get_temp::<bool>(id.with("cairn_custom_focus"))
+            .unwrap_or(false)
+    }) {
+        return;
+    }
     let Some(response) = ctx.read_response(id) else {
         return;
     };
@@ -151,14 +164,37 @@ pub fn primary_sized_glyph(
     };
     let (rect, response) = ui.allocate_exact_size(vec2(width.max(72.0), height.max(32.0)), sense);
     let hover = hover_amount(ui, response.id.with("hover"), enabled && response.hovered());
+    let pressed = enabled && response.is_pointer_button_down_on();
     let (fill, color) = if !enabled {
         (t::wash(), t::dim())
-    } else if response.is_pointer_button_down_on() {
+    } else if pressed {
         (t::accent_press(), t::on_accent())
     } else {
         (mix(t::accent(), t::accent_hover(), hover), t::on_accent())
     };
     ui.painter().rect_filled(rect, R, fill);
+    if enabled {
+        // 顶部 1px 轻高光线 + 克制描边，给实色主按钮一点物理厚度。
+        let top_highlight = Color32::from_white_alpha(if t::is_light() { 58 } else { 44 });
+        let rim_x0 = rect.left() + R as f32;
+        let rim_x1 = rect.right() - R as f32;
+        if rim_x1 > rim_x0 && !pressed {
+            ui.painter().line_segment(
+                [
+                    pos2(rim_x0, rect.top() + 1.0),
+                    pos2(rim_x1, rect.top() + 1.0),
+                ],
+                Stroke::new(1.0, top_highlight),
+            );
+        }
+        let edge = if pressed {
+            t::accent_press()
+        } else {
+            mix(t::tint(t::accent_hover(), 0.7), t::accent_hover(), hover)
+        };
+        ui.painter()
+            .rect_stroke(rect, R, Stroke::new(1.0, edge), egui::StrokeKind::Inside);
+    }
     paint_label(ui.painter(), rect, text, glyph, color, 14.0, true);
     if enabled && response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -237,7 +273,7 @@ fn paint_glyph(painter: &egui::Painter, c: egui::Pos2, glyph: PrimaryGlyph, colo
     }
 }
 
-/// 次按钮：透明底加细线，悬停时填色。
+/// 次按钮：克制表面底 + 细边，悬停和按下有平滑层级过渡。
 pub fn secondary_sized(
     ui: &mut egui::Ui,
     text: &str,
@@ -253,12 +289,15 @@ pub fn secondary_sized(
     };
     let (rect, response) = ui.allocate_exact_size(vec2(width.max(48.0), height.max(32.0)), sense);
     let hover = hover_amount(ui, response.id.with("hover"), enabled && response.hovered());
-    if enabled && response.is_pointer_button_down_on() {
-        // 按下时比悬停再深一点。
-        ui.painter()
-            .rect_filled(rect, R, mix(t::wash(), t::control(), 0.35));
-    } else if hover > 0.0 {
-        ui.painter().rect_filled(rect, R, t::tint(t::wash(), hover));
+    let fill = if !enabled {
+        Color32::TRANSPARENT
+    } else if response.is_pointer_button_down_on() {
+        mix(t::wash(), t::control(), 0.28)
+    } else {
+        mix(t::tint(t::surface(), 0.72), t::wash(), hover)
+    };
+    if fill != Color32::TRANSPARENT {
+        ui.painter().rect_filled(rect, R, fill);
     }
     ui.painter().rect_stroke(
         rect,
@@ -266,14 +305,18 @@ pub fn secondary_sized(
         Stroke::new(1.0, mix(t::hairline(), t::control(), hover)),
         egui::StrokeKind::Inside,
     );
-    let color = if enabled { t::ink() } else { t::dim() };
+    let color = if enabled {
+        mix(t::ink(), t::ink(), hover)
+    } else {
+        t::dim()
+    };
     paint_label(
         ui.painter(),
         rect,
         text,
         PrimaryGlyph::None,
         color,
-        14.0,
+        13.5,
         false,
     );
     if enabled && response.hovered() {
@@ -282,12 +325,12 @@ pub fn secondary_sized(
     response
 }
 
-/// 高 4 的细进度条。
+/// 高 5 的细进度条。
 pub fn progress_bar(ui: &mut egui::Ui, fraction: f32, indeterminate: bool, time: f64) {
     let width = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(vec2(width, 4.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(width, 5.0), Sense::hover());
     let painter = ui.painter();
-    painter.rect_filled(rect, 2, t::hairline());
+    painter.rect_filled(rect, 3, t::hairline());
     let time = if reduced() { 0.0 } else { time as f32 };
     let (from, to) = if indeterminate {
         let seg = (rect.width() * 0.25).max(48.0);
@@ -302,7 +345,7 @@ pub fn progress_bar(ui: &mut egui::Ui, fraction: f32, indeterminate: bool, time:
     if to - from > 0.5 {
         painter.rect_filled(
             Rect::from_min_max(pos2(from, rect.top()), pos2(to, rect.bottom())),
-            2,
+            3,
             t::accent(),
         );
     }

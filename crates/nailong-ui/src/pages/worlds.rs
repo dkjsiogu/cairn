@@ -529,35 +529,14 @@ impl App {
                             new_snapshot = Some(world.clone());
                         }
                         if self.worlds.confirm.as_deref() == Some(world.as_str()) {
-                            if ui.button("取消").clicked() {
+                            if motion::secondary_sized(ui, "取消", true, 64.0, 32.0, 12.5).clicked()
+                            {
                                 self.worlds.confirm = None;
                             }
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new("确认删除世界")
-                                            .size(13.0)
-                                            .color(t::danger()),
-                                    )
-                                    .fill(t::tint(t::danger(), 0.16))
-                                    .stroke(egui::Stroke::new(1.0, t::tint(t::danger(), 0.71))),
-                                )
-                                .clicked()
-                            {
+                            if danger_button(ui, "确认删除世界", 112.0, 32.0).clicked() {
                                 delete_world = Some(world.clone());
                             }
-                        } else if ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new("删除世界").size(13.0).color(t::sub()),
-                                )
-                                .fill(t::bg())
-                                .stroke(egui::Stroke::new(1.0, t::hairline()))
-                                .corner_radius(motion::R)
-                                .min_size(egui::vec2(78.0, 28.0)),
-                            )
-                            .clicked()
-                        {
+                        } else if ghost_button(ui, "删除世界").clicked() {
                             self.worlds.confirm = Some(world.clone());
                         }
                     });
@@ -583,9 +562,10 @@ impl App {
                             egui::Frame::new()
                                 .fill(t::surface())
                                 .stroke(egui::Stroke::new(1.0, t::hairline()))
-                                .corner_radius(motion::R)
-                                .inner_margin(egui::Margin::symmetric(8, 4))
+                                .corner_radius(motion::R_CARD)
+                                .inner_margin(egui::Margin::symmetric(8, 6))
                                 .show(ui, |ui| {
+                                    ui.spacing_mut().item_spacing.y = 0.0;
                                     for (index, snapshot) in snapshots.iter().enumerate() {
                                         let confirming = self.worlds.confirm_backup.as_deref()
                                             == Some(snapshot.id.as_str());
@@ -721,9 +701,12 @@ pub(crate) fn save_world_row(
     active: bool,
 ) -> egui::Response {
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 54.0), egui::Sense::click());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 56.0), egui::Sense::click());
     list_row_fill(ui, rect, active, &response);
-    let inner = rect.shrink2(egui::vec2(12.0, 8.0));
+    if active {
+        active_accent_bar(ui.painter(), rect);
+    }
+    let inner = rect.shrink2(egui::vec2(14.0, 8.0));
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(inner)
@@ -731,7 +714,15 @@ pub(crate) fn save_world_row(
     );
     child.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 2.0;
-        ui.label(egui::RichText::new(&world.name).size(14.0));
+        ui.label(
+            egui::RichText::new(&world.name)
+                .size(14.0)
+                .family(if active {
+                    bold_family()
+                } else {
+                    egui::FontFamily::Proportional
+                }),
+        );
         ui.label(
             egui::RichText::new(format!(
                 "{} · {} · {} 份快照",
@@ -739,7 +730,7 @@ pub(crate) fn save_world_row(
                 human_age(world.modified),
                 snapshots
             ))
-            .size(13.0)
+            .size(12.5)
             .color(t::sub()),
         );
     });
@@ -764,21 +755,49 @@ pub(crate) fn snapshot_row(
 ) -> SnapshotAction {
     let mut action = SnapshotAction::default();
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 52.0), egui::Sense::hover());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 56.0), egui::Sense::hover());
     if response.hovered() {
-        ui.painter().rect_filled(rect, 8, t::wash());
+        ui.painter().rect_filled(rect, motion::R, t::wash());
     }
-    if newest {
-        ui.painter().rect_filled(
-            egui::Rect::from_min_size(
-                egui::pos2(rect.left() + 2.0, rect.top() + 12.0),
-                egui::vec2(2.5, 28.0),
-            ),
-            1.0,
-            t::accent(),
+    // 时间线轨道 + 节点圆点
+    let node_x = rect.left() + 18.0;
+    let node_y = rect.center().y;
+    let line_stroke = egui::Stroke::new(1.0, t::hairline());
+    if !newest {
+        ui.painter().line_segment(
+            [
+                egui::pos2(node_x, rect.top()),
+                egui::pos2(node_x, node_y - 6.0),
+            ],
+            line_stroke,
         );
     }
-    let inner = rect.shrink2(egui::vec2(12.0, 6.0));
+    if !last {
+        ui.painter().line_segment(
+            [
+                egui::pos2(node_x, node_y + 6.0),
+                egui::pos2(node_x, rect.bottom()),
+            ],
+            line_stroke,
+        );
+    }
+    if newest {
+        ui.painter()
+            .circle_filled(egui::pos2(node_x, node_y), 7.0, t::tint(t::accent(), 0.18));
+        ui.painter()
+            .circle_filled(egui::pos2(node_x, node_y), 3.8, t::accent());
+    } else {
+        ui.painter().circle(
+            egui::pos2(node_x, node_y),
+            3.5,
+            t::surface(),
+            egui::Stroke::new(1.5, t::control()),
+        );
+    }
+    let inner = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 34.0, rect.top() + 7.0),
+        egui::pos2(rect.right() - 12.0, rect.bottom() - 7.0),
+    );
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(inner)
@@ -786,11 +805,17 @@ pub(crate) fn snapshot_row(
     );
     child.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 2.0;
-        ui.label(
-            egui::RichText::new(human_age(snapshot.created_at))
-                .size(13.0)
-                .family(bold_family()),
-        );
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.label(
+                egui::RichText::new(human_age(snapshot.created_at))
+                    .size(13.5)
+                    .family(bold_family()),
+            );
+            if newest {
+                tag_pill(ui, "最新", t::accent(), t::tint(t::accent(), 0.14));
+            }
+        });
         ui.label(
             egui::RichText::new(match &snapshot.note {
                 Some(note) => format!("{note} · {}", human_size(snapshot.bytes)),
@@ -800,11 +825,12 @@ pub(crate) fn snapshot_row(
                     human_size(snapshot.bytes)
                 ),
             })
-            .size(13.0)
+            .size(12.5)
             .color(t::sub()),
         );
     });
     child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
         if confirming {
             if danger_tiny(ui, "确认删除").clicked() {
                 action.delete = true;
@@ -827,7 +853,7 @@ pub(crate) fn snapshot_row(
     if !last {
         ui.painter().line_segment(
             [
-                egui::pos2(rect.left() + 12.0, rect.bottom()),
+                egui::pos2(rect.left() + 34.0, rect.bottom()),
                 egui::pos2(rect.right() - 12.0, rect.bottom()),
             ],
             egui::Stroke::new(1.0, t::hairline()),

@@ -552,8 +552,8 @@ impl App {
                 egui::Frame::new()
                     .fill(t::surface())
                     .stroke(egui::Stroke::new(1.0, t::hairline()))
-                    .corner_radius(motion::R)
-                    .inner_margin(egui::Margin::symmetric(6, 4))
+                    .corner_radius(motion::R_CARD)
+                    .inner_margin(egui::Margin::symmetric(6, 5))
                     .show(ui, |ui| {
                         for (index, entry) in entries.iter().enumerate() {
                             let size = entry.size.or_else(|| content_size(&game_dir, kind, entry));
@@ -738,21 +738,29 @@ impl App {
 }
 
 pub(crate) fn toggle_switch(ui: &mut egui::Ui, on: bool) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(32.0, 18.0), egui::Sense::click());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(34.0, 19.0), egui::Sense::click());
     let value = if motion::reduced() {
         if on { 1.0 } else { 0.0 }
     } else {
         ui.ctx().animate_bool_with_time(response.id, on, 0.15)
     };
-    ui.painter()
-        .rect_filled(rect, 9, motion::mix(t::control(), t::accent(), value));
+    let track = motion::mix(t::wash(), t::accent(), value);
+    let border = motion::mix(t::control(), t::accent(), value);
+    ui.painter().rect(
+        rect,
+        9.5,
+        track,
+        egui::Stroke::new(1.0, border),
+        egui::StrokeKind::Inside,
+    );
+    let thumb_color = motion::mix(t::sub(), t::on_accent(), value);
     ui.painter().circle_filled(
         egui::pos2(
-            egui::lerp((rect.left() + 9.0)..=(rect.right() - 9.0), value),
+            egui::lerp((rect.left() + 9.5)..=(rect.right() - 9.5), value),
             rect.center().y,
         ),
-        6.0,
-        t::on_accent(),
+        6.2,
+        thumb_color,
     );
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -787,7 +795,7 @@ pub(crate) fn installed_row(
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 58.0), egui::Sense::hover());
     if response.hovered() {
-        ui.painter().rect_filled(rect, 10, t::wash());
+        ui.painter().rect_filled(rect, motion::R, t::wash());
     }
     let inner = rect.shrink2(egui::vec2(12.0, 6.0));
     let mut child = ui.new_child(

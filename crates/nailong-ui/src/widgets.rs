@@ -31,48 +31,228 @@ pub(crate) fn busy_spinner(ui: &mut egui::Ui) {
     }
 }
 
+/// 左侧激活态竖条：导航项、版本行、世界行、设置分栏与命令面板统一使用。
+pub(crate) fn active_accent_bar(painter: &egui::Painter, rect: egui::Rect) {
+    let h = (rect.height() - 14.0).clamp(12.0, 22.0);
+    let bar = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 3.0, rect.center().y),
+        egui::vec2(2.5, h),
+    );
+    painter.rect_filled(bar, 2.0, t::accent());
+}
+
+/// 键盘快捷键小键帽（如 `Ctrl+K`、`Esc`、`Enter`）。
+pub(crate) fn kbd_badge(ui: &mut egui::Ui, text: &str) {
+    let font = egui::FontId::proportional(11.0);
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, t::dim());
+    let w = (galley.size().x + 10.0).max(20.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, 19.0), egui::Sense::hover());
+    ui.painter().rect(
+        rect,
+        4,
+        t::bg(),
+        egui::Stroke::new(1.0, t::hairline()),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().galley(
+        egui::pos2(
+            rect.center().x - galley.size().x * 0.5,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        t::dim(),
+    );
+}
+
+/// 分段切换容器：凹陷轨道底色 + 细边，里面放 `content_tab`。
+pub(crate) fn segmented_bar(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::new()
+        .fill(t::rail())
+        .stroke(egui::Stroke::new(1.0, t::hairline()))
+        .corner_radius(motion::R + 2)
+        .inner_margin(egui::Margin::same(3))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                add(ui);
+            });
+        });
+}
+
+/// 分段控件里的一项：选中时浮起成 `surface` 胶囊带细边，可带数量徽章。
 pub(crate) fn content_tab(
     ui: &mut egui::Ui,
     label: &str,
     count: usize,
     active: bool,
 ) -> egui::Response {
-    let text = if count > 0 {
-        format!("{label}  {count}")
+    let font = egui::FontId::new(
+        13.5,
+        if active {
+            bold_family()
+        } else {
+            egui::FontFamily::Proportional
+        },
+    );
+    let text_color = if active { t::ink() } else { t::sub() };
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font, text_color);
+    let badge_galley = (count > 0).then(|| {
+        ui.painter().layout_no_wrap(
+            count.to_string(),
+            egui::FontId::proportional(11.5),
+            if active { t::accent() } else { t::dim() },
+        )
+    });
+    let badge_w = badge_galley
+        .as_ref()
+        .map_or(0.0, |g| (g.size().x + 10.0).max(20.0) + 6.0);
+    let w = (galley.size().x + badge_w + 22.0).max(58.0);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(w, 28.0), egui::Sense::click());
+    let hover = motion::hover_amount(ui, response.id.with("seg_hover"), response.hovered());
+    if active {
+        ui.painter().rect(
+            rect,
+            motion::R,
+            t::surface(),
+            egui::Stroke::new(1.0, t::hairline()),
+            egui::StrokeKind::Inside,
+        );
+    } else if hover > 0.0 {
+        ui.painter()
+            .rect_filled(rect, motion::R, t::tint(t::wash(), 0.65 * hover));
+    }
+    let content_w = galley.size().x + badge_w;
+    let x = rect.center().x - content_w * 0.5;
+    let color = if active {
+        t::ink()
     } else {
-        label.to_string()
+        motion::mix(t::sub(), t::ink(), hover)
     };
-    ui.add(
-        egui::Button::new(egui::RichText::new(text).size(14.0).color(if active {
-            t::ink()
-        } else {
-            t::sub()
-        }))
-        .fill(if active {
-            t::wash()
-        } else {
-            egui::Color32::TRANSPARENT
-        })
-        .stroke(egui::Stroke::NONE)
-        .corner_radius(motion::R)
-        .min_size(egui::vec2(if count > 0 { 92.0 } else { 68.0 }, 32.0)),
-    )
+    ui.painter().galley(
+        egui::pos2(x, rect.center().y - galley.size().y * 0.5),
+        galley,
+        color,
+    );
+    if let Some(bg) = badge_galley {
+        let bw = (bg.size().x + 10.0).max(20.0);
+        let br = egui::Rect::from_center_size(
+            egui::pos2(x + content_w - bw * 0.5, rect.center().y),
+            egui::vec2(bw, 17.0),
+        );
+        ui.painter().rect_filled(
+            br,
+            8,
+            if active {
+                t::tint(t::accent(), 0.16)
+            } else {
+                t::tint(t::wash(), 0.85)
+            },
+        );
+        ui.painter().galley(
+            egui::pos2(
+                br.center().x - bg.size().x * 0.5,
+                br.center().y - bg.size().y * 0.5,
+            ),
+            bg,
+            if active { t::accent() } else { t::dim() },
+        );
+    }
+    response
 }
 
-/// 品类胶囊 / 已安装切换用的小按钮。
-pub(crate) fn chip(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response {
-    let (fill, color, border) = if selected {
-        (t::wash(), t::ink(), t::control())
+/// 下划线式次级标签（如 Mod / 资源包 / 光影），与分段主切换清晰区分。
+pub(crate) fn underline_tab(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
+    let font = egui::FontId::new(
+        13.5,
+        if active {
+            bold_family()
+        } else {
+            egui::FontFamily::Proportional
+        },
+    );
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font, t::ink());
+    let w = (galley.size().x + 20.0).max(52.0);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(w, 32.0), egui::Sense::click());
+    let hover = motion::hover_amount(ui, response.id.with("utab_hover"), response.hovered());
+    if !active && hover > 0.0 {
+        ui.painter().rect_filled(
+            rect.shrink2(egui::vec2(0.0, 2.0)),
+            motion::R,
+            t::tint(t::wash(), 0.5 * hover),
+        );
+    }
+    let color = if active {
+        t::ink()
     } else {
-        (egui::Color32::TRANSPARENT, t::sub(), t::hairline())
+        motion::mix(t::sub(), t::ink(), hover)
     };
-    ui.add(
-        egui::Button::new(egui::RichText::new(text).size(13.0).color(color))
-            .fill(fill)
-            .stroke(egui::Stroke::new(1.0, border))
-            .corner_radius(motion::R)
-            .min_size(egui::vec2(0.0, 28.0)),
-    )
+    ui.painter().galley(
+        egui::pos2(
+            rect.center().x - galley.size().x * 0.5,
+            rect.center().y - galley.size().y * 0.5 - 1.0,
+        ),
+        galley,
+        color,
+    );
+    if active {
+        let bar = egui::Rect::from_min_max(
+            egui::pos2(rect.left() + 8.0, rect.bottom() - 2.5),
+            egui::pos2(rect.right() - 8.0, rect.bottom() - 0.5),
+        );
+        ui.painter().rect_filled(bar, 1.5, t::accent());
+    }
+    response
+}
+
+/// 品类与选项胶囊：自定义绘制，高度和边距统一、选中带雾蓝轻底。
+pub(crate) fn chip(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response {
+    let font = egui::FontId::new(
+        13.0,
+        if selected {
+            bold_family()
+        } else {
+            egui::FontFamily::Proportional
+        },
+    );
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, t::ink());
+    let w = (galley.size().x + 22.0).max(40.0);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(w, 28.0), egui::Sense::click());
+    let hover = motion::hover_amount(ui, response.id.with("chip_hover"), response.hovered());
+    let (fill, border, color) = if selected {
+        (
+            t::tint(t::accent(), 0.14),
+            t::tint(t::accent(), 0.62),
+            t::ink(),
+        )
+    } else if response.is_pointer_button_down_on() {
+        (t::wash(), t::control(), t::ink())
+    } else {
+        (
+            motion::mix(t::tint(t::surface(), 0.55), t::wash(), hover),
+            motion::mix(t::hairline(), t::control(), hover),
+            motion::mix(t::sub(), t::ink(), hover),
+        )
+    };
+    ui.painter().rect(
+        rect,
+        motion::R,
+        fill,
+        egui::Stroke::new(1.0, border),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().galley(
+        egui::pos2(
+            rect.center().x - galley.size().x * 0.5,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        color,
+    );
+    response
 }
 
 /// 下载量用中文单位，避免卡片里塞一长串数字。
@@ -100,15 +280,31 @@ pub(crate) fn compact(count: u64) -> String {
 }
 
 pub(crate) fn quick_action(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    motion::secondary_sized(ui, text, true, 94.0, 30.0, 11.0)
+    motion::secondary_sized(ui, text, true, 88.0, 30.0, 11.0)
 }
 
 pub(crate) fn action_link(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    ui.add(
-        egui::Button::new(egui::RichText::new(text).size(13.0).color(t::sub()))
-            .fill(egui::Color32::TRANSPARENT)
-            .stroke(egui::Stroke::NONE),
-    )
+    let font = egui::FontId::proportional(13.0);
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, t::sub());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(galley.size().x + 12.0, 26.0),
+        egui::Sense::click(),
+    );
+    let hover = motion::hover_amount(ui, response.id.with("link_hover"), response.hovered());
+    if hover > 0.0 {
+        ui.painter()
+            .rect_filled(rect, motion::R, t::tint(t::wash(), 0.7 * hover));
+    }
+    let color = motion::mix(t::sub(), t::ink(), hover);
+    ui.painter().galley(
+        egui::pos2(
+            rect.center().x - galley.size().x * 0.5,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        color,
+    );
+    response
 }
 
 pub(crate) fn status_dot(ui: &mut egui::Ui, ok: bool) {
@@ -159,7 +355,7 @@ pub(crate) fn card() -> egui::Frame {
     egui::Frame::new()
         .fill(t::surface())
         .stroke(egui::Stroke::new(1.0, t::hairline()))
-        .corner_radius(motion::R)
+        .corner_radius(motion::R_CARD)
         .inner_margin(egui::Margin::same(18))
 }
 
@@ -171,12 +367,27 @@ pub(crate) fn skeleton_line(ui: &mut egui::Ui, height: f32) {
 }
 
 pub(crate) fn ghost_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    ui.add(
-        egui::Button::new(egui::RichText::new(text).size(13.0).color(t::sub()))
-            .fill(egui::Color32::TRANSPARENT)
-            .stroke(egui::Stroke::NONE)
-            .min_size(egui::vec2(58.0, 28.0)),
-    )
+    let font = egui::FontId::proportional(13.0);
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, t::sub());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2((galley.size().x + 18.0).max(56.0), 28.0),
+        egui::Sense::click(),
+    );
+    let hover = motion::hover_amount(ui, response.id.with("ghost_hover"), response.hovered());
+    if hover > 0.0 {
+        ui.painter()
+            .rect_filled(rect, motion::R, t::tint(t::wash(), 0.8 * hover));
+    }
+    let color = motion::mix(t::sub(), t::ink(), hover);
+    ui.painter().galley(
+        egui::pos2(
+            rect.center().x - galley.size().x * 0.5,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        color,
+    );
+    response
 }
 
 pub(crate) fn open_folder(path: &std::path::Path) {
@@ -304,18 +515,36 @@ pub(crate) fn primary_wide(ui: &mut egui::Ui, text: &str, enabled: bool, width: 
 }
 
 pub(crate) fn accent_outline(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    ui.add(
-        egui::Button::new(
-            egui::RichText::new(text)
-                .size(13.0)
-                .family(bold_family())
-                .color(t::accent()),
-        )
-        .fill(t::tint(t::accent(), 0.16))
-        .stroke(egui::Stroke::new(1.0, t::tint(t::accent(), 0.86)))
-        .corner_radius(motion::R)
-        .min_size(egui::vec2(88.0, 30.0)),
-    )
+    let font = egui::FontId::new(13.0, bold_family());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font, t::accent());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2((galley.size().x + 24.0).max(86.0), 30.0),
+        egui::Sense::click(),
+    );
+    let hover = motion::hover_amount(ui, response.id.with("acc_hover"), response.hovered());
+    let alpha = if response.is_pointer_button_down_on() {
+        0.26
+    } else {
+        0.13 + 0.08 * hover
+    };
+    ui.painter().rect(
+        rect,
+        motion::R,
+        t::tint(t::accent(), alpha),
+        egui::Stroke::new(1.0, t::tint(t::accent(), 0.65 + 0.25 * hover)),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().galley(
+        egui::pos2(
+            rect.center().x - galley.size().x * 0.5,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        t::accent(),
+    );
+    response
 }
 
 pub(crate) fn text_field(
@@ -324,7 +553,7 @@ pub(crate) fn text_field(
     hint: &str,
     width: f32,
 ) -> egui::Response {
-    ui.add(
+    let response = ui.add(
         egui::TextEdit::singleline(text)
             .hint_text(hint)
             .desired_width(width)
@@ -333,9 +562,19 @@ pub(crate) fn text_field(
                     .fill(t::surface())
                     .stroke(egui::Stroke::new(1.0, t::hairline()))
                     .corner_radius(motion::R)
-                    .inner_margin(egui::Margin::symmetric(9, 4)),
+                    .inner_margin(egui::Margin::symmetric(10, 6)),
             ),
-    )
+    );
+    motion::mark_custom_focus(ui.ctx(), response.id);
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            response.rect,
+            motion::R,
+            egui::Stroke::new(1.5, t::accent()),
+            egui::StrokeKind::Inside,
+        );
+    }
+    response
 }
 
 /// 按宽度从中间省略：路径的开头（盘符、用户目录）和结尾（具体是哪个版本）都留着。
@@ -458,7 +697,7 @@ pub(crate) fn path_row_with(
     (open, extra_clicked)
 }
 
-/// 搜索框：左边一个放大镜，有内容时右边一个清除按钮。
+/// 搜索框：左边放大镜（聚焦变雾蓝），自带聚焦高亮边，有内容时右边一个清除按钮。
 pub(crate) fn search_field(
     ui: &mut egui::Ui,
     text: &mut String,
@@ -475,29 +714,42 @@ pub(crate) fn search_field(
                     .stroke(egui::Stroke::new(1.0, t::hairline()))
                     .corner_radius(motion::R)
                     .inner_margin(egui::Margin {
-                        left: 28,
-                        right: 24,
-                        top: 5,
-                        bottom: 5,
+                        left: 30,
+                        right: 26,
+                        top: 6,
+                        bottom: 6,
                     }),
             ),
     );
+    motion::mark_custom_focus(ui.ctx(), response.id);
     let rect = response.rect;
-    let color = if response.has_focus() {
-        t::sub()
-    } else {
-        t::dim()
-    };
-    let c = egui::pos2(rect.left() + 14.0, rect.center().y - 1.0);
+    let focused = response.has_focus();
+    if focused {
+        ui.painter().rect_stroke(
+            rect,
+            motion::R,
+            egui::Stroke::new(1.5, t::accent()),
+            egui::StrokeKind::Inside,
+        );
+    } else if response.hovered() {
+        ui.painter().rect_stroke(
+            rect,
+            motion::R,
+            egui::Stroke::new(1.0, t::control()),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let color = if focused { t::accent() } else { t::dim() };
+    let c = egui::pos2(rect.left() + 14.5, rect.center().y - 1.0);
     let painter = ui.painter();
     painter.circle_stroke(c, 4.5, egui::Stroke::new(1.3, color));
     painter.line_segment(
-        [c + egui::vec2(3.3, 3.3), c + egui::vec2(6.6, 6.6)],
+        [c + egui::vec2(3.3, 3.3), c + egui::vec2(6.5, 6.5)],
         egui::Stroke::new(1.5, color),
     );
     if !text.is_empty() {
         let clear = egui::Rect::from_center_size(
-            egui::pos2(rect.right() - 12.0, rect.center().y),
+            egui::pos2(rect.right() - 13.0, rect.center().y),
             egui::vec2(18.0, 18.0),
         );
         if ui
@@ -568,32 +820,86 @@ pub(crate) fn tag_fill(ui: &mut egui::Ui, text: &str, color: egui::Color32, fill
 }
 
 pub(crate) fn small_accent(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    ui.add(
-        egui::Button::new(egui::RichText::new(text).size(13.0).color(t::accent()))
-            .fill(t::tint(t::accent(), 0.14))
-            .stroke(egui::Stroke::new(1.0, t::tint(t::accent(), 0.71)))
-            .corner_radius(motion::R)
-            .min_size(egui::vec2(44.0, 24.0)),
-    )
+    let font = egui::FontId::new(12.5, bold_family());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font, t::accent());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2((galley.size().x + 20.0).max(46.0), 26.0),
+        egui::Sense::click(),
+    );
+    let hover = motion::hover_amount(ui, response.id.with("sacc_hover"), response.hovered());
+    ui.painter().rect(
+        rect,
+        motion::R,
+        t::tint(t::accent(), 0.13 + 0.09 * hover),
+        egui::Stroke::new(1.0, t::tint(t::accent(), 0.6 + 0.25 * hover)),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().galley(
+        egui::pos2(
+            rect.center().x - galley.size().x * 0.5,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        t::accent(),
+    );
+    response
 }
 
 pub(crate) fn tiny_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    ui.add(
-        egui::Button::new(egui::RichText::new(text).size(13.0).color(t::sub()))
-            .fill(t::bg())
-            .stroke(egui::Stroke::new(1.0, t::hairline()))
-            .corner_radius(motion::R)
-            .min_size(egui::vec2(44.0, 24.0)),
-    )
+    let font = egui::FontId::proportional(12.5);
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, t::sub());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2((galley.size().x + 18.0).max(46.0), 26.0),
+        egui::Sense::click(),
+    );
+    let hover = motion::hover_amount(ui, response.id.with("tiny_hover"), response.hovered());
+    ui.painter().rect(
+        rect,
+        motion::R,
+        motion::mix(t::tint(t::bg(), 0.65), t::wash(), hover),
+        egui::Stroke::new(1.0, motion::mix(t::hairline(), t::control(), hover)),
+        egui::StrokeKind::Inside,
+    );
+    let color = motion::mix(t::sub(), t::ink(), hover);
+    ui.painter().galley(
+        egui::pos2(
+            rect.center().x - galley.size().x * 0.5,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        color,
+    );
+    response
 }
 
 pub(crate) fn danger_tiny(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    ui.add(
-        egui::Button::new(egui::RichText::new(text).size(13.0).color(t::danger()))
-            .fill(t::tint(t::danger(), 0.14))
-            .corner_radius(motion::R)
-            .min_size(egui::vec2(64.0, 24.0)),
-    )
+    let font = egui::FontId::new(12.5, bold_family());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font, t::danger());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2((galley.size().x + 20.0).max(64.0), 26.0),
+        egui::Sense::click(),
+    );
+    let hover = motion::hover_amount(ui, response.id.with("dtiny_hover"), response.hovered());
+    ui.painter().rect(
+        rect,
+        motion::R,
+        t::tint(t::danger(), 0.14 + 0.10 * hover),
+        egui::Stroke::new(1.0, t::tint(t::danger(), 0.65)),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().galley(
+        egui::pos2(
+            rect.center().x - galley.size().x * 0.5,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        t::danger(),
+    );
+    response
 }
 
 /// 危险操作的确认按钮：`danger` 色的字和细边，淡淡的底。只在二次确认时出现。
@@ -628,7 +934,17 @@ pub(crate) fn danger_button(
     response
 }
 
-/// 弹窗的外框：遮罩、`surface` 底、细边。返回（内容的返回值，点了遮罩或按了 Esc）。
+/// 统一的浮层弹窗框架：`R_MODAL` 圆角 + 柔和投影 + 细边。
+pub(crate) fn elevated_modal_frame() -> egui::Frame {
+    egui::Frame::new()
+        .fill(t::surface())
+        .stroke(egui::Stroke::new(1.0, t::hairline()))
+        .corner_radius(motion::R_MODAL)
+        .shadow(t::modal_shadow())
+        .inner_margin(egui::Margin::symmetric(26, 22))
+}
+
+/// 弹窗的外框：遮罩、`surface` 底、细边与柔和投影。返回（内容的返回值，点了遮罩或按了 Esc）。
 /// 新弹窗都用它，外观和关闭方式就一致了；别忘了把开关加进 `App::modal_open`。
 pub(crate) fn dialog<R>(
     ctx: &egui::Context,
@@ -638,13 +954,7 @@ pub(crate) fn dialog<R>(
 ) -> (R, bool) {
     let modal = egui::Modal::new(egui::Id::unique(("dialog", id)))
         .backdrop_color(t::veil(1.0))
-        .frame(
-            egui::Frame::new()
-                .fill(t::surface())
-                .stroke(egui::Stroke::new(1.0, t::hairline()))
-                .corner_radius(6)
-                .inner_margin(egui::Margin::symmetric(26, 22)),
-        )
+        .frame(elevated_modal_frame())
         .show(ctx, |ui| {
             ui.set_width(width);
             add(ui)

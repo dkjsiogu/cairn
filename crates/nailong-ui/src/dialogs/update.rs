@@ -374,13 +374,7 @@ impl App {
         let mut copy: Option<String> = None;
         let modal = egui::Modal::new(egui::Id::unique("update_modal"))
             .backdrop_color(t::veil(1.0))
-            .frame(
-                egui::Frame::new()
-                    .fill(t::surface())
-                    .stroke(egui::Stroke::new(1.0, t::hairline()))
-                    .corner_radius(motion::R)
-                    .inner_margin(egui::Margin::symmetric(24, 20)),
-            )
+            .frame(elevated_modal_frame())
             .show(ctx, |ui| {
                 ui.set_width(480.0);
                 ui.label(
@@ -397,7 +391,7 @@ impl App {
                 egui::Frame::new()
                     .fill(t::bg())
                     .stroke(egui::Stroke::new(1.0, t::hairline()))
-                    .corner_radius(motion::R)
+                    .corner_radius(motion::R_CARD)
                     .inner_margin(egui::Margin::symmetric(12, 10))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());

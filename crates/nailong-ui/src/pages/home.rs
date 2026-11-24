@@ -64,7 +64,7 @@ impl App {
                         egui::Frame::new()
                             .fill(t::surface())
                             .stroke(egui::Stroke::new(1.0, t::hairline()))
-                            .corner_radius(motion::R)
+                            .corner_radius(motion::R_CARD)
                             .inner_margin(egui::Margin::symmetric(24, 20))
                             .show(ui, |ui| {
                                 ui.set_width(content_w);
@@ -352,17 +352,30 @@ impl App {
                         } else {
                             loader
                         };
-                        child.label(
-                            egui::RichText::new(format!("{kind} · {status}"))
-                                .size(13.0)
-                                .color(if row.health.missing > 0 {
-                                    t::warn()
-                                } else if running {
-                                    t::accent()
-                                } else {
-                                    t::sub()
-                                }),
-                        );
+                        child.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 7.0;
+                            let dot_color = if row.health.missing > 0 {
+                                t::warn()
+                            } else if running {
+                                t::ok()
+                            } else {
+                                t::accent()
+                            };
+                            let (dot, _) =
+                                ui.allocate_exact_size(egui::vec2(8.0, 14.0), egui::Sense::hover());
+                            ui.painter().circle_filled(dot.center(), 3.2, dot_color);
+                            ui.label(
+                                egui::RichText::new(format!("{kind} · {status}"))
+                                    .size(13.0)
+                                    .color(if row.health.missing > 0 {
+                                        t::warn()
+                                    } else if running {
+                                        t::ok()
+                                    } else {
+                                        t::sub()
+                                    }),
+                            );
+                        });
                         // 版本名完整显示：放得下用大字，放不下按宽度缩小，太长才换成两行。
                         let (size, wrap) = fit_title(&child, &title, left.width());
                         let label = egui::Label::new(
@@ -437,66 +450,72 @@ impl App {
                             ui.add_space(overflow + 8.0);
                         }
 
-                        ui.add_space(if compact_h { 10.0 } else { 18.0 });
+                        ui.add_space(if compact_h { 8.0 } else { 14.0 });
 
-                        // 三栏摘要：细线分隔，整栏可点。
-                        let top = ui.cursor().top();
-                        ui.painter().line_segment(
-                            [egui::pos2(hero.left(), top), egui::pos2(hero.right(), top)],
-                            egui::Stroke::new(1.0, t::hairline()),
-                        );
-                        let cell_w = width / 3.0;
+                        // 三栏摘要卡片：独立轻表面，悬停边框微亮，整卡可点。
+                        let card_gap = 12.0;
+                        let cell_w = (width - card_gap * 2.0) / 3.0;
                         let (cells, _) =
-                            ui.allocate_exact_size(egui::vec2(width, 84.0), egui::Sense::hover());
-                        let world = match &cache.latest_world {
-                            Some(world) => {
-                                format!(
-                                    "{} · {}",
-                                    short_text(&world.name, 14),
-                                    human_age(world.modified)
-                                )
-                            }
-                            None => "还没有世界".to_string(),
+                            ui.allocate_exact_size(egui::vec2(width, 86.0), egui::Sense::hover());
+                        let (world_main, world_sub) = match &cache.latest_world {
+                            Some(world) => (short_text(&world.name, 14), human_age(world.modified)),
+                            None => ("还没有世界".to_string(), "进游戏后显示".to_string()),
                         };
-                        let content = if ring_data.update_names.is_empty() {
-                            format!("{} 个 Mod · {} 个资源包", cache.mods, cache.packs)
+                        let (content_main, content_sub) = if ring_data.update_names.is_empty() {
+                            (
+                                format!("{} 个 Mod", cache.mods),
+                                format!("{} 个资源包", cache.packs),
+                            )
                         } else {
-                            format!("{} 个 Mod 可更新", ring_data.update_names.len())
+                            (
+                                format!("{} 个可更新", ring_data.update_names.len()),
+                                format!("共 {} 个 Mod", cache.mods),
+                            )
                         };
-                        let backup = match &ring_data.latest_snapshot {
-                            Some(age) => format!("{} 个快照 · 最近 {age}", cache.snapshots),
-                            None => "还没有快照".to_string(),
+                        let (backup_main, backup_sub) = match &ring_data.latest_snapshot {
+                            Some(age) => {
+                                (format!("{} 个快照", cache.snapshots), format!("最近 {age}"))
+                            }
+                            None => ("还没有快照".to_string(), "打开存档页创建".to_string()),
                         };
-                        for (index, (name, detail)) in
-                            [("最近世界", world), ("内容", content), ("备份", backup)]
-                                .into_iter()
-                                .enumerate()
+                        let content_highlight = !ring_data.update_names.is_empty();
+                        for (index, (kicker, main, sub, accent_val)) in [
+                            ("最近世界", world_main, world_sub, false),
+                            ("内容", content_main, content_sub, content_highlight),
+                            ("备份", backup_main, backup_sub, false),
+                        ]
+                        .into_iter()
+                        .enumerate()
                         {
                             let rect = egui::Rect::from_min_size(
-                                cells.left_top() + egui::vec2(cell_w * index as f32, 0.0),
+                                cells.left_top()
+                                    + egui::vec2((cell_w + card_gap) * index as f32, 0.0),
                                 egui::vec2(cell_w, cells.height()),
                             );
-                            // 「最近世界」右边一个小按钮：启动后直接进这个世界。先占住它的位置，
-                            // 再画整栏，这样点按钮不会同时算成点了这一栏。
                             let enter = (index == 0).then_some(quick_world.as_ref()).flatten().map(
                                 |world| {
                                     let button = egui::Rect::from_center_size(
-                                        egui::pos2(rect.right() - 52.0, rect.center().y),
-                                        egui::vec2(72.0, 30.0),
+                                        egui::pos2(rect.right() - 48.0, rect.center().y + 6.0),
+                                        egui::vec2(68.0, 28.0),
                                     );
                                     (button, world)
                                 },
                             );
-                            let cell = summary_cell(ui, rect, name, &detail, index > 0);
+                            let cell = summary_cell(
+                                ui,
+                                rect,
+                                kicker,
+                                &main,
+                                &sub,
+                                accent_val,
+                                enter.is_none(),
+                            );
                             let mut on_button = false;
                             if let Some((button, world)) = enter {
-                                // 用子区域画，不动外面的排版位置。
                                 let mut child =
                                     ui.new_child(egui::UiBuilder::new().max_rect(button));
-                                let response = motion::secondary_sized(
-                                    &mut child, "进入", true, 72.0, 30.0, 13.0,
-                                )
-                                .on_hover_text(format!("开始游戏，直接进「{world}」"));
+                                let response = small_accent(&mut child, "▶ 进入")
+                                    .on_hover_text(format!("开始游戏，直接进「{world}」"));
                                 on_button = response.hovered();
                                 if response.clicked() {
                                     enter_world = true;
@@ -897,43 +916,77 @@ fn switch_row(
     }
 }
 
-/// 启动台的一栏摘要。
+/// 启动台的一张摘要卡片：轻表面 + 三层信息层级 + 悬停微亮箭头。
 pub(crate) fn summary_cell(
     ui: &mut egui::Ui,
     rect: egui::Rect,
-    title: &str,
-    detail: &str,
-    divider: bool,
+    kicker: &str,
+    main: &str,
+    sub: &str,
+    accent_main: bool,
+    show_chevron: bool,
 ) -> egui::Response {
     let response = ui.interact(
         rect,
-        egui::Id::unique("summary_cell").with(title),
+        egui::Id::unique("summary_cell").with(kicker),
         egui::Sense::click(),
     );
     let hover = motion::hover_amount(ui, response.id.with("hover"), response.hovered());
-    if hover > 0.0 {
-        ui.painter()
-            .rect_filled(rect.shrink(4.0), motion::R, t::tint(t::wash(), hover));
-    }
-    if divider {
-        ui.painter().line_segment(
-            [rect.left_top(), rect.left_bottom()],
-            egui::Stroke::new(1.0, t::hairline()),
+    let fill = if response.is_pointer_button_down_on() {
+        motion::mix(t::wash(), t::control(), 0.25)
+    } else {
+        motion::mix(t::surface(), t::wash(), 0.7 * hover)
+    };
+    ui.painter().rect(
+        rect,
+        motion::R_CARD,
+        fill,
+        egui::Stroke::new(1.0, motion::mix(t::hairline(), t::control(), hover)),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().line_segment(
+        [
+            egui::pos2(rect.left() + motion::R_CARD as f32, rect.top() + 1.0),
+            egui::pos2(rect.right() - motion::R_CARD as f32, rect.top() + 1.0),
+        ],
+        egui::Stroke::new(1.0, t::rim()),
+    );
+    let left = rect.left() + 16.0;
+    ui.painter().text(
+        egui::pos2(left, rect.top() + 13.0),
+        egui::Align2::LEFT_TOP,
+        kicker,
+        egui::FontId::proportional(12.0),
+        t::dim(),
+    );
+    if show_chevron {
+        ui.painter().text(
+            egui::pos2(rect.right() - 14.0, rect.top() + 12.0),
+            egui::Align2::RIGHT_TOP,
+            "›",
+            egui::FontId::proportional(15.0),
+            motion::mix(t::dim(), t::ink(), hover),
         );
     }
-    let left = rect.left() + if divider { 18.0 } else { 8.0 };
+    let main_color = if accent_main { t::accent() } else { t::ink() };
+    let main_font = egui::FontId::new(15.0, bold_family());
+    let max_main_w = if show_chevron {
+        rect.width() - 32.0
+    } else {
+        (rect.width() - 104.0).max(80.0)
+    };
     ui.painter().text(
-        egui::pos2(left, rect.top() + 18.0),
+        egui::pos2(left, rect.top() + 33.0),
         egui::Align2::LEFT_TOP,
-        title,
-        egui::FontId::new(15.0, bold_family()),
-        t::ink(),
+        elide_middle(ui, main, &main_font, max_main_w),
+        main_font,
+        main_color,
     );
     ui.painter().text(
-        egui::pos2(left, rect.top() + 44.0),
+        egui::pos2(left, rect.top() + 57.0),
         egui::Align2::LEFT_TOP,
-        detail,
-        egui::FontId::proportional(13.0),
+        sub,
+        egui::FontId::proportional(12.5),
         t::sub(),
     );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)

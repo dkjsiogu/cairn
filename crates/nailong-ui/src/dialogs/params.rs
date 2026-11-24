@@ -6,38 +6,70 @@
 
 use crate::prelude::*;
 
-/// 一个参数胶囊：上面的标签小、下面的值清楚；单独设置过的有强调色边框。
-fn pill(ui: &mut egui::Ui, label: &str, value: &str, custom: bool, warn: bool) -> egui::Response {
-    let mut job = egui::text::LayoutJob::default();
-    job.append(
-        label,
-        0.0,
-        egui::TextFormat::simple(egui::FontId::proportional(12.0), t::dim()),
-    );
-    job.append(
-        value,
-        6.0,
-        egui::TextFormat::simple(
-            egui::FontId::proportional(13.0),
-            if warn { t::warn() } else { t::ink() },
-        ),
-    );
-    let stroke = if custom {
-        t::tint(t::accent(), 0.7)
+/// 规格条里的一段：标签小、值清晰；单独覆写过的项带雾蓝小圆点。
+fn spec_segment(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &str,
+    custom: bool,
+    warn: bool,
+) -> egui::Response {
+    let label_galley = (!label.is_empty()).then(|| {
+        ui.painter()
+            .layout_no_wrap(label.to_owned(), egui::FontId::proportional(12.0), t::dim())
+    });
+    let val_color = if warn {
+        t::warn()
+    } else if label.is_empty() {
+        t::sub()
     } else {
-        t::hairline()
+        t::ink()
     };
-    let response = ui.add(
-        egui::Button::new(job)
-            .fill(egui::Color32::TRANSPARENT)
-            .stroke(egui::Stroke::new(1.0, stroke))
-            .corner_radius(motion::R)
-            .min_size(egui::vec2(0.0, 26.0)),
+    let val_galley = ui.painter().layout_no_wrap(
+        value.to_owned(),
+        egui::FontId::proportional(12.5),
+        val_color,
     );
-    if response.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    let dot_w = if custom { 10.0 } else { 0.0 };
+    let label_w = label_galley.as_ref().map_or(0.0, |g| g.size().x + 5.0);
+    let w = dot_w + label_w + val_galley.size().x + 16.0;
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(w, 26.0), egui::Sense::click());
+    let hover = motion::hover_amount(ui, response.id.with("spec_hover"), response.hovered());
+    if hover > 0.0 {
+        ui.painter()
+            .rect_filled(rect, motion::R - 2, t::tint(t::wash(), 0.9 * hover));
     }
-    response
+    let mut x = rect.left() + 8.0;
+    if custom {
+        ui.painter()
+            .circle_filled(egui::pos2(x + 3.0, rect.center().y), 2.5, t::accent());
+        x += 10.0;
+    }
+    if let Some(lg) = label_galley {
+        let lw = lg.size().x;
+        ui.painter().galley(
+            egui::pos2(x, rect.center().y - lg.size().y * 0.5),
+            lg,
+            t::dim(),
+        );
+        x += lw + 5.0;
+    }
+    let vc = if label.is_empty() {
+        motion::mix(t::sub(), t::ink(), hover)
+    } else {
+        val_color
+    };
+    ui.painter().galley(
+        egui::pos2(x, rect.center().y - val_galley.size().y * 0.5),
+        val_galley,
+        vc,
+    );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+fn spec_divider(ui: &mut egui::Ui) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(1.0, 14.0), egui::Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, t::hairline());
 }
 
 impl App {
@@ -56,86 +88,99 @@ impl App {
         });
     }
 
-    /// 启动台上「开始游戏」下面的一排：这次会怎么启动。点了打开启动参数窗口。
+    /// 启动台上「开始游戏」下面的一条统一参数规格栏：点了打开启动参数窗口。
     pub(crate) fn launch_pills(&mut self, ui: &mut egui::Ui, row: &Row) {
         let cfg = self.version_cfg(&row.id);
         let planned = self.plan_for(row, &cfg);
         let mut open = false;
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-            let (java, java_warn) = match (&planned, &cfg.java) {
-                (Some((_, java)), _) => (format!("Java {}", java.major), false),
-                (None, Some(_)) => ("指定的 Java 不可用".to_string(), true),
-                (None, None) => ("没有合适的 Java".to_string(), true),
-            };
-            let java_tip = match &planned {
-                Some((_, java)) => format!("{}\n{}", java.label(), java.path.display()),
-                None => "在启动参数里选一个 Java".to_string(),
-            };
-            if pill(ui, "Java", &java, cfg.java.is_some(), java_warn)
-                .on_hover_text(java_tip)
-                .clicked()
-            {
-                open = true;
-            }
-            if let Some((plan, _)) = &planned {
-                let memory = if plan.auto_memory {
-                    format!("{} 自动", tuning::gb(plan.heap_mb))
-                } else {
-                    tuning::gb(plan.heap_mb)
-                };
-                if pill(ui, "内存", &memory, cfg.memory.is_some(), false)
-                    .on_hover_text(&plan.basis)
+        egui::Frame::new()
+            .fill(t::surface())
+            .stroke(egui::Stroke::new(1.0, t::hairline()))
+            .corner_radius(motion::R)
+            .inner_margin(egui::Margin::symmetric(3, 2))
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
+                    let (java, java_warn) = match (&planned, &cfg.java) {
+                        (Some((_, java)), _) => (format!("{}", java.major), false),
+                        (None, Some(_)) => ("不可用".to_string(), true),
+                        (None, None) => ("缺失".to_string(), true),
+                    };
+                    let java_tip = match &planned {
+                        Some((_, java)) => format!("{}\n{}", java.label(), java.path.display()),
+                        None => "在启动参数里选择 Java".to_string(),
+                    };
+                    if spec_segment(ui, "Java", &java, cfg.java.is_some(), java_warn)
+                        .on_hover_text(java_tip)
+                        .clicked()
+                    {
+                        open = true;
+                    }
+                    if let Some((plan, _)) = &planned {
+                        spec_divider(ui);
+                        let memory = if plan.auto_memory {
+                            format!("{} 自动", tuning::gb(plan.heap_mb))
+                        } else {
+                            tuning::gb(plan.heap_mb)
+                        };
+                        if spec_segment(ui, "内存", &memory, cfg.memory.is_some(), false)
+                            .on_hover_text(&plan.basis)
+                            .clicked()
+                        {
+                            open = true;
+                        }
+                        spec_divider(ui);
+                        let gc = cfg.gc.unwrap_or(self.prefs.gc);
+                        let collector = if gc == tuning::GcChoice::Auto {
+                            format!("{} 自动", plan.collector.label())
+                        } else {
+                            plan.collector.label().to_string()
+                        };
+                        if spec_segment(ui, "GC", &collector, cfg.gc.is_some(), false)
+                            .on_hover_text("垃圾回收器")
+                            .clicked()
+                        {
+                            open = true;
+                        }
+                    }
+                    spec_divider(ui);
+                    let [width, height] = cfg.window();
+                    if spec_segment(
+                        ui,
+                        "窗口",
+                        &format!("{width}×{height}"),
+                        cfg.window.is_some(),
+                        false,
+                    )
                     .clicked()
-                {
-                    open = true;
-                }
-                let gc = cfg.gc.unwrap_or(self.prefs.gc);
-                let collector = if gc == tuning::GcChoice::Auto {
-                    format!("{} 自动", plan.collector.label())
-                } else {
-                    plan.collector.label().to_string()
-                };
-                if pill(ui, "GC", &collector, cfg.gc.is_some(), false)
-                    .on_hover_text("垃圾回收器")
-                    .clicked()
-                {
-                    open = true;
-                }
-            }
-            let [width, height] = cfg.window();
-            if pill(
-                ui,
-                "窗口",
-                &format!("{width}×{height}"),
-                cfg.window.is_some(),
-                false,
-            )
-            .clicked()
-            {
-                open = true;
-            }
-            let extra = tuning::split_args(cfg.jvm_args.as_deref().unwrap_or(&self.prefs.jvm_args));
-            if !extra.is_empty() || cfg.jvm_args.is_some() {
-                let value = if extra.is_empty() {
-                    "无".to_string()
-                } else {
-                    format!("{} 个", extra.len())
-                };
-                if pill(ui, "JVM 参数", &value, cfg.jvm_args.is_some(), false)
-                    .on_hover_text(extra.join(" "))
-                    .clicked()
-                {
-                    open = true;
-                }
-            }
-            if pill(ui, "", "调整", false, false)
-                .on_hover_text("改这个版本的 Java、内存、回收器和窗口，看完整命令行")
-                .clicked()
-            {
-                open = true;
-            }
-        });
+                    {
+                        open = true;
+                    }
+                    let extra =
+                        tuning::split_args(cfg.jvm_args.as_deref().unwrap_or(&self.prefs.jvm_args));
+                    if !extra.is_empty() || cfg.jvm_args.is_some() {
+                        spec_divider(ui);
+                        let value = if extra.is_empty() {
+                            "无".to_string()
+                        } else {
+                            format!("{} 个", extra.len())
+                        };
+                        if spec_segment(ui, "参数", &value, cfg.jvm_args.is_some(), false)
+                            .on_hover_text(extra.join(" "))
+                            .clicked()
+                        {
+                            open = true;
+                        }
+                    }
+                    spec_divider(ui);
+                    if spec_segment(ui, "", "调整 ›", false, false)
+                        .on_hover_text("修改启动参数与查看完整命令行")
+                        .clicked()
+                    {
+                        open = true;
+                    }
+                });
+            });
         if open {
             self.open_launch_edit(row);
         }
@@ -171,13 +216,7 @@ impl App {
         let width = (screen.width() - 120.0).clamp(520.0, 680.0);
         let modal = egui::Modal::new(egui::Id::unique("launch_modal"))
             .backdrop_color(t::veil(1.0))
-            .frame(
-                egui::Frame::new()
-                    .fill(t::surface())
-                    .stroke(egui::Stroke::new(1.0, t::hairline()))
-                    .corner_radius(motion::R)
-                    .inner_margin(egui::Margin::symmetric(24, 20)),
-            )
+            .frame(elevated_modal_frame())
             .show(ctx, |ui| {
                 ui.set_width(width);
                 ui.horizontal(|ui| {

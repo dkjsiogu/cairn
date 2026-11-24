@@ -368,20 +368,22 @@ impl App {
                 });
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
-                    for (tab, label) in [
-                        (GalleryTab::Overview, "总览"),
-                        (GalleryTab::Time, "时间"),
-                        (GalleryTab::Places, "地点"),
-                        (GalleryTab::People, "人物"),
-                    ] {
-                        if content_tab(ui, label, 0, self.gallery.tab == tab).clicked() {
-                            self.gallery.tab = tab;
-                            if tab != GalleryTab::Time {
-                                self.gallery.filter = Filter::default();
-                                self.gallery.query.clear();
+                    segmented_bar(ui, |ui| {
+                        for (tab, label) in [
+                            (GalleryTab::Overview, "总览"),
+                            (GalleryTab::Time, "时间"),
+                            (GalleryTab::Places, "地点"),
+                            (GalleryTab::People, "人物"),
+                        ] {
+                            if content_tab(ui, label, 0, self.gallery.tab == tab).clicked() {
+                                self.gallery.tab = tab;
+                                if tab != GalleryTab::Time {
+                                    self.gallery.filter = Filter::default();
+                                    self.gallery.query.clear();
+                                }
                             }
                         }
-                    }
+                    });
                     if self.gallery.tab == GalleryTab::Time {
                         ui.add_space(10.0);
                         self.filter_chips(ui);
@@ -521,39 +523,46 @@ impl App {
                                 GalleryTab::People,
                             ),
                         ];
-                        let cell_w = width / cells.len() as f32;
                         let (row, _) =
-                            ui.allocate_exact_size(egui::vec2(width, 64.0), egui::Sense::hover());
+                            ui.allocate_exact_size(egui::vec2(width, 68.0), egui::Sense::hover());
+                        ui.painter().rect(
+                            row,
+                            motion::R_CARD,
+                            t::surface(),
+                            egui::Stroke::new(1.0, t::hairline()),
+                            egui::StrokeKind::Inside,
+                        );
+                        let cell_w = width / cells.len() as f32;
                         for (i, (value, label, tab)) in cells.iter().enumerate() {
                             let rect = egui::Rect::from_min_size(
                                 egui::pos2(row.left() + i as f32 * cell_w, row.top()),
-                                egui::vec2(cell_w, 64.0),
+                                egui::vec2(cell_w, 68.0),
                             );
                             let response = ui.interact(
                                 rect,
                                 egui::Id::unique(("overview_cell", i)),
                                 egui::Sense::click(),
                             );
-                            list_row_fill(ui, rect.shrink(2.0), false, &response);
+                            list_row_fill(ui, rect.shrink(4.0), false, &response);
                             if i > 0 {
                                 ui.painter().vline(
                                     rect.left(),
-                                    rect.y_range().shrink(10.0),
+                                    rect.y_range().shrink(12.0),
                                     egui::Stroke::new(1.0, t::hairline()),
                                 );
                             }
                             ui.painter().text(
-                                rect.left_top() + egui::vec2(14.0, 12.0),
+                                rect.left_top() + egui::vec2(16.0, 12.0),
                                 egui::Align2::LEFT_TOP,
                                 value,
                                 egui::FontId::new(20.0, light_family()),
                                 t::ink(),
                             );
                             ui.painter().text(
-                                rect.left_top() + egui::vec2(14.0, 40.0),
+                                rect.left_top() + egui::vec2(16.0, 42.0),
                                 egui::Align2::LEFT_TOP,
                                 label,
-                                egui::FontId::proportional(13.0),
+                                egui::FontId::proportional(12.5),
                                 t::dim(),
                             );
                             if response
@@ -595,7 +604,7 @@ impl App {
                                 crate::pages::shots::place_line(shot)
                             );
                             if shots
-                                .tile(ui, "recent", shot, rect, 3, Some(hover))
+                                .tile(ui, "recent", shot, rect, 6, Some(hover))
                                 .clicked()
                             {
                                 open = Some((seq.clone(), shot.path.clone(), rect));

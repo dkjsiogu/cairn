@@ -307,21 +307,28 @@ impl App {
             }
         }
         ui.add_space(6.0);
-        if motion::secondary_sized(ui, "复制", self.busy.is_none(), 64.0, 34.0, 12.0)
-            .on_hover_text("复制一份，试新 Mod 前留个备份")
+        if motion::secondary_sized(ui, "启动参数", true, 78.0, 34.0, 12.0)
+            .on_hover_text("修改此版本的 Java、内存、回收器与窗口")
+            .clicked()
+        {
+            self.open_launch_edit(row);
+        }
+        ui.add_space(6.0);
+        if motion::secondary_sized(ui, "复制", self.busy.is_none(), 58.0, 34.0, 12.0)
+            .on_hover_text("复制一份此版本")
             .clicked()
         {
             self.open_duplicate(row);
         }
         ui.add_space(6.0);
-        if motion::secondary_sized(ui, "导出整合包", self.busy.is_none(), 96.0, 34.0, 12.0)
-            .on_hover_text("网上能下到的 Mod 只记地址，别的打包进去")
+        if motion::secondary_sized(ui, "导出整合包", self.busy.is_none(), 92.0, 34.0, 12.0)
+            .on_hover_text("导出为 .mrpack 整合包")
             .clicked()
         {
             self.open_export(row);
         }
         ui.add_space(6.0);
-        if motion::secondary_sized(ui, "打开目录", true, 78.0, 34.0, 12.0).clicked() {
+        if motion::secondary_sized(ui, "打开目录", true, 76.0, 34.0, 12.0).clicked() {
             *open_dir = Some(row.game_dir.clone());
         }
     }
@@ -638,19 +645,22 @@ impl App {
                         egui::Frame::new()
                             .fill(t::surface())
                             .stroke(egui::Stroke::new(1.0, t::hairline()))
-                            .corner_radius(motion::R)
-                            .inner_margin(egui::Margin::symmetric(10, 8))
+                            .corner_radius(motion::R_CARD)
+                            .inner_margin(egui::Margin::symmetric(10, 10))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 2.0;
+                                    ui.spacing_mut().item_spacing.x = 0.0;
                                     // 数字就是入口：点 Mod 去内容页，点存档去存档页。
-                                    for (value, label, kind) in [
+                                    for (idx, (value, label, kind)) in [
                                         (mods, "Mod", Some(mods::ContentKind::Mod)),
                                         (packs, "资源包", Some(mods::ContentKind::ResourcePack)),
                                         (shaders, "光影", Some(mods::ContentKind::Shader)),
                                         (worlds, "存档", None),
-                                    ] {
-                                        if stat_button(ui, value, label).clicked() {
+                                    ]
+                                    .into_iter()
+                                    .enumerate()
+                                    {
+                                        if stat_button(ui, value, label, idx > 0).clicked() {
                                             match kind {
                                                 Some(kind) => go_content = Some(kind),
                                                 None => go_worlds = true,
@@ -706,11 +716,13 @@ impl App {
                         egui::Frame::new()
                             .fill(t::surface())
                             .stroke(egui::Stroke::new(1.0, t::hairline()))
-                            .corner_radius(motion::R)
+                            .corner_radius(motion::R_CARD)
                             .inner_margin(egui::Margin::symmetric(16, 14))
                             .show(ui, |ui| {
                                 self.name_line(ui, &row);
-                                ui.add_space(8.0);
+                                ui.add_space(6.0);
+                                ui.separator();
+                                ui.add_space(6.0);
                                 info_line(
                                     ui,
                                     "加载器",
@@ -722,10 +734,14 @@ impl App {
                                     },
                                 );
                                 if let Some(pack) = &row.pack {
-                                    ui.add_space(8.0);
+                                    ui.add_space(6.0);
+                                    ui.separator();
+                                    ui.add_space(6.0);
                                     info_line(ui, "整合包", pack);
                                 }
-                                ui.add_space(8.0);
+                                ui.add_space(6.0);
+                                ui.separator();
+                                ui.add_space(6.0);
                                 let dir = row.game_dir.clone();
                                 ui.horizontal(|ui| {
                                     if path_row(ui, "文件夹", &dir) {
@@ -1030,7 +1046,7 @@ impl App {
                                     egui::Frame::new()
                                         .fill(t::surface())
                                         .stroke(egui::Stroke::new(1.0, t::hairline()))
-                                        .corner_radius(motion::R)
+                                        .corner_radius(motion::R_CARD)
                                         .inner_margin(egui::Margin::symmetric(20, 18))
                                         .show(ui, |ui| {
                                             ui.set_width(left_w - 40.0);
@@ -1180,7 +1196,7 @@ impl App {
                                     egui::Frame::new()
                                         .fill(t::surface())
                                         .stroke(egui::Stroke::new(1.0, t::hairline()))
-                                        .corner_radius(motion::R)
+                                        .corner_radius(motion::R_CARD)
                                         .inner_margin(egui::Margin::symmetric(18, 18))
                                         .show(ui, |ui| {
                                             ui.set_width(right_w - 36.0);
@@ -1279,13 +1295,17 @@ impl App {
                         ui.add_space(16.0);
                         let hovering = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
                         egui::Frame::new()
-                            .fill(t::bg())
+                            .fill(if hovering {
+                                t::tint(t::accent(), 0.08)
+                            } else {
+                                t::surface()
+                            })
                             .stroke(egui::Stroke::new(
-                                1.0,
+                                if hovering { 1.5 } else { 1.0 },
                                 if hovering { t::accent() } else { t::hairline() },
                             ))
-                            .corner_radius(motion::R)
-                            .inner_margin(egui::Margin::symmetric(18, 12))
+                            .corner_radius(motion::R_CARD)
+                            .inner_margin(egui::Margin::symmetric(18, 14))
                             .show(ui, |ui| {
                                 ui.set_width(width - 36.0);
                                 ui.horizontal(|ui| {
@@ -1446,18 +1466,26 @@ impl App {
 }
 
 /// 版本详情里一格能点的数字：大一点的数，下面是它是什么。
-fn stat_button(ui: &mut egui::Ui, value: usize, label: &str) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(84.0, 50.0), egui::Sense::click());
-    list_row_fill(ui, rect, false, &response);
+fn stat_button(ui: &mut egui::Ui, value: usize, label: &str, divider: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(84.0, 52.0), egui::Sense::click());
+    let hover = motion::hover_amount(ui, response.id.with("stat_hover"), response.hovered());
+    if divider {
+        ui.painter().vline(
+            rect.left(),
+            rect.y_range().shrink(10.0),
+            egui::Stroke::new(1.0, t::hairline()),
+        );
+    }
+    list_row_fill(ui, rect.shrink2(egui::vec2(3.0, 1.0)), false, &response);
     ui.painter().text(
-        rect.left_top() + egui::vec2(10.0, 8.0),
+        rect.left_top() + egui::vec2(12.0, 7.0),
         egui::Align2::LEFT_TOP,
         value.to_string(),
-        egui::FontId::new(17.0, bold_family()),
-        t::ink(),
+        egui::FontId::new(18.0, bold_family()),
+        motion::mix(t::ink(), t::accent(), hover),
     );
     ui.painter().text(
-        rect.left_top() + egui::vec2(10.0, 30.0),
+        rect.left_top() + egui::vec2(12.0, 31.0),
         egui::Align2::LEFT_TOP,
         label,
         egui::FontId::proportional(12.5),
@@ -1480,19 +1508,29 @@ pub(crate) fn loader_tile(
     } else {
         egui::Sense::hover()
     };
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 58.0), sense);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 62.0), sense);
     let hover = motion::hover_amount(ui, response.id.with("hover"), enabled && response.hovered());
-    ui.painter().rect(
-        rect,
-        motion::R,
-        if selected {
-            t::wash()
-        } else {
-            t::tint(t::wash(), hover)
-        },
-        egui::Stroke::new(1.0, if selected { t::accent() } else { t::hairline() }),
-        egui::StrokeKind::Inside,
-    );
+    let fill = if selected {
+        t::tint(t::accent(), 0.13)
+    } else if hover > 0.0 {
+        t::tint(t::wash(), hover)
+    } else {
+        t::bg()
+    };
+    let border = if selected {
+        egui::Stroke::new(1.5, t::accent())
+    } else {
+        egui::Stroke::new(1.0, motion::mix(t::hairline(), t::control(), hover))
+    };
+    ui.painter()
+        .rect(rect, motion::R, fill, border, egui::StrokeKind::Inside);
+    if selected {
+        ui.painter().circle_filled(
+            egui::pos2(rect.right() - 10.0, rect.top() + 10.0),
+            3.2,
+            t::accent(),
+        );
+    }
     let sub = if enabled && !subtitle.is_empty() {
         subtitle.to_string()
     } else if enabled {
@@ -1504,15 +1542,22 @@ pub(crate) fn loader_tile(
         rect.left_top() + egui::vec2(12.0, 12.0),
         egui::Align2::LEFT_TOP,
         kind.name(),
-        egui::FontId::proportional(14.0),
+        egui::FontId::new(
+            14.0,
+            if selected {
+                bold_family()
+            } else {
+                egui::FontFamily::Proportional
+            },
+        ),
         if enabled { t::ink() } else { t::dim() },
     );
     ui.painter().text(
-        rect.left_top() + egui::vec2(12.0, 32.0),
+        rect.left_top() + egui::vec2(12.0, 34.0),
         egui::Align2::LEFT_TOP,
         sub,
-        egui::FontId::proportional(13.0),
-        t::sub(),
+        egui::FontId::proportional(12.5),
+        if selected { t::accent() } else { t::sub() },
     );
     response
 }
@@ -1528,7 +1573,8 @@ enum RowAction {
     Delete,
 }
 
-/// 版本列表的一行：名字、游戏版本和加载器；右边是「运行中」或者上次什么时候玩的。
+/// 版本列表的一行：名字、游戏版本和加载器；第一行右侧留给「运行中」或上次游玩时间，
+/// 第二行占满整行宽度避免过早截断加载器版本号。
 pub(crate) fn version_row(
     ui: &mut egui::Ui,
     row: &Row,
@@ -1536,52 +1582,72 @@ pub(crate) fn version_row(
     note: Option<(String, bool)>,
 ) -> egui::Response {
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 54.0), egui::Sense::click());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 56.0), egui::Sense::click());
     list_row_fill(ui, rect, active, &response);
-    let inner = rect.shrink2(egui::vec2(12.0, 8.0));
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(inner)
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-    );
-    child.spacing_mut().item_spacing.x = 10.0;
+    if active {
+        active_accent_bar(ui.painter(), rect);
+    }
+    let dot_pos = egui::pos2(rect.left() + 18.0, rect.top() + 20.0);
     match &note {
         Some((_, true)) => {
-            let (dot, _) = child.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
-            child
-                .painter()
-                .circle_filled(dot.center(), 3.5, t::accent());
+            ui.painter()
+                .circle_filled(dot_pos, 6.0, t::tint(t::ok(), 0.22));
+            ui.painter().circle_filled(dot_pos, 3.2, t::ok());
         }
-        _ => status_dot(&mut child, row.health.missing == 0),
-    }
-    if let Some((text, running)) = &note {
-        let font = egui::FontId::proportional(12.0);
-        child.painter().text(
-            egui::pos2(inner.right(), inner.top() + 9.0),
-            egui::Align2::RIGHT_CENTER,
-            text,
-            font,
-            if *running { t::accent() } else { t::dim() },
-        );
-    }
-    child.vertical(|ui| {
-        // 右上角留给「运行中」「3 天前玩过」。
-        if note.is_some() {
-            ui.set_max_width(inner.width() - 92.0);
+        _ => {
+            ui.painter().circle_filled(
+                dot_pos,
+                3.2,
+                if row.health.missing == 0 {
+                    t::ok()
+                } else {
+                    t::warn()
+                },
+            );
         }
-        ui.spacing_mut().item_spacing.y = 2.0;
-        // 列表里放不下就省略，悬停整行看全名。
-        ui.add(egui::Label::new(egui::RichText::new(&row.id).size(14.0)).truncate());
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(row_kind(row))
-                    .size(13.0)
-                    .color(t::sub()),
-            )
-            .truncate(),
-        );
-    });
-    response.on_hover_text(format!("{}\n{}", row.id, row_kind(row)))
+    }
+    let text_left = rect.left() + 30.0;
+    let right_edge = rect.right() - 12.0;
+    let note_w = if let Some((text, running)) = &note {
+        let font = egui::FontId::proportional(11.5);
+        let color = if *running { t::ok() } else { t::dim() };
+        let galley = ui.painter().layout_no_wrap(text.clone(), font, color);
+        let w = galley.size().x;
+        ui.painter()
+            .galley(egui::pos2(right_edge - w, rect.top() + 12.0), galley, color);
+        w + 8.0
+    } else {
+        0.0
+    };
+    let name_font = egui::FontId::new(
+        14.0,
+        if active {
+            bold_family()
+        } else {
+            egui::FontFamily::Proportional
+        },
+    );
+    let name_w = (right_edge - text_left - note_w).max(60.0);
+    let name_shown = elide_middle(ui, &row.id, &name_font, name_w);
+    ui.painter().text(
+        egui::pos2(text_left, rect.top() + 19.0),
+        egui::Align2::LEFT_CENTER,
+        name_shown,
+        name_font,
+        t::ink(),
+    );
+    let kind_font = egui::FontId::proportional(12.5);
+    let kind_text = row_kind(row);
+    let kind_w = (right_edge - text_left).max(80.0);
+    let kind_shown = elide_middle(ui, &kind_text, &kind_font, kind_w);
+    ui.painter().text(
+        egui::pos2(text_left, rect.top() + 39.0),
+        egui::Align2::LEFT_CENTER,
+        kind_shown,
+        kind_font,
+        t::sub(),
+    );
+    response.on_hover_text(format!("{}\n{}", row.id, kind_text))
 }
 
 /// 版本名下面那一行：`1.21.1 · NeoForge 21.1.209`，整合包前面加上「整合包」。

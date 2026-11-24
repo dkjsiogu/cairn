@@ -8,7 +8,7 @@
 
 **简体中文** | [English](README.en.md)
 
-> 当前版本：**0.45.2**（预览版） · [完整更新日志](CHANGELOG.md) · [实现状态与边界](docs/design/14-implementation-status.md)
+> 当前版本：**0.46.0**（预览版） · [完整更新日志](CHANGELOG.md) · [实现状态与边界](docs/design/14-implementation-status.md)
 
 ## 为什么是 Cairn
 
@@ -74,7 +74,7 @@
 | 平台 | 文件 | 大小 | 要求 |
 |---|---|---:|---|
 | Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | 约 9 MB | Windows 10/11 |
-| Linux x64 (deb) | [cairn_0.45.2_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.45.2_amd64.deb) | 约 3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39 |
+| Linux x64 (deb) | [cairn_0.46.0_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.46.0_amd64.deb) | 约 3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39 |
 
 校验值：[SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS)（缺少 Java 时启动器可自动下载官方运行时）。
 
@@ -97,7 +97,7 @@ sudo apt update && sudo apt install cairn
 或直接安装 `.deb`（会自动添加上述 apt 源，并替换旧的 `nailong` 包）：
 
 ```bash
-sudo apt install ./cairn_0.45.2_amd64.deb
+sudo apt install ./cairn_0.46.0_amd64.deb
 ```
 
 数据默认位于 `~/.local/share/cairn/.minecraft`（启动器也可用 `--root <目录>` 指定目录，或在设置中切换至已有 `.minecraft`）。如需彻底关闭系统后台更新：`sudo rm /etc/apt/apt.conf.d/52cairn-auto-update`；卸载：`sudo apt remove cairn`。

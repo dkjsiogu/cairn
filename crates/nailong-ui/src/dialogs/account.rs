@@ -59,11 +59,7 @@ impl Default for LoginState {
 }
 
 pub(crate) fn modal_frame() -> egui::Frame {
-    egui::Frame::new()
-        .fill(t::surface())
-        .stroke(egui::Stroke::new(2.0, t::hairline()))
-        .corner_radius(motion::R)
-        .inner_margin(egui::Margin::symmetric(26, 22))
+    elevated_modal_frame()
 }
 
 impl App {
@@ -268,9 +264,9 @@ impl App {
                 egui::Frame::new()
                     .fill(t::surface())
                     .stroke(egui::Stroke::new(1.0, t::hairline()))
-                    .corner_radius(6)
+                    .corner_radius(motion::R_MODAL)
                     .inner_margin(egui::Margin::same(8))
-                    .shadow(ui.visuals().popup_shadow)
+                    .shadow(t::modal_shadow())
                     .show(ui, |ui| {
                         ui.set_width(284.0);
                         ui.spacing_mut().item_spacing.y = 2.0;

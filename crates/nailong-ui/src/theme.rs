@@ -10,12 +10,19 @@ const fn rgb(r: u8, g: u8, b: u8) -> Color32 {
     Color32::from_rgb(r, g, b)
 }
 
+const fn white_alpha(a: u8) -> Color32 {
+    Color32::from_rgba_premultiplied(a, a, a, a)
+}
+
 #[derive(Clone, Copy)]
 struct Palette {
+    rail: Color32,
     bg: Color32,
     surface: Color32,
+    elevated: Color32,
     wash: Color32,
     hairline: Color32,
+    rim: Color32,
     control: Color32,
     ink: Color32,
     sub: Color32,
@@ -31,41 +38,47 @@ struct Palette {
 }
 
 const DARK: Palette = Palette {
-    bg: rgb(0x1B, 0x1D, 0x22),
-    surface: rgb(0x22, 0x25, 0x2B),
-    wash: rgb(0x27, 0x2A, 0x31),
-    hairline: rgb(0x2D, 0x30, 0x37),
-    control: rgb(0x66, 0x6B, 0x76),
-    ink: rgb(0xDF, 0xE2, 0xE8),
-    sub: rgb(0xA0, 0xA5, 0xB0),
-    dim: rgb(0x88, 0x8D, 0x98),
-    dot: rgb(0x7C, 0x81, 0x8C),
-    accent: rgb(0x84, 0x96, 0xC2),
-    accent_hover: rgb(0x93, 0xA4, 0xCD),
-    accent_press: rgb(0x75, 0x87, 0xB3),
-    on_accent: rgb(0x14, 0x16, 0x1B),
-    ok: rgb(0x88, 0xA8, 0x96),
-    warn: rgb(0xBF, 0xA1, 0x73),
-    danger: rgb(0xC9, 0x8A, 0x82),
+    rail: rgb(0x15, 0x18, 0x1E),
+    bg: rgb(0x1B, 0x1E, 0x25),
+    surface: rgb(0x22, 0x26, 0x2F),
+    elevated: rgb(0x27, 0x2C, 0x36),
+    wash: rgb(0x2B, 0x30, 0x3C),
+    hairline: rgb(0x30, 0x36, 0x43),
+    rim: white_alpha(18),
+    control: rgb(0x6B, 0x72, 0x82),
+    ink: rgb(0xE6, 0xE9, 0xF0),
+    sub: rgb(0xA4, 0xAA, 0xB8),
+    dim: rgb(0x8D, 0x94, 0xA4),
+    dot: rgb(0x7D, 0x84, 0x94),
+    accent: rgb(0x85, 0x9F, 0xD6),
+    accent_hover: rgb(0x96, 0xAF, 0xE3),
+    accent_press: rgb(0x73, 0x8D, 0xC4),
+    on_accent: rgb(0x12, 0x15, 0x1B),
+    ok: rgb(0x82, 0xB3, 0x9B),
+    warn: rgb(0xCC, 0xA8, 0x72),
+    danger: rgb(0xD4, 0x8A, 0x82),
 };
 
 const LIGHT: Palette = Palette {
-    bg: rgb(0xF1, 0xF1, 0xEE),
-    surface: rgb(0xFA, 0xFA, 0xF7),
-    wash: rgb(0xE4, 0xE5, 0xE4),
-    hairline: rgb(0xDB, 0xDB, 0xD6),
-    control: rgb(0x85, 0x88, 0x8F),
-    ink: rgb(0x2B, 0x2D, 0x32),
-    sub: rgb(0x5C, 0x5F, 0x66),
-    dim: rgb(0x6B, 0x6E, 0x74),
-    dot: rgb(0x85, 0x88, 0x8F),
-    accent: rgb(0x52, 0x64, 0x8F),
-    accent_hover: rgb(0x5E, 0x70, 0x9B),
-    accent_press: rgb(0x47, 0x58, 0x80),
-    on_accent: rgb(0xF6, 0xF6, 0xF3),
-    ok: rgb(0x51, 0x76, 0x62),
-    warn: rgb(0x85, 0x69, 0x36),
-    danger: rgb(0xA5, 0x54, 0x4C),
+    rail: rgb(0xE9, 0xEB, 0xE7),
+    bg: rgb(0xF3, 0xF4, 0xF1),
+    surface: rgb(0xFC, 0xFC, 0xFA),
+    elevated: rgb(0xF5, 0xF6, 0xF3),
+    wash: rgb(0xE4, 0xE7, 0xE4),
+    hairline: rgb(0xD8, 0xDC, 0xE0),
+    rim: white_alpha(180),
+    control: rgb(0x7D, 0x83, 0x90),
+    ink: rgb(0x1F, 0x23, 0x2A),
+    sub: rgb(0x54, 0x5A, 0x66),
+    dim: rgb(0x64, 0x6A, 0x75),
+    dot: rgb(0x82, 0x88, 0x94),
+    accent: rgb(0x4A, 0x63, 0x99),
+    accent_hover: rgb(0x56, 0x70, 0xA8),
+    accent_press: rgb(0x3E, 0x55, 0x87),
+    on_accent: rgb(0xF8, 0xF9, 0xFB),
+    ok: rgb(0x42, 0x73, 0x5B),
+    warn: rgb(0x87, 0x66, 0x2B),
+    danger: rgb(0xA8, 0x4E, 0x46),
 };
 
 static IS_LIGHT: AtomicBool = AtomicBool::new(false);
@@ -87,10 +100,13 @@ macro_rules! tokens {
 }
 
 tokens!(
+    rail,
     bg,
     surface,
+    elevated,
     wash,
     hairline,
+    rim,
     control,
     ink,
     sub,
@@ -104,6 +120,29 @@ tokens!(
     warn,
     danger,
 );
+
+pub fn is_light() -> bool {
+    IS_LIGHT.load(Ordering::Relaxed)
+}
+
+/// 弹窗和浮层卡片的柔和投影。
+pub fn modal_shadow() -> egui::epaint::Shadow {
+    if is_light() {
+        egui::epaint::Shadow {
+            offset: [0, 10],
+            blur: 28,
+            spread: 0,
+            color: Color32::from_black_alpha(32),
+        }
+    } else {
+        egui::epaint::Shadow {
+            offset: [0, 14],
+            blur: 36,
+            spread: 0,
+            color: Color32::from_black_alpha(120),
+        }
+    }
+}
 
 /// 把颜色调成半透明，用于状态提示的底色和边框。
 pub fn tint(color: Color32, alpha: f32) -> Color32 {
@@ -176,20 +215,20 @@ fn visuals(p: Palette, dark: bool) -> egui::Visuals {
     } else {
         egui::Visuals::light()
     };
-    let radius = egui::CornerRadius::same(4);
+    let radius = egui::CornerRadius::same(7);
     let shadow = egui::epaint::Shadow {
-        offset: [0, 4],
-        blur: 12,
+        offset: [0, 8],
+        blur: 22,
         spread: 0,
-        color: Color32::from_black_alpha(if dark { 70 } else { 28 }),
+        color: Color32::from_black_alpha(if dark { 95 } else { 30 }),
     };
     visuals.override_text_color = Some(p.ink);
     visuals.panel_fill = p.bg;
     visuals.window_fill = p.surface;
     visuals.extreme_bg_color = p.surface;
     visuals.window_stroke = egui::Stroke::new(1.0, p.hairline);
-    visuals.window_corner_radius = egui::CornerRadius::same(6);
-    visuals.menu_corner_radius = radius;
+    visuals.window_corner_radius = egui::CornerRadius::same(12);
+    visuals.menu_corner_radius = egui::CornerRadius::same(9);
     visuals.popup_shadow = shadow;
     visuals.window_shadow = shadow;
     visuals.faint_bg_color = p.wash;
@@ -208,10 +247,10 @@ fn visuals(p: Palette, dark: bool) -> egui::Visuals {
         expansion: 0.0,
     };
     visuals.widgets.noninteractive = widget(Color32::TRANSPARENT, p.hairline);
-    visuals.widgets.inactive = widget(Color32::TRANSPARENT, p.hairline);
+    visuals.widgets.inactive = widget(p.surface, p.hairline);
     visuals.widgets.hovered = widget(p.wash, p.control);
-    visuals.widgets.active = widget(p.wash, p.control);
-    visuals.widgets.open = widget(p.wash, p.control);
+    visuals.widgets.active = widget(p.wash, p.accent);
+    visuals.widgets.open = widget(p.wash, p.accent);
     visuals
 }
 

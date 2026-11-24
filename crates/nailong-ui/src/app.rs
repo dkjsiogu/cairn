@@ -828,51 +828,38 @@ impl App {
     }
 
     /// 页面最底下一条细边，右边是版本号。单独占一条，不会压住列表、卡片和按钮。
-    /// 点版本号打开设置（那里能检查更新）；左边是 `Ctrl+K` 的提示。
     pub(crate) fn version_line(&mut self, ui: &mut egui::Ui) {
         let mut open = false;
-        let mut palette = false;
         egui::Panel::bottom("version_line")
             .resizable(false)
             .show_separator_line(false)
-            .exact_size(18.0)
+            .exact_size(20.0)
             .frame(egui::Frame::new().fill(t::bg()).inner_margin(egui::Margin {
-                left: 12,
-                right: 12,
+                left: 16,
+                right: 16,
                 top: 0,
-                bottom: 4,
+                bottom: 5,
             }))
             .show(ui, |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let version = env!("CARGO_PKG_VERSION");
-                    let small = |text: String| egui::RichText::new(text).size(11.0).color(t::dim());
                     let response = ui
                         .add(
-                            egui::Label::new(small(format!("v{version}")))
-                                .sense(egui::Sense::click()),
+                            egui::Label::new(
+                                egui::RichText::new(format!("v{version}"))
+                                    .size(11.0)
+                                    .color(t::dim()),
+                            )
+                            .sense(egui::Sense::click()),
                         )
-                        .on_hover_text(format!("Cairn {version} · 设置和检查更新"));
+                        .on_hover_text(format!("Cairn {version} · 设置与更新"));
                     if response.clicked() {
                         open = true;
-                    }
-                    ui.add_space(10.0);
-                    if ui
-                        .add(
-                            egui::Label::new(small("Ctrl+K 找任何东西".into()))
-                                .sense(egui::Sense::click()),
-                        )
-                        .on_hover_text("版本、页面、设置和常用操作，打几个字就到")
-                        .clicked()
-                    {
-                        palette = true;
                     }
                 });
             });
         if open {
             self.open_settings();
-        }
-        if palette && !self.page_locked() {
-            self.open_palette();
         }
     }
 
@@ -922,6 +909,14 @@ impl App {
                     [bar.left_top(), bar.right_top()],
                     egui::Stroke::new(1.0, t::hairline()),
                 );
+                ui.painter().rect_filled(
+                    egui::Rect::from_min_max(
+                        bar.left_top(),
+                        egui::pos2(bar.left() + 3.0, bar.bottom()),
+                    ),
+                    0.0,
+                    color,
+                );
                 ui.horizontal_centered(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
@@ -949,6 +944,9 @@ impl App {
                         }
                         // 剩下的地方给文字，放不下从末尾省略，悬停看全文。
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            let (dot, _) =
+                                ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                            ui.painter().circle_filled(dot.center(), 3.5, color);
                             ui.add(
                                 egui::Label::new(
                                     egui::RichText::new(&text).size(13.0).color(color),

@@ -728,35 +728,53 @@ impl App {
         let paint = rect;
         ui.painter().rect(
             paint,
-            motion::R,
-            motion::mix(t::surface(), t::wash(), hover_t),
-            egui::Stroke::new(1.0, motion::mix(t::hairline(), t::control(), hover_t)),
+            motion::R_CARD,
+            motion::mix(t::surface(), t::wash(), 0.72 * hover_t),
+            egui::Stroke::new(
+                1.0,
+                motion::mix(t::hairline(), t::tint(t::accent(), 0.65), hover_t),
+            ),
             egui::StrokeKind::Inside,
         );
 
-        let inner = paint.shrink2(egui::vec2(12.0, 10.0));
+        let inner = paint.shrink2(egui::vec2(14.0, 12.0));
         let mut install = None;
+        let body_rect =
+            egui::Rect::from_min_max(inner.min, egui::pos2(inner.right(), inner.bottom() - 32.0));
         let mut child = ui.new_child(
             egui::UiBuilder::new()
-                .max_rect(inner)
+                .max_rect(body_rect)
                 .layout(egui::Layout::top_down(egui::Align::LEFT)),
         );
-        child.spacing_mut().item_spacing.y = 5.0;
+        child.spacing_mut().item_spacing.y = 7.0;
 
         child.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 9.0;
+            ui.spacing_mut().item_spacing.x = 10.0;
             let icon_size = egui::vec2(38.0, 38.0);
             if let Some(texture) = self.content.icons.get(&key) {
-                ui.add(
-                    egui::Image::from_texture(egui::load::SizedTexture::new(
-                        texture.id(),
-                        icon_size,
-                    ))
-                    .corner_radius(motion::R),
+                let (icon_rect, _) = ui.allocate_exact_size(icon_size, egui::Sense::hover());
+                ui.painter().add(
+                    egui::epaint::RectShape::filled(icon_rect, motion::R, egui::Color32::WHITE)
+                        .with_texture(
+                            texture.id(),
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        ),
+                );
+                ui.painter().rect_stroke(
+                    icon_rect,
+                    motion::R,
+                    egui::Stroke::new(1.0, t::hairline()),
+                    egui::StrokeKind::Inside,
                 );
             } else {
                 let (icon_rect, _) = ui.allocate_exact_size(icon_size, egui::Sense::hover());
-                ui.painter().rect_filled(icon_rect, motion::R, t::wash());
+                ui.painter().rect(
+                    icon_rect,
+                    motion::R,
+                    t::elevated(),
+                    egui::Stroke::new(1.0, t::hairline()),
+                    egui::StrokeKind::Inside,
+                );
                 let letter = project
                     .name
                     .chars()
@@ -767,14 +785,14 @@ impl App {
                     icon_rect.center(),
                     egui::Align2::CENTER_CENTER,
                     letter,
-                    egui::FontId::proportional(16.0),
+                    egui::FontId::new(16.0, bold_family()),
                     t::sub(),
                 );
             }
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(short_text(&project.name, 34))
-                        .size(15.0)
+                        .size(14.5)
                         .family(bold_family()),
                 )
                 .truncate(),
@@ -783,52 +801,87 @@ impl App {
         child.add(
             egui::Label::new(
                 egui::RichText::new(short_text(&project.summary, summary_chars))
-                    .size(13.0)
+                    .size(12.5)
                     .color(t::sub()),
             )
             .wrap(),
         );
-        child.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(format!("{} 下载", compact(project.downloads)))
-                    .size(13.0)
-                    .color(t::sub()),
+
+        // 底栏固定对齐到卡片底部，每行 4 张卡片基线完全一致。
+        let footer_rect = egui::Rect::from_min_max(
+            egui::pos2(inner.left(), inner.bottom() - 26.0),
+            inner.right_bottom(),
+        );
+        let mut footer = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(footer_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        footer.label(
+            egui::RichText::new(format!("{} 下载", compact(project.downloads)))
+                .size(12.5)
+                .color(t::dim()),
+        );
+        if width >= 240.0 {
+            footer.label(egui::RichText::new("·").size(12.5).color(t::dim()));
+            footer.label(
+                egui::RichText::new(project.source.label())
+                    .size(12.5)
+                    .color(t::dim()),
             );
-            // 窄卡片放不下来源，避免压到右边的安装按钮。
-            if width >= 240.0 {
-                ui.label(egui::RichText::new("·").size(13.0).color(t::sub()));
-                ui.label(
-                    egui::RichText::new(project.source.label())
-                        .size(13.0)
-                        .color(t::sub()),
+        }
+        footer.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if installed {
+                tag_pill(ui, "✓ 已装", t::ok(), t::tint(t::ok(), 0.14));
+            } else if quick {
+                busy_spinner(ui);
+            } else {
+                let (btn_rect, btn_resp) = ui.allocate_exact_size(
+                    egui::vec2(26.0, 26.0),
+                    if busy {
+                        egui::Sense::hover()
+                    } else {
+                        egui::Sense::click()
+                    },
                 );
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if installed {
-                    ui.label(egui::RichText::new("已装").size(13.0).color(t::ok()));
-                } else if quick {
-                    busy_spinner(ui);
-                } else if ui
-                    .add_enabled(
-                        !busy,
-                        egui::Button::new(
-                            egui::RichText::new("+")
-                                .size(15.0)
-                                .family(bold_family())
-                                .color(t::accent()),
-                        )
-                        .fill(t::tint(t::accent(), 0.16))
-                        .stroke(egui::Stroke::new(1.0, t::tint(t::accent(), 0.78)))
-                        .corner_radius(motion::R)
-                        .min_size(egui::vec2(22.0, 22.0)),
+                let bh = motion::hover_amount(
+                    ui,
+                    btn_resp.id.with("plus_hover"),
+                    !busy && btn_resp.hovered(),
+                );
+                let (bfill, bstroke, bcol) = if busy {
+                    (t::wash(), t::hairline(), t::dim())
+                } else {
+                    (
+                        t::tint(t::accent(), 0.13 + 0.12 * bh),
+                        t::tint(t::accent(), 0.55 + 0.35 * bh),
+                        t::accent(),
                     )
-                    .on_hover_text("安装到当前版本")
-                    .on_disabled_hover_text(busy_reason)
-                    .clicked()
-                {
+                };
+                ui.painter().rect(
+                    btn_rect,
+                    motion::R,
+                    bfill,
+                    egui::Stroke::new(1.0, bstroke),
+                    egui::StrokeKind::Inside,
+                );
+                let c = btn_rect.center();
+                let cross = egui::Stroke::new(1.6, bcol);
+                ui.painter()
+                    .line_segment([c + egui::vec2(-4.5, 0.0), c + egui::vec2(4.5, 0.0)], cross);
+                ui.painter()
+                    .line_segment([c + egui::vec2(0.0, -4.5), c + egui::vec2(0.0, 4.5)], cross);
+                let btn_resp = if busy {
+                    btn_resp.on_hover_text(busy_reason)
+                } else {
+                    btn_resp
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text("安装到当前版本")
+                };
+                if !busy && btn_resp.clicked() {
                     install = Some(project.clone());
                 }
-            });
+            }
         });
 
         if response.clicked() && install.is_none() {

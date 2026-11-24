@@ -414,7 +414,7 @@ pub fn show(ui: &mut egui::Ui, rect: egui::Rect, data: &Data) -> Option<Layer> {
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
 
-    // 中心圆点
+    // 中心圆点 + 克制的哑光同心晕层（非霓虹）
     let core = motion::spring(
         &ctx,
         id.with("core"),
@@ -422,14 +422,25 @@ pub fn show(ui: &mut egui::Ui, rect: egui::Rect, data: &Data) -> Option<Layer> {
         420.0,
         20.0,
     );
+    let core_fade = visibility(Layer::Core);
+    painter.circle_filled(
+        center,
+        (core + 14.0).max(1.0) * scale,
+        t::tint(state_color, 0.05 * core_fade),
+    );
+    painter.circle_filled(
+        center,
+        (core + 6.0).max(1.0) * scale,
+        t::tint(state_color, 0.12 * core_fade),
+    );
     painter.circle_filled(
         center,
         core.max(1.0) * scale,
-        t::tint(state_color, visibility(Layer::Core)),
+        t::tint(state_color, core_fade),
     );
 
     if let Some(layer) = hot {
-        paint_tip(&ctx, rect, &tip(data, layer));
+        paint_tip(&ctx, rect, &tip(data, layer), state_color, layer);
     }
 
     if response.clicked() {
@@ -439,20 +450,20 @@ pub fn show(ui: &mut egui::Ui, rect: egui::Rect, data: &Data) -> Option<Layer> {
     }
 }
 
-/// 说明卡片浮在圆环左边，不遮挡圆环的主体。
-fn paint_tip(ctx: &egui::Context, rect: egui::Rect, tip: &Tip) {
+/// 说明卡片浮在圆环左边，带柔和投影和状态色点，窄窗下自动钳制不越界。
+fn paint_tip(ctx: &egui::Context, rect: egui::Rect, tip: &Tip, state_color: Color32, layer: Layer) {
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::Tooltip,
         egui::Id::unique("nailong_ring_tip"),
     ));
-    let width = 180.0;
-    let pad = 12.0;
+    let width = 192.0;
+    let pad = 13.0;
     let inner = width - pad * 2.0;
     let title = painter.layout(
         tip.title.clone(),
         egui::FontId::new(14.0, crate::bold_family()),
         t::ink(),
-        inner,
+        inner - 14.0,
     );
     let detail = painter.layout(
         tip.detail.clone(),
@@ -460,33 +471,48 @@ fn paint_tip(ctx: &egui::Context, rect: egui::Rect, tip: &Tip) {
         t::sub(),
         inner,
     );
+    let action_text = if tip.action.is_empty() {
+        String::new()
+    } else {
+        format!("{} →", tip.action)
+    };
     let action = painter.layout(
-        tip.action.to_string(),
-        egui::FontId::proportional(13.0),
+        action_text,
+        egui::FontId::proportional(12.5),
         t::accent(),
         inner,
     );
     let mut height = pad * 2.0 + title.size().y + 4.0 + detail.size().y;
     if !tip.action.is_empty() {
-        height += 6.0 + action.size().y;
+        height += 7.0 + action.size().y;
     }
-    let min = pos2(rect.left() - width + 28.0, rect.center().y - height * 0.5);
-    let card = egui::Rect::from_min_size(min, vec2(width, height));
+    let screen = ctx.content_rect();
+    let x = (rect.left() - width + 24.0).clamp(screen.left() + 12.0, screen.right() - width - 12.0);
+    let y_top = (rect.center().y - height * 0.5)
+        .clamp(screen.top() + 12.0, screen.bottom() - height - 12.0);
+    let card = egui::Rect::from_min_size(pos2(x, y_top), vec2(width, height));
+    painter.add(t::modal_shadow().as_shape(card, motion::R_CARD));
     painter.rect(
         card,
-        motion::R,
+        motion::R_CARD,
         t::surface(),
         Stroke::new(1.0, t::hairline()),
         egui::StrokeKind::Inside,
     );
+    let dot_color = match layer {
+        Layer::Core | Layer::Files => state_color,
+        Layer::Mods => t::accent(),
+        Layer::Saves => t::ok(),
+    };
     let mut y = card.top() + pad;
     let left = card.left() + pad;
     let title_h = title.size().y;
-    painter.galley(pos2(left, y), title, t::ink());
+    painter.circle_filled(pos2(left + 4.0, y + title_h * 0.5), 3.5, dot_color);
+    painter.galley(pos2(left + 13.0, y), title, t::ink());
     y += title_h + 4.0;
     let detail_h = detail.size().y;
     painter.galley(pos2(left, y), detail, t::sub());
-    y += detail_h + 6.0;
+    y += detail_h + 7.0;
     if !tip.action.is_empty() {
         painter.galley(pos2(left, y), action, t::accent());
     }

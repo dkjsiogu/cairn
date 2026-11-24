@@ -14,13 +14,7 @@ impl App {
         let veil = t::veil(1.0);
         let modal = egui::Modal::new(egui::Id::unique("install_review_modal"))
             .backdrop_color(veil)
-            .frame(
-                egui::Frame::new()
-                    .fill(t::surface())
-                    .stroke(egui::Stroke::new(1.0, t::hairline()))
-                    .corner_radius(motion::R)
-                    .inner_margin(egui::Margin::symmetric(26, 22)),
-            )
+            .frame(elevated_modal_frame())
             .show(ctx, |ui| {
                 ui.set_width(500.0);
                 ui.horizontal(|ui| {

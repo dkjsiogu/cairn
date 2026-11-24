@@ -153,125 +153,134 @@ impl App {
                 // 步骤和刚下载的文件。
                 if !bench {
                     ui.add_space(14.0);
-                    let top = ui.cursor().top();
-                    ui.painter().line_segment(
-                        [
-                            egui::pos2(ui.min_rect().left(), top),
-                            egui::pos2(ui.min_rect().left() + width, top),
-                        ],
-                        egui::Stroke::new(1.0, t::hairline()),
-                    );
-                    ui.add_space(12.0);
-                    let two_columns = width >= 520.0;
-                    let column = if two_columns {
-                        (width - 32.0) / 2.0
-                    } else {
-                        width
-                    };
-                    let rows = if compact_h { 4 } else { 6 };
-                    let steps = |ui: &mut egui::Ui| {
-                        ui.set_width(column);
-                        ui.label(
-                            egui::RichText::new("步骤")
-                                .size(13.0)
-                                .family(bold_family())
-                                .color(t::sub()),
-                        );
-                        ui.add_space(4.0);
-                        let skip = activity.steps.len().saturating_sub(rows);
-                        if skip > 0 {
-                            ui.label(
-                                egui::RichText::new(format!("…前面还有 {skip} 步"))
-                                    .size(12.0)
-                                    .color(t::dim()),
-                            );
-                        }
-                        ui.spacing_mut().item_spacing.y = 2.0;
-                        for step in activity.steps.iter().skip(skip) {
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().interact_size.y = 20.0;
-                                let (glyph, color) = match step.took {
-                                    Some(_) => ("✓", t::ok()),
-                                    None => ("•", t::accent()),
-                                };
-                                ui.label(egui::RichText::new(glyph).size(12.0).color(color));
-                                ui.label(egui::RichText::new(&step.name).size(13.0).color(
-                                    if step.took.is_some() {
-                                        t::sub()
-                                    } else {
-                                        t::ink()
-                                    },
-                                ));
-                                // 做完的写用了多久，进行中的写它自己的进度。
-                                let right = match step.took {
-                                    Some(d) => Some((took(d), t::dim())),
-                                    None => step.detail().map(|d| (d, t::sub())),
-                                };
-                                if let Some((text, color)) = right {
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            ui.label(
-                                                egui::RichText::new(text).size(12.0).color(color),
-                                            );
-                                        },
+                    egui::Frame::new()
+                        .fill(t::surface())
+                        .stroke(egui::Stroke::new(1.0, t::hairline()))
+                        .corner_radius(motion::R_CARD)
+                        .inner_margin(egui::Margin::symmetric(18, 14))
+                        .show(ui, |ui| {
+                            let inner_w = width - 36.0;
+                            ui.set_width(inner_w);
+                            let two_columns = inner_w >= 480.0;
+                            let column = if two_columns {
+                                (inner_w - 28.0) / 2.0
+                            } else {
+                                inner_w
+                            };
+                            let rows = if compact_h { 4 } else { 6 };
+                            let steps = |ui: &mut egui::Ui| {
+                                ui.set_width(column);
+                                ui.label(
+                                    egui::RichText::new("步骤")
+                                        .size(13.0)
+                                        .family(bold_family())
+                                        .color(t::sub()),
+                                );
+                                ui.add_space(6.0);
+                                let skip = activity.steps.len().saturating_sub(rows);
+                                if skip > 0 {
+                                    ui.label(
+                                        egui::RichText::new(format!("…前面还有 {skip} 步"))
+                                            .size(12.0)
+                                            .color(t::dim()),
                                     );
                                 }
-                            });
-                        }
-                    };
-                    let files = |ui: &mut egui::Ui| {
-                        ui.set_width(column);
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new("刚下载")
-                                    .size(13.0)
-                                    .family(bold_family())
-                                    .color(t::sub()),
-                            );
-                            if let Some(source) = activity.source_label() {
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
+                                ui.spacing_mut().item_spacing.y = 3.0;
+                                for step in activity.steps.iter().skip(skip) {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().interact_size.y = 20.0;
+                                        let (glyph, color) = match step.took {
+                                            Some(_) => ("✓", t::ok()),
+                                            None => ("•", t::accent()),
+                                        };
                                         ui.label(
-                                            egui::RichText::new(format!("来自 {source}"))
-                                                .size(12.0)
-                                                .color(t::dim()),
-                                        )
-                                        .on_hover_text(activity.source.as_deref().unwrap_or(""));
-                                    },
-                                );
+                                            egui::RichText::new(glyph).size(12.0).color(color),
+                                        );
+                                        ui.label(egui::RichText::new(&step.name).size(13.0).color(
+                                            if step.took.is_some() {
+                                                t::sub()
+                                            } else {
+                                                t::ink()
+                                            },
+                                        ));
+                                        let right = match step.took {
+                                            Some(d) => Some((took(d), t::dim())),
+                                            None => step.detail().map(|d| (d, t::sub())),
+                                        };
+                                        if let Some((text, color)) = right {
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(egui::Align::Center),
+                                                |ui| {
+                                                    ui.label(
+                                                        egui::RichText::new(text)
+                                                            .size(12.0)
+                                                            .color(color),
+                                                    );
+                                                },
+                                            );
+                                        }
+                                    });
+                                }
+                            };
+                            let files = |ui: &mut egui::Ui| {
+                                ui.set_width(column);
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new("刚下载")
+                                            .size(13.0)
+                                            .family(bold_family())
+                                            .color(t::sub()),
+                                    );
+                                    if let Some(source) = activity.source_label() {
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(
+                                                    egui::RichText::new(format!("来自 {source}"))
+                                                        .size(12.0)
+                                                        .color(t::dim()),
+                                                )
+                                                .on_hover_text(
+                                                    activity.source.as_deref().unwrap_or(""),
+                                                );
+                                            },
+                                        );
+                                    }
+                                });
+                                ui.add_space(6.0);
+                                if activity.recent.is_empty() {
+                                    ui.label(
+                                        egui::RichText::new("正在校验本地文件")
+                                            .size(12.5)
+                                            .color(t::dim()),
+                                    );
+                                }
+                                let font = egui::FontId::proportional(12.5);
+                                for (index, name) in
+                                    activity.recent.iter().take(rows + 1).enumerate()
+                                {
+                                    let fade = 1.0 - index as f32 * 0.13;
+                                    let color =
+                                        motion::mix(t::dim(), t::ink(), fade.clamp(0.0, 1.0) * 0.8);
+                                    let shown = elide_middle(ui, name, &font, column - 4.0);
+                                    ui.label(
+                                        egui::RichText::new(shown).font(font.clone()).color(color),
+                                    )
+                                    .on_hover_text(name);
+                                }
+                            };
+                            if two_columns {
+                                ui.horizontal_top(|ui| {
+                                    ui.vertical(steps);
+                                    ui.add_space(24.0);
+                                    ui.vertical(files);
+                                });
+                            } else {
+                                ui.vertical(steps);
+                                ui.add_space(10.0);
+                                ui.vertical(files);
                             }
                         });
-                        ui.add_space(4.0);
-                        if activity.recent.is_empty() {
-                            ui.label(
-                                egui::RichText::new("正在校验本地文件")
-                                    .size(12.5)
-                                    .color(t::dim()),
-                            );
-                        }
-                        let font = egui::FontId::proportional(12.5);
-                        for (index, name) in activity.recent.iter().take(rows + 1).enumerate() {
-                            // 越早的越淡：一眼看出哪个是刚下好的。
-                            let fade = 1.0 - index as f32 * 0.13;
-                            let color = motion::mix(t::dim(), t::ink(), fade.clamp(0.0, 1.0) * 0.8);
-                            let shown = elide_middle(ui, name, &font, column - 4.0);
-                            ui.label(egui::RichText::new(shown).font(font.clone()).color(color))
-                                .on_hover_text(name);
-                        }
-                    };
-                    if two_columns {
-                        ui.horizontal_top(|ui| {
-                            ui.vertical(steps);
-                            ui.add_space(24.0);
-                            ui.vertical(files);
-                        });
-                    } else {
-                        ui.vertical(steps);
-                        ui.add_space(10.0);
-                        ui.vertical(files);
-                    }
                 }
 
                 ui.add_space(if compact_h { 12.0 } else { 18.0 });

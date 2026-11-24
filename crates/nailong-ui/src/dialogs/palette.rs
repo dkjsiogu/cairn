@@ -370,25 +370,47 @@ impl App {
                 egui::Align2::CENTER_TOP,
                 [0.0, (screen.height() * 0.14).max(48.0)],
             ))
-            .backdrop_color(t::veil(0.7))
+            .backdrop_color(t::veil(0.75))
             .frame(
                 egui::Frame::new()
                     .fill(t::surface())
                     .stroke(egui::Stroke::new(1.0, t::hairline()))
-                    .corner_radius(6)
+                    .corner_radius(motion::R_MODAL)
+                    .shadow(t::modal_shadow())
                     .inner_margin(egui::Margin::symmetric(10, 10)),
             )
             .show(ctx, |ui| {
                 ui.set_width(width);
                 ui.spacing_mut().item_spacing.y = 2.0;
                 let before = palette.query.clone();
-                let field = ui.add(
-                    egui::TextEdit::singleline(&mut palette.query)
-                        .hint_text("找版本、世界、页面、设置，或者要做的事")
-                        .desired_width(width - 20.0)
-                        .font(egui::FontId::proportional(16.0))
-                        .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 9))),
-                );
+                let field = ui
+                    .horizontal(|ui| {
+                        let (icon_rect, _) =
+                            ui.allocate_exact_size(egui::vec2(28.0, 36.0), egui::Sense::hover());
+                        let c = icon_rect.center() + egui::vec2(2.0, -1.0);
+                        ui.painter()
+                            .circle_stroke(c, 5.5, egui::Stroke::new(1.5, t::accent()));
+                        ui.painter().line_segment(
+                            [c + egui::vec2(4.0, 4.0), c + egui::vec2(7.6, 7.6)],
+                            egui::Stroke::new(1.7, t::accent()),
+                        );
+                        let f = ui.add(
+                            egui::TextEdit::singleline(&mut palette.query)
+                                .hint_text("搜索版本、世界、页面、设置或操作…")
+                                .desired_width(width - 92.0)
+                                .font(egui::FontId::proportional(15.5))
+                                .frame(
+                                    egui::Frame::new().inner_margin(egui::Margin::symmetric(4, 8)),
+                                ),
+                        );
+                        motion::mark_custom_focus(ui.ctx(), f.id);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add_space(6.0);
+                            kbd_badge(ui, "Esc");
+                        });
+                        f
+                    })
+                    .inner;
                 if palette.fresh || !field.has_focus() {
                     field.request_focus();
                     palette.fresh = false;
@@ -396,21 +418,21 @@ impl App {
                 if palette.query != before {
                     palette.cursor = 0;
                 }
-                let line = ui.cursor().top() + 2.0;
+                let line = ui.cursor().top() + 3.0;
                 ui.painter().line_segment(
                     [
-                        egui::pos2(ui.max_rect().left(), line),
-                        egui::pos2(ui.max_rect().right(), line),
+                        egui::pos2(ui.max_rect().left() - 10.0, line),
+                        egui::pos2(ui.max_rect().right() + 10.0, line),
                     ],
                     egui::Stroke::new(1.0, t::hairline()),
                 );
-                ui.add_space(8.0);
+                ui.add_space(9.0);
                 if total == 0 {
-                    ui.add_space(14.0);
+                    ui.add_space(16.0);
                     ui.vertical_centered(|ui| {
                         ui.label(egui::RichText::new("没有找到").size(13.0).color(t::dim()));
                     });
-                    ui.add_space(14.0);
+                    ui.add_space(16.0);
                 }
                 for position in first..(first + SHOWN).min(total) {
                     let item = match shown.get(position) {
@@ -426,21 +448,39 @@ impl App {
                         palette.cursor = position;
                     }
                 }
-                ui.add_space(6.0);
+                ui.add_space(8.0);
+                let footer_line = ui.cursor().top();
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(ui.max_rect().left() - 10.0, footer_line),
+                        egui::pos2(ui.max_rect().right() + 10.0, footer_line),
+                    ],
+                    egui::Stroke::new(1.0, t::hairline()),
+                );
+                ui.add_space(7.0);
                 let launchable = shown
                     .get(palette.cursor)
                     .is_some_and(|&index| palette.items[index].launchable.is_some());
                 ui.horizontal(|ui| {
-                    ui.add_space(8.0);
-                    let hint = if launchable {
-                        "↑ ↓ 选择 · Enter 切换到它 · Ctrl+Enter 直接启动 · Esc 关闭"
-                    } else {
-                        "↑ ↓ 选择 · Enter 执行 · Esc 关闭"
-                    };
-                    ui.label(egui::RichText::new(hint).size(11.5).color(t::dim()));
+                    ui.spacing_mut().item_spacing.x = 5.0;
+                    ui.add_space(6.0);
+                    kbd_badge(ui, "↑↓");
+                    ui.label(egui::RichText::new("选择").size(11.5).color(t::dim()));
+                    ui.add_space(4.0);
+                    kbd_badge(ui, "Enter");
+                    ui.label(
+                        egui::RichText::new(if launchable { "切换" } else { "执行" })
+                            .size(11.5)
+                            .color(t::dim()),
+                    );
+                    if launchable {
+                        ui.add_space(4.0);
+                        kbd_badge(ui, "Ctrl+Enter");
+                        ui.label(egui::RichText::new("启动").size(11.5).color(t::dim()));
+                    }
                     if total > SHOWN {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.add_space(8.0);
+                            ui.add_space(6.0);
                             ui.label(
                                 egui::RichText::new(format!("{} / {total}", palette.cursor + 1))
                                     .size(11.5)
@@ -569,29 +609,50 @@ impl App {
     }
 }
 
-/// 面板里的一行：左边名字和说明，右边一个小字说明这是什么。
+/// 面板里的一行：选中带雾蓝左竖条，右侧胶囊类别徽章。
 fn palette_row(ui: &mut egui::Ui, item: &Item, active: bool) -> egui::Response {
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 38.0), egui::Sense::click());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 40.0), egui::Sense::click());
     if active {
         ui.painter().rect_filled(rect, motion::R, t::wash());
+        active_accent_bar(ui.painter(), rect);
     }
-    let kind_font = egui::FontId::proportional(11.5);
-    let kind = ui
-        .painter()
-        .layout_no_wrap(item.kind.to_string(), kind_font, t::dim());
-    let kind_w = kind.size().x;
+    let kind_font = egui::FontId::proportional(11.0);
+    let kind = ui.painter().layout_no_wrap(
+        item.kind.to_string(),
+        kind_font,
+        if active { t::sub() } else { t::dim() },
+    );
+    let pill_w = kind.size().x + 12.0;
+    let pill_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.right() - 10.0 - pill_w * 0.5, rect.center().y),
+        egui::vec2(pill_w, 20.0),
+    );
+    ui.painter().rect(
+        pill_rect,
+        5,
+        if active { t::surface() } else { t::bg() },
+        egui::Stroke::new(1.0, t::hairline()),
+        egui::StrokeKind::Inside,
+    );
     ui.painter().galley(
         egui::pos2(
-            rect.right() - 12.0 - kind_w,
-            rect.center().y - kind.size().y * 0.5,
+            pill_rect.center().x - kind.size().x * 0.5,
+            pill_rect.center().y - kind.size().y * 0.5,
         ),
         kind,
-        t::dim(),
+        if active { t::sub() } else { t::dim() },
     );
-    let left = rect.left() + 12.0;
-    let room = rect.width() - 24.0 - kind_w - 12.0;
-    let title_font = egui::FontId::proportional(14.0);
+    let left = rect.left() + 14.0;
+    let room = rect.width() - 28.0 - pill_w - 12.0;
+    let title_font = egui::FontId::new(
+        14.0,
+        if active {
+            bold_family()
+        } else {
+            egui::FontFamily::Proportional
+        },
+    );
     let title = elide_middle(ui, &item.title, &title_font, room);
     let title = ui.painter().layout_no_wrap(title, title_font, t::ink());
     let title_w = title.size().x;

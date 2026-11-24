@@ -215,13 +215,7 @@ impl LogView {
         let body_h = (screen.height() - 330.0).clamp(160.0, 460.0);
         let modal = egui::Modal::new(egui::Id::unique("log_modal"))
             .backdrop_color(t::veil(1.0))
-            .frame(
-                egui::Frame::new()
-                    .fill(t::surface())
-                    .stroke(egui::Stroke::new(1.0, t::hairline()))
-                    .corner_radius(motion::R)
-                    .inner_margin(egui::Margin::symmetric(24, 20)),
-            )
+            .frame(elevated_modal_frame())
             .show(ctx, |ui| {
                 ui.set_width(width);
                 ui.horizontal(|ui| {

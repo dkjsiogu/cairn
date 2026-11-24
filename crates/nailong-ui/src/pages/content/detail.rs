@@ -406,7 +406,7 @@ impl App {
                         egui::Frame::new()
                             .fill(t::bg())
                             .stroke(egui::Stroke::new(1.0, t::hairline()))
-                            .corner_radius(motion::R)
+                            .corner_radius(motion::R_CARD)
                             .inner_margin(egui::Margin::symmetric(14, 12))
                             .show(ui, |ui| {
                                 ui.set_width(action_w - 28.0);
@@ -924,16 +924,9 @@ pub(crate) fn version_row_mini(
 ) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 38.0), egui::Sense::click());
-    if active || response.hovered() {
-        ui.painter().rect_filled(
-            rect,
-            8,
-            if active {
-                t::wash()
-            } else {
-                egui::Color32::TRANSPARENT
-            },
-        );
+    list_row_fill(ui, rect, active, &response);
+    if active {
+        active_accent_bar(ui.painter(), rect);
     }
     let inner = rect.shrink2(egui::vec2(9.0, 0.0));
     let mut child = ui.new_child(

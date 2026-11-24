@@ -56,13 +56,7 @@ impl App {
         let mut close = false;
         let modal = egui::Modal::new(egui::Id::unique("bench_modal"))
             .backdrop_color(t::veil(1.0))
-            .frame(
-                egui::Frame::new()
-                    .fill(t::surface())
-                    .stroke(egui::Stroke::new(1.0, t::hairline()))
-                    .corner_radius(motion::R)
-                    .inner_margin(egui::Margin::symmetric(26, 22)),
-            )
+            .frame(elevated_modal_frame())
             .show(ctx, |ui| {
                 ui.set_width(440.0);
                 ui.label(
@@ -415,8 +409,9 @@ impl App {
                 egui::Frame::new()
                     .fill(t::surface())
                     .stroke(egui::Stroke::new(1.0, t::hairline()))
-                    .corner_radius(6)
-                    .inner_margin(egui::Margin::symmetric(22, 20)),
+                    .corner_radius(motion::R_MODAL)
+                    .shadow(t::modal_shadow())
+                    .inner_margin(egui::Margin::symmetric(24, 20)),
             )
             .show(ctx, |ui| {
                 ui.set_width(width);
@@ -441,13 +436,21 @@ impl App {
                             });
                             ui.add_space(14.0);
                             for tab in SettingsTab::ALL {
+                                let active = self.settings_tab == tab;
                                 let (rect, response, color) =
-                                    crate::pages::nav_row(ui, 34.0, self.settings_tab == tab, true);
+                                    crate::pages::nav_row(ui, 34.0, active, true);
                                 ui.painter().text(
-                                    egui::pos2(rect.left() + 12.0, rect.center().y),
+                                    egui::pos2(rect.left() + 14.0, rect.center().y),
                                     egui::Align2::LEFT_CENTER,
                                     tab.label(),
-                                    egui::FontId::proportional(14.0),
+                                    egui::FontId::new(
+                                        14.0,
+                                        if active {
+                                            bold_family()
+                                        } else {
+                                            egui::FontFamily::Proportional
+                                        },
+                                    ),
                                     color,
                                 );
                                 if response.on_hover_text(tab.hint()).clicked() {
@@ -912,13 +915,13 @@ impl SettingsTab {
     }
 }
 
-/// 设置里的一块：`bg` 底、细边，占满这一栏的宽度。
+/// 设置里的一块：`bg` 底、细边、`R_CARD` 圆角，占满这一栏的宽度。
 pub(crate) fn settings_card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new()
         .fill(t::bg())
         .stroke(egui::Stroke::new(1.0, t::hairline()))
-        .corner_radius(motion::R)
-        .inner_margin(egui::Margin::symmetric(14, 12))
+        .corner_radius(motion::R_CARD)
+        .inner_margin(egui::Margin::symmetric(15, 13))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             add(ui);

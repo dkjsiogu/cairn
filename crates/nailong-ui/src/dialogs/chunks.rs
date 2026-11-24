@@ -372,10 +372,10 @@ fn map_view(
     let size = egui::vec2(ui.available_width(), 340.0);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, motion::R, t::bg());
+    painter.rect_filled(rect, motion::R_CARD, t::bg());
     painter.rect_stroke(
         rect,
-        motion::R,
+        motion::R_CARD,
         egui::Stroke::new(1.0, t::hairline()),
         egui::StrokeKind::Inside,
     );

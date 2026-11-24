@@ -463,14 +463,19 @@ impl Shots {
             }
             _ => {}
         }
-        if hover > 0.0 {
-            painter.rect_stroke(
-                rect,
-                radius,
-                egui::Stroke::new(1.5, t::tint(t::accent(), hover)),
-                egui::StrokeKind::Inside,
-            );
-        }
+        let border_color = if hover > 0.0 {
+            motion::mix(t::hairline(), t::accent(), hover)
+        } else if t::is_light() {
+            egui::Color32::from_black_alpha(18)
+        } else {
+            egui::Color32::from_white_alpha(20)
+        };
+        painter.rect_stroke(
+            rect,
+            radius,
+            egui::Stroke::new(if hover > 0.0 { 1.5 } else { 1.0 }, border_color),
+            egui::StrokeKind::Inside,
+        );
         if self.copying.as_ref() == Some(&shot.path) {
             badge(ui, rect, "复制中…", 1.0);
             animating = true;
@@ -593,11 +598,14 @@ impl Shots {
             } else {
                 format!("{}\n左键查看 · 右键复制图片", place_line(shot))
             };
-            let response = self.tile(ui, "strip", shot, base, motion::R, Some(hover));
+            let response = self.tile(ui, "strip", shot, base, motion::R_CARD - 2, Some(hover));
             // 最后一格还有更多时盖一层「+N」，点它去截图页。
             if more {
-                ui.painter()
-                    .rect_filled(base, motion::R, t::tint(egui::Color32::BLACK, 0.55));
+                ui.painter().rect_filled(
+                    base,
+                    motion::R_CARD - 2,
+                    t::tint(egui::Color32::BLACK, 0.55),
+                );
                 ui.painter().text(
                     base.center(),
                     egui::Align2::CENTER_CENTER,
