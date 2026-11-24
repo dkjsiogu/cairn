@@ -500,12 +500,6 @@ impl App {
                             }
                         },
                     );
-                    ui.add_space(8.0);
-                    ui.label(
-                        egui::RichText::new("浏览器没有打开时，点上面的按钮")
-                            .size(13.0)
-                            .color(t::sub()),
-                    );
                 });
             });
         if modal.backdrop_response.clicked() || escape_pressed(ctx) {
@@ -542,15 +536,6 @@ impl App {
                         .family(display_family())
                         .color(t::ink()),
                 );
-                ui.add_space(4.0);
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new("浏览器授权未完成")
-                            .size(13.0)
-                            .color(t::sub()),
-                    )
-                    .wrap(),
-                );
                 ui.add_space(12.0);
                 egui::Frame::new()
                     .fill(t::tint(t::warn(), 0.11))
@@ -580,7 +565,7 @@ impl App {
                 });
                 ui.add_space(7.0);
                 ui.label(
-                    egui::RichText::new("原始错误已写入「设置 › 诊断 › 日志」")
+                    egui::RichText::new("详细错误见启动器日志（Ctrl+L）")
                         .size(13.0)
                         .color(t::sub()),
                 );

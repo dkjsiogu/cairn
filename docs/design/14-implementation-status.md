@@ -1,7 +1,7 @@
-# 14 · 原型实现状态（0.1 → 0.45.1）
+# 14 · 原型实现状态（0.1 → 0.45.2）
 
-> 日期：2026-11-23
-> 对应发布：GitHub Release `v0.45.1` 的 `cairn.exe`、`cairn_0.45.1_amd64.deb`，以及 apt 源 `https://dkjsiogu.github.io/cairn/apt`（0.37 起改名 Cairn）
+> 日期：2026-11-24
+> 对应发布：GitHub Release `v0.45.2` 的 `cairn.exe`、`cairn_0.45.2_amd64.deb`，以及 apt 源 `https://dkjsiogu.github.io/cairn/apt`（0.37 起改名 Cairn）
 > 目的：把「设计稿」和「已经跑起来的代码」分开记账，避免把计划当成已完成。
 
 ## 1. 一句话结论
@@ -49,6 +49,8 @@
 0.34.1 修复 26.x 无法安装和启动：版本文件 `default-user-jvm` 的首条没有 `rules`，解析失败；`${natives_directory}` 误指向 `java` 子目录，`java.library.path` 变成 `.../java/java`。实测 26.1、26.3 原版可安装并进入世界。调参在版本文件带官方默认时跟随官方（26.x 为 ZGC + 紧凑对象头 + 预先占用 + 字符串去重，初始堆 2 GB）。Java 选择改为够用里最低的大版本，同版本优先 64 位 OpenJDK。
 
 0.42.5 手感（见 [21](21-handling.md) §4）。文字默认不可选中（`selectable_labels = false`），整行可点的列表、卡片点在字上也算；`motion::pointer_on_clickables` 让所有能点的地方悬停变手形，egui 按钮也设了 `interact_cursor`；`list_row_fill` 看整个 Response，悬停渐变、按下加深、右键菜单开着时保持高亮；次按钮加按下颜色。版本列表右键菜单（启动、打开文件夹、改名、移到回收站）和 ↑ ↓ 切换；日志行可拖选，错误提示加「复制」；右下角单独一条细边写版本号，点它打开设置。
+
+0.45.2 Windows 无黑框修复与全界面文案瘦身：`paths::no_window` 统一为 Windows 后台 `java.exe` 子进程设置 `CREATE_NO_WINDOW`（补齐 `install/processors.rs` 与 `java.rs` 探测，`launch.rs` 与 `bench.rs` 共用）；精简 22 个界面文件中的冗余推销、复读副标题与过度安抚文案，并修正启动参数、登录错误和安装页中的 3 处过期文案。
 
 0.45.1 底层可靠性清理与文档整理：`paths::write_atomic` 改用 `<文件名>.tmp-<pid>-<seq>` 避免并发与同主名文件撞车，新增 `write_atomic_private` 在 Unix 创建时直接设 `0600`（用于 `accounts.json`、`account.json` 及切换目录复制），`played.json` 改走 `write_atomic`；`snapshots` 的 `restore`、`delete`、`chunk_map` 补齐 `REPO_LOCK` 避免与后台 `prune`/`repack` 竞态；清理 `auth`、`accounts`、`saves`、`snapshots`、`region`、`rollback`、`update`、`shots`、`export`、`yggdrasil`、`paths` 中误用的 `Error::Install`；Windows `swap_exe` 在 `cairn.old.exe` 暂被占用时退到带进程号的备份名并在启动时一并清理；重拍 `0.45.1` 全套截图与动效并把 README 历史拆进 `CHANGELOG.md`。
 

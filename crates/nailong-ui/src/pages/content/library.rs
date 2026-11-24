@@ -193,15 +193,15 @@ impl App {
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.label(
-                            egui::RichText::new("先选一个安装目标").size(15.0).family(bold_family()),
+                            egui::RichText::new("先选一个安装目标")
+                                .size(15.0)
+                                .family(bold_family()),
                         );
                         ui.add_space(5.0);
                         ui.label(
-                            egui::RichText::new(
-                                "内容需要一个目标版本。在上方「安装到」里选一个，或去「版本」页装一个。",
-                            )
-                            .size(13.0)
-                            .color(t::sub()),
+                            egui::RichText::new("在上方选择目标版本，或先安装一个版本")
+                                .size(13.0)
+                                .color(t::sub()),
                         );
                         ui.add_space(14.0);
                         if primary_wide(ui, "去版本页", true, 168.0) {
@@ -298,7 +298,7 @@ impl App {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if accent_outline(ui, "＋ 导入文件")
-                    .on_hover_text("也可以直接把文件拖进窗口，一次可以拖很多个")
+                    .on_hover_text("也支持直接拖入多个文件")
                     .clicked()
                 {
                     import = true;
@@ -361,7 +361,7 @@ impl App {
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if action_link(ui, "重新扫描")
-                        .on_hover_text("回到窗口时会自动发现文件夹里的变化，一般不用点")
+                        .on_hover_text("手动重新扫描文件变化")
                         .clicked()
                     {
                         rescan = true;
@@ -463,18 +463,11 @@ impl App {
                         ui.horizontal(|ui| {
                             ui.label(egui::RichText::new("↑").size(15.0).color(t::accent()));
                             ui.add_space(2.0);
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    egui::RichText::new(format!("{} 项有新版本", updates.len()))
-                                        .size(13.0)
-                                        .family(bold_family()),
-                                );
-                                ui.label(
-                                    egui::RichText::new("逐个更新，旧文件会一并清理")
-                                        .size(13.0)
-                                        .color(t::sub()),
-                                );
-                            });
+                            ui.label(
+                                egui::RichText::new(format!("{} 项有新版本", updates.len()))
+                                    .size(13.0)
+                                    .family(bold_family()),
+                            );
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
@@ -517,11 +510,9 @@ impl App {
             } else if status == StatusFilter::Duplicates && !groups.is_empty() {
                 ui.add_space(10.0);
                 ui.label(
-                    egui::RichText::new(
-                        "同一个 Mod 的几份挨在一起：留一份，其余禁用或删除，游戏才不会报重复",
-                    )
-                    .size(13.0)
-                    .color(t::sub()),
+                    egui::RichText::new("保留一份，其余禁用或删除，避免加载冲突")
+                        .size(13.0)
+                        .color(t::sub()),
                 );
             }
 

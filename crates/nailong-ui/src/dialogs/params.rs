@@ -189,7 +189,7 @@ impl App {
                         );
                         ui.label(
                             egui::RichText::new(format!(
-                                "{} · 只改这个版本，没改的跟随全局（设置 › 性能）",
+                                "{} · 仅对当前版本生效，未改项跟随全局",
                                 short_text(&row.label, 24)
                             ))
                             .size(13.0)
@@ -225,7 +225,7 @@ impl App {
                             ui,
                             edit.draft.java.is_none(),
                             &auto_label,
-                            &format!("这个版本需要 Java {required} 或更新，自动选够用里最低的"),
+                            &format!("需要 Java {required}+，自动匹配合适版本"),
                             None,
                         ) {
                             edit.draft.java = None;

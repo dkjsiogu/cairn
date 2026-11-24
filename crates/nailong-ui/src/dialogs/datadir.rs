@@ -42,11 +42,9 @@ impl App {
                         .family(display_family()),
                 );
                 ui.label(
-                    egui::RichText::new(
-                        "版本、运行库和资源都从这里读。可以直接用别的启动器的 .minecraft",
-                    )
-                    .size(13.0)
-                    .color(t::sub()),
+                    egui::RichText::new("可直接切换至其他启动器的 .minecraft")
+                        .size(13.0)
+                        .color(t::sub()),
                 );
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
@@ -80,11 +78,9 @@ impl App {
                             .show(ui, |ui| {
                                 if self.data_dir.found.is_empty() {
                                     ui.label(
-                                        egui::RichText::new(
-                                            "没找到别的启动器的 .minecraft，可以自己选文件夹",
-                                        )
-                                        .size(13.0)
-                                        .color(t::dim()),
+                                        egui::RichText::new("未检测到其他启动器目录，可手动选择")
+                                            .size(13.0)
+                                            .color(t::dim()),
                                     );
                                 }
                                 for other in &self.data_dir.found {
@@ -121,7 +117,7 @@ impl App {
                 }
                 ui.add_space(10.0);
                 ui.label(
-                    egui::RichText::new("账户和设置会一起带过去。换好后 Cairn 会重新打开")
+                    egui::RichText::new("切换后将带入账户与设置，并重启 Cairn")
                         .size(12.0)
                         .color(t::dim()),
                 );

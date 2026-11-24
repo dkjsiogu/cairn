@@ -119,11 +119,7 @@ impl Prepared {
             cmd.env_remove("JAVA_TOOL_OPTIONS");
             cmd.env_remove("JDK_JAVA_OPTIONS");
         }
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        }
+        crate::paths::no_window(&mut cmd);
         cmd
     }
 

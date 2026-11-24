@@ -633,23 +633,11 @@ impl App {
                     ui.set_width(left_w);
                     card().show(ui, |ui| {
                         ui.set_width(left_w - 36.0);
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new("版本信息")
-                                    .size(15.0)
-                                    .family(bold_family()),
-                            );
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.label(
-                                        egui::RichText::new("选定版本后自动解析前置")
-                                            .size(13.0)
-                                            .color(t::sub()),
-                                    );
-                                },
-                            );
-                        });
+                        ui.label(
+                            egui::RichText::new("版本信息")
+                                .size(15.0)
+                                .family(bold_family()),
+                        );
                         ui.add_space(9.0);
                         if let Some(version) = &selected {
                             detail_kv(ui, "文件", &short_text(&version.file_name, 76));
@@ -722,21 +710,23 @@ impl App {
                                         .color(t::sub()),
                                 );
                             }
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.label(
-                                        egui::RichText::new("必需前置自动安装")
-                                            .size(13.0)
-                                            .color(t::sub()),
-                                    );
-                                },
-                            );
+                            if !choices.is_empty() {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            egui::RichText::new("必需前置自动安装")
+                                                .size(13.0)
+                                                .color(t::sub()),
+                                        );
+                                    },
+                                );
+                            }
                         });
                         ui.add_space(8.0);
                         if selected.is_none() || versions_loading {
                             ui.label(
-                                egui::RichText::new("选好版本后，这里会列出需要的前置。")
+                                egui::RichText::new("请先选择版本")
                                     .size(13.0)
                                     .color(t::sub()),
                             );
@@ -751,9 +741,7 @@ impl App {
                             ui.horizontal(|ui| {
                                 status_dot(ui, true);
                                 ui.label(
-                                    egui::RichText::new("这个版本没有额外前置")
-                                        .size(13.0)
-                                        .color(t::sub()),
+                                    egui::RichText::new("无额外前置").size(13.0).color(t::sub()),
                                 );
                             });
                         } else {
@@ -846,12 +834,6 @@ impl App {
                                     .color(t::sub()),
                             );
                         });
-                        ui.add_space(3.0);
-                        ui.label(
-                            egui::RichText::new("点一行切换要安装的版本")
-                                .size(13.0)
-                                .color(t::sub()),
-                        );
                         ui.add_space(8.0);
                         if versions.is_empty() {
                             ui.label(

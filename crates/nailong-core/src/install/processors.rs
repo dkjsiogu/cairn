@@ -241,14 +241,17 @@ pub fn install_client(
                 args
             );
         }
-        let mut child = Command::new(&java.path)
-            .arg("-cp")
+        let mut cmd = Command::new(&java.path);
+        cmd.arg("-cp")
             .arg(classpath.join(if cfg!(windows) { ";" } else { ":" }))
             .arg(&main_class)
             .args(&args)
             .current_dir(root.dir())
+            .stdin(Stdio::null())
             .stdout(Stdio::from(log))
-            .stderr(Stdio::from(log_err))
+            .stderr(Stdio::from(log_err));
+        crate::paths::no_window(&mut cmd);
+        let mut child = cmd
             .spawn()
             .map_err(|e| Error::Install(format!("无法启动 {label} processor: {e}")))?;
         let status = loop {

@@ -446,17 +446,11 @@ impl App {
                         busy_spinner(ui);
                         ui.add_space(5.0);
                         ui.label(
-                            egui::RichText::new("正在加载热门与最新内容…")
+                            egui::RichText::new("正在加载内容…")
                                 .size(13.0)
                                 .family(bold_family()),
                         );
                     });
-                    ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new("正在连接 Modrinth / CurseForge，第一次会慢一点")
-                            .size(13.0)
-                            .color(t::sub()),
-                    );
                     ui.add_space(16.0);
                     for _ in 0..3 {
                         skeleton_line(ui, 12.0);
@@ -648,11 +642,9 @@ impl App {
                         );
                         ui.add_space(5.0);
                         ui.label(
-                            egui::RichText::new(
-                                "换个关键词，或者在「只浏览」模式下放宽游戏版本与加载器。",
-                            )
-                            .size(13.0)
-                            .color(t::sub()),
+                            egui::RichText::new("换个关键词，或在顶部放宽版本与加载器筛选")
+                                .size(13.0)
+                                .color(t::sub()),
                         );
                         ui.add_space(12.0);
                         if primary_wide(ui, "回到浏览", true, 150.0) {

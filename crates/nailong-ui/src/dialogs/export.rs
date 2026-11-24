@@ -274,7 +274,7 @@ impl App {
             .sum();
         ui.label(
             egui::RichText::new(format!(
-                "勾选了 {}。Mod、资源包、光影能在 Modrinth 或 CurseForge 下到的只记地址，不打包；其余打包进去",
+                "已选 {} · Modrinth / CurseForge 资源仅记外链，其余直接打包",
                 human_size(picked)
             ))
             .size(12.0)
@@ -310,7 +310,7 @@ impl App {
         ui.add_space(4.0);
         ui.label(
             egui::RichText::new(format!(
-                "{} 个文件只记下载地址，安装时自己去下；{} 个文件打包进去",
+                "{} 个外链文件 · {} 个已打包",
                 report.online, report.packed
             ))
             .size(13.0)
@@ -367,7 +367,7 @@ impl App {
                 });
             ui.add_space(4.0);
             ui.label(
-                egui::RichText::new("自己做的、改过的，或者作者不让第三方下载的 Mod 会在这里")
+                egui::RichText::new("自定义文件或禁止第三方分发的文件已直接打包")
                     .size(12.0)
                     .color(t::dim()),
             );

@@ -290,12 +290,9 @@ impl App {
                                 });
                         });
                         ui.label(
-                            egui::RichText::new(format!(
-                                "{} 个世界 · 每次快照只存改过的部分",
-                                self.worlds.list.len()
-                            ))
-                            .size(13.0)
-                            .color(t::sub()),
+                            egui::RichText::new(format!("{} 个世界", self.worlds.list.len()))
+                                .size(13.0)
+                                .color(t::sub()),
                         );
                     });
                     if wide {
@@ -866,7 +863,7 @@ pub(crate) fn saves_empty_card(
                 ui.add_space(4.0);
                 ui.add(
                     egui::Label::new(
-                        egui::RichText::new("第一次会完整存一份，之后只写改动过的块。")
+                        egui::RichText::new("按区块增量保存，占用空间小")
                             .size(13.0)
                             .color(t::sub()),
                     )

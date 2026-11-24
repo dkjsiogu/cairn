@@ -24,32 +24,16 @@ impl App {
             .show(ctx, |ui| {
                 ui.set_width(500.0);
                 ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.label(
-                            egui::RichText::new("写入前先确认")
-                            .size(13.0)
-                            .color(t::accent()),
-                        );
-                        ui.label(
-                            egui::RichText::new(if review.update {
-                                "确认更新"
-                            } else {
-                                "确认安装"
-                            })
-                            .size(24.0)
-                            .family(display_family())
-                            .color(t::ink()),
-                        );
-                        ui.label(
-                            egui::RichText::new(if review.update {
-                                "先确认版本变化，再覆盖旧文件"
-                            } else {
-                                "先确认写入位置，再开始下载"
-                            })
-                            .size(13.0)
-                            .color(t::sub()),
-                        );
-                    });
+                    ui.label(
+                        egui::RichText::new(if review.update {
+                            "确认更新"
+                        } else {
+                            "确认安装"
+                        })
+                        .size(24.0)
+                        .family(display_family())
+                        .color(t::ink()),
+                    );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let fill = t::tint(t::accent(), 0.16);
                         if review.update {
@@ -67,11 +51,7 @@ impl App {
                             .family(bold_family()),
                     );
                     if review.quick {
-                        ui.label(
-                            egui::RichText::new("一键安装")
-                                .size(13.0)
-                                .color(t::sub()),
-                        );
+                        ui.label(egui::RichText::new("一键安装").size(13.0).color(t::sub()));
                     }
                 });
                 ui.add_space(9.0);
@@ -84,7 +64,11 @@ impl App {
                         ui.set_width(476.0);
                         install_review_row(
                             ui,
-                            if review.update { "更新到" } else { "安装到" },
+                            if review.update {
+                                "更新到"
+                            } else {
+                                "安装到"
+                            },
                             &review.target,
                         );
                         ui.add_space(5.0);
@@ -99,28 +83,14 @@ impl App {
                             ui.add_space(5.0);
                             install_review_row(ui, "预计大小", &human_size(size));
                         }
-                        ui.add_space(5.0);
-                        install_review_row(ui, "影响范围", "只写这个版本的内容目录，不动世界存档");
                     });
                 ui.add_space(12.0);
                 if review.update {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "将更新 {} 个项目",
-                                review.updates.len()
-                            ))
+                    ui.label(
+                        egui::RichText::new(format!("将更新 {} 个项目", review.updates.len()))
                             .size(13.0)
                             .family(bold_family()),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(
-                                egui::RichText::new("旧文件会一并清理")
-                                    .size(13.0)
-                                    .color(t::sub()),
-                            );
-                        });
-                    });
+                    );
                     ui.add_space(6.0);
                     egui::ScrollArea::vertical()
                         .id_salt("update_review_list")
@@ -160,39 +130,24 @@ impl App {
                         });
                 } else if review.quick {
                     ui.label(
-                        egui::RichText::new(
-                            "点「确认安装」后才会解析最新兼容版本与必需前置；解析失败不会改动现有文件。",
-                        )
-                        .size(13.0)
-                        .color(t::sub()),
+                        egui::RichText::new("确认后自动解析最新兼容版本与必需前置")
+                            .size(13.0)
+                            .color(t::sub()),
                     );
                 } else if review.dependencies.is_empty() {
                     ui.horizontal(|ui| {
                         status_dot(ui, true);
-                        ui.label(
-                            egui::RichText::new("没有额外前置，只安装这一个文件")
-                                .size(13.0)
-                                .color(t::sub()),
-                        );
+                        ui.label(egui::RichText::new("无额外前置").size(13.0).color(t::sub()));
                     });
                 } else {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "一起安装 {} 个前置",
-                                review.dependencies.len()
-                            ))
-                            .size(13.0)
-                            .family(bold_family()),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(
-                                egui::RichText::new("必需自动勾选，可选按你的选择")
-                                    .size(13.0)
-                                    .color(t::sub()),
-                            );
-                        });
-                    });
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "一起安装 {} 个前置",
+                            review.dependencies.len()
+                        ))
+                        .size(13.0)
+                        .family(bold_family()),
+                    );
                     ui.add_space(6.0);
                     egui::ScrollArea::vertical()
                         .id_salt("install_review_deps")
@@ -202,31 +157,21 @@ impl App {
                             for dependency in &review.dependencies {
                                 ui.horizontal(|ui| {
                                     if dependency.required {
-                                        tag_fill(
-                                            ui,
-                                            "必需",
-                                            t::accent(),
-                                            t::tint(t::warn(), 0.14),
-                                        );
+                                        tag_fill(ui, "必需", t::accent(), t::tint(t::warn(), 0.14));
                                     } else {
                                         tag_fill(ui, "可选", t::sub(), t::wash());
                                     }
                                     ui.add_space(3.0);
                                     ui.add(
                                         egui::Label::new(
-                                            egui::RichText::new(short_text(
-                                                &dependency.name,
-                                                44,
-                                            ))
-                                            .size(13.0),
+                                            egui::RichText::new(short_text(&dependency.name, 44))
+                                                .size(13.0),
                                         )
                                         .truncate(),
                                     );
                                     if dependency.missing {
                                         ui.label(
-                                            egui::RichText::new("缺失")
-                                                .size(13.0)
-                                                .color(t::warn()),
+                                            egui::RichText::new("缺失").size(13.0).color(t::warn()),
                                         );
                                     }
                                 });
@@ -234,43 +179,22 @@ impl App {
                             }
                         });
                 }
+                ui.add_space(10.0);
+                ui.label(
+                    egui::RichText::new("操作前将自动创建恢复点")
+                        .size(12.5)
+                        .color(t::dim()),
+                );
                 ui.add_space(12.0);
-                egui::Frame::new()
-                    .fill(t::tint(t::warn(), 0.09))
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        t::tint(t::warn(), 0.35),
-                    ))
-                    .corner_radius(motion::R)
-                    .inner_margin(egui::Margin::symmetric(12, 10))
-                    .show(ui, |ui| {
-                        ui.set_width(476.0);
-                        ui.label(
-                            egui::RichText::new(if review.update {
-                                "更新前自动创建恢复点"
-                            } else {
-                                "安装前自动创建恢复点"
-                            })
-                            .size(13.0)
-                            .family(bold_family())
-                            .color(t::warn()),
-                        );
-                        ui.label(
-                            egui::RichText::new(if review.update {
-                                "更新后进不去，在「内容 › 恢复点」一键回到更新前。"
-                            } else {
-                                "装完发现不对，在「内容 › 恢复点」一键回到现在。"
-                            })
-                            .size(13.0)
-                            .color(t::sub()),
-                        );
-                    });
-                ui.add_space(14.0);
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if motion::primary_sized_glyph(
                             ui,
-                            if review.update { "确认更新" } else { "确认安装" },
+                            if review.update {
+                                "确认更新"
+                            } else {
+                                "确认安装"
+                            },
                             true,
                             118.0,
                             34.0,
@@ -280,9 +204,7 @@ impl App {
                             confirm = true;
                         }
                         ui.add_space(8.0);
-                        if motion::secondary_sized(ui, "取消", true, 76.0, 34.0, 11.5)
-                            .clicked()
-                        {
+                        if motion::secondary_sized(ui, "取消", true, 76.0, 34.0, 11.5).clicked() {
                             cancel = true;
                         }
                     });

@@ -278,7 +278,7 @@ impl App {
                     AddTab::Microsoft => {
                         ui.add(
                             egui::Label::new(
-                                egui::RichText::new("在浏览器中登录微软账户")
+                                egui::RichText::new("将打开浏览器完成微软正版授权")
                                     .size(13.5)
                                     .color(t::sub()),
                             )

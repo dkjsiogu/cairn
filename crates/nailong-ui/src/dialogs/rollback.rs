@@ -113,7 +113,7 @@ impl App {
                         );
                         ui.label(
                             egui::RichText::new(
-                                "恢复 Mod、配置、内容索引和加载器版本文件；恢复前会自动留一份当前状态",
+                                "恢复 Mod、配置与加载器（不动世界存档），操作前自动留档",
                             )
                             .size(13.0)
                             .color(t::sub()),
@@ -139,7 +139,11 @@ impl App {
                 ui.horizontal(|ui| {
                     if self.rollback.busy {
                         busy_spinner(ui);
-                        ui.label(egui::RichText::new("正在处理内容…").size(13.0).color(t::sub()));
+                        ui.label(
+                            egui::RichText::new("正在处理内容…")
+                                .size(13.0)
+                                .color(t::sub()),
+                        );
                     } else if motion::primary_sized(ui, "立即创建恢复点", true, 128.0, 32.0, 11.0)
                     {
                         create = true;
@@ -165,11 +169,9 @@ impl App {
                                 );
                                 ui.add_space(4.0);
                                 ui.label(
-                                    egui::RichText::new(
-                                        "安装或更新内容前会自动创建一个；版本目录内的加载器 JSON / 补丁 jar 也会一起保存。",
-                                    )
-                                    .size(13.0)
-                                    .color(t::sub()),
+                                    egui::RichText::new("安装或更新内容前会自动创建")
+                                        .size(13.0)
+                                        .color(t::sub()),
                                 );
                             });
                             ui.add_space(18.0);
@@ -216,10 +218,11 @@ impl App {
                                                                     .size(13.0)
                                                                     .color(t::danger()),
                                                             )
-                                                            .fill(
-                                                                t::tint(t::danger(), 0.16),
-                                                            )
-                                                            .stroke(egui::Stroke::new(1.0, t::danger())),
+                                                            .fill(t::tint(t::danger(), 0.16))
+                                                            .stroke(egui::Stroke::new(
+                                                                1.0,
+                                                                t::danger(),
+                                                            )),
                                                         )
                                                         .clicked()
                                                     {
@@ -263,12 +266,6 @@ impl App {
                             ui.add_space(6.0);
                         }
                     });
-                ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new("只恢复内容与加载器版本文件，不动世界存档；世界备份在「存档」里。")
-                        .size(13.0)
-                        .color(t::sub()),
-                );
             });
         if modal.backdrop_response.clicked() || escape_pressed(ctx) {
             close = true;

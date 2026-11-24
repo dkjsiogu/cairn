@@ -455,11 +455,7 @@ fn run_once(
     for var in ["_JAVA_OPTIONS", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS"] {
         cmd.env_remove(var);
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
+    crate::paths::no_window(&mut cmd);
     let started = Instant::now();
     let mut child = cmd
         .spawn()

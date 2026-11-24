@@ -71,32 +71,30 @@ pub fn tip(data: &Data, layer: Layer) -> Tip {
         (Layer::Core, State::Ready) => (
             "可以启动".into(),
             if data.update_names.is_empty() {
-                "所有文件都已就绪。".into()
+                "文件完整".into()
             } else {
-                "有更新不影响启动。".into()
+                "有可更新 Mod，不影响启动".into()
             },
             "点击开始游戏",
         ),
         (Layer::Core, State::Missing) => (
             "暂时不能启动".into(),
-            format!("还缺 {} 个文件，补全后就能玩。", data.missing),
+            format!("缺 {} 个文件", data.missing),
             "点击补全文件",
         ),
-        (Layer::Core, State::Installing) => {
-            ("正在安装".into(), "可以最小化窗口，安装会继续。".into(), "")
-        }
+        (Layer::Core, State::Installing) => ("正在安装".into(), "后台安装中".into(), ""),
         (Layer::Core, State::Running) => (
             "游戏运行中".into(),
             if data.running_minutes == 0 {
-                "刚刚启动。".into()
+                "刚刚启动".into()
             } else {
-                format!("已运行 {} 分钟。", data.running_minutes)
+                format!("已运行 {} 分钟", data.running_minutes)
             },
             "点击查看日志",
         ),
         (Layer::Files, State::Missing) => (
             format!("缺 {} 个文件", data.missing),
-            "补全时只下载缺少的部分。".into(),
+            "仅补下缺失文件".into(),
             "点击查看版本详情",
         ),
         (Layer::Files, State::Installing) => (
@@ -104,49 +102,45 @@ pub fn tip(data: &Data, layer: Layer) -> Tip {
             data.progress_detail.clone(),
             "",
         ),
-        (Layer::Files, State::Running) => (
-            "文件完整".into(),
-            "运行期间不会改动游戏文件。".into(),
-            "点击查看版本详情",
-        ),
+        (Layer::Files, State::Running) => {
+            ("文件完整".into(), "游戏运行中".into(), "点击查看版本详情")
+        }
         (Layer::Files, _) => (
             "文件完整".into(),
-            "客户端、运行库和资源都没有缺失。".into(),
+            "客户端与资源齐全".into(),
             "点击查看版本详情",
         ),
-        (Layer::Mods, State::Installing) => {
-            ("等待安装".into(), "装好游戏后再处理 Mod。".into(), "")
-        }
+        (Layer::Mods, State::Installing) => ("等待安装".into(), "安装完成后管理".into(), ""),
         (Layer::Mods, _) if data.mods.is_empty() => (
             "还没有 Mod".into(),
-            "可以去内容页发现和安装。".into(),
+            "去内容页发现和安装".into(),
             "点击打开内容",
         ),
         (Layer::Mods, State::Running) => (
             format!("{} 个 Mod", data.mods.len()),
-            "运行中可以查看，退出游戏后才能修改。".into(),
+            "运行中仅可查看，退出游戏后修改".into(),
             "点击查看内容",
         ),
         (Layer::Mods, _) if !data.update_names.is_empty() => (
             format!("{} 个可更新", data.update_names.len()),
-            format!("{}。更新前会留恢复点。", data.update_names.join("、")),
+            data.update_names.join("、"),
             "点击查看更新",
         ),
         (Layer::Mods, _) => (
             format!("{} 个 Mod", data.mods.len()),
-            format!("{enabled} 个已启用，{disabled} 个已禁用。"),
+            format!("{enabled} 启用 · {disabled} 禁用"),
             "点击打开内容",
         ),
         (Layer::Saves, _) if data.snapshots == 0 => (
             "还没有快照".into(),
-            "可以在存档页给世界做备份。".into(),
+            "在存档页创建备份".into(),
             "点击打开存档",
         ),
         (Layer::Saves, _) => (
             format!("{} 个快照", data.snapshots),
             data.latest_snapshot
                 .as_ref()
-                .map(|age| format!("最新一份在 {age}，新的刻度在最上方。"))
+                .map(|age| format!("最新：{age}"))
                 .unwrap_or_default(),
             "点击打开存档",
         ),

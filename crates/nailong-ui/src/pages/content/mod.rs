@@ -167,11 +167,6 @@ impl App {
                         .family(display_family())
                         .color(t::ink()),
                 );
-                ui.label(
-                    egui::RichText::new("Mod、资源包、光影 · 已安装与发现")
-                        .size(13.0)
-                        .color(t::sub()),
-                );
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let rows: Vec<Row> = self.rows.clone();
@@ -374,7 +369,7 @@ impl App {
                         });
                 }
                 ui.label(
-                    egui::RichText::new("选一个目标版本可以一键安装到它；只浏览不会写入磁盘")
+                    egui::RichText::new("在上方选择目标版本后可一键安装")
                         .size(13.0)
                         .color(t::sub()),
                 );

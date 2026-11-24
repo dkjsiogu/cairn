@@ -255,7 +255,7 @@ impl App {
                 ui.label(egui::RichText::new(detail).size(13.0).color(t::sub()));
                 ui.add_space(2.0);
                 ui.label(
-                    egui::RichText::new("地形、实体和兴趣点一起换；回档前自动快照当前世界")
+                    egui::RichText::new("同步回档地形、实体与兴趣点，操作前自动快照")
                         .size(13.0)
                         .color(t::dim()),
                 );

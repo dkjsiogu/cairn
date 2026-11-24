@@ -48,9 +48,8 @@ impl App {
             });
             ui.add_space(10.0);
             for line in [
-                "Mod、配置和加载器回到那时的样子",
-                "世界存档不动",
-                "退回前会先留一份现在的，退错了还能回来",
+                "恢复 Mod、配置和加载器（不动世界存档）",
+                "退回前会自动留档，随时可撤销",
             ] {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("·").size(13.0).color(t::dim()));

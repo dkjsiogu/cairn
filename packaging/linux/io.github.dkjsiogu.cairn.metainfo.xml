@@ -28,6 +28,11 @@
   <url type="bugtracker">https://github.com/dkjsiogu/cairn/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.45.2" date="2026-11-24">
+      <description>
+        <p>Windows console popup fix and UI copy cleanup: apply CREATE_NO_WINDOW to Forge/NeoForge installer processors and Java runtime probing so installing versions on Windows no longer flashes black console windows; trimmed verbose boilerplate and fixed three stale UI hints across all pages and dialogs.</p>
+      </description>
+    </release>
     <release version="0.45.1" date="2026-11-23">
       <description>
         <p>Reliability and polish pass: atomic file writes now use collision-free temp names and create credential files with 0600 permissions immediately on Unix; snapshot restore, delete and chunk-map reads now share the repository lock with backup and prune; non-install errors (login, saves, snapshots, updates) no longer carry a misleading install-failure prefix; Windows self-update handles locked backup executables more cleanly. Refreshed all documentation screenshots to Cairn 0.45.1 and moved full release history into CHANGELOG.md.</p>

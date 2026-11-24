@@ -530,12 +530,6 @@ impl App {
                                 .size(15.0)
                                 .family(bold_family()),
                         );
-                        ui.add_space(6.0);
-                        ui.label(
-                            egui::RichText::new("装一个原版或加载器版本，再回来管理内容与存档")
-                                .size(13.0)
-                                .color(t::sub()),
-                        );
                         ui.add_space(16.0);
                         if ui
                             .add(
@@ -738,17 +732,17 @@ impl App {
                                         open_dir = Some(dir.clone());
                                     }
                                 });
-                                ui.add_space(4.0);
                                 let own = row.game_dir == self.root.version_dir(&row.id);
-                                ui.label(
-                                    egui::RichText::new(if own {
-                                        "Mod、存档、配置都在这个文件夹里，和别的版本互不影响"
-                                    } else {
-                                        "这个版本没开版本隔离：Mod、存档、配置在 .minecraft 里，和别的没隔离的版本共用"
-                                    })
-                                    .size(13.0)
-                                    .color(t::dim()),
-                                );
+                                if !own {
+                                    ui.add_space(4.0);
+                                    ui.label(
+                                        egui::RichText::new(
+                                            "未隔离：与 .minecraft 共用 Mod、存档和配置",
+                                        )
+                                        .size(13.0)
+                                        .color(t::warn()),
+                                    );
+                                }
                             });
 
                         ui.add_space(16.0);
@@ -1025,13 +1019,7 @@ impl App {
                                 );
                             });
                         });
-                        ui.add_space(1.0);
-                        ui.label(
-                            egui::RichText::new("选择 Minecraft 版本和加载器，下载完整客户端")
-                                .size(13.0)
-                                .color(t::sub()),
-                        );
-                        ui.add_space(18.0);
+                        ui.add_space(16.0);
 
                         ui.horizontal_top(|ui| {
                             ui.allocate_ui_with_layout(
@@ -1172,9 +1160,9 @@ impl App {
                                                 egui::RichText::new(format!(
                                                     "预计下载 200–300 MB · Java 21 {}",
                                                     if self.env.java_ok {
-                                                        "已检测到"
+                                                        "已就绪"
                                                     } else {
-                                                        "未检测到"
+                                                        "缺失（启动时自动下载）"
                                                     }
                                                 ))
                                                 .size(13.0)
@@ -1257,22 +1245,14 @@ impl App {
                                                     }
                                                     Ok(_) => None,
                                                 };
-                                            ui.add_space(4.0);
-                                            ui.label(
-                                                egui::RichText::new(match &name_problem {
-                                                    Some(problem) => problem.clone(),
-                                                    None => {
-                                                        "一个版本一个文件夹，Mod 和存档都在里面"
-                                                            .to_string()
-                                                    }
-                                                })
-                                                .size(13.0)
-                                                .color(if name_problem.is_some() {
-                                                    t::warn()
-                                                } else {
-                                                    t::dim()
-                                                }),
-                                            );
+                                            if let Some(problem) = &name_problem {
+                                                ui.add_space(4.0);
+                                                ui.label(
+                                                    egui::RichText::new(problem)
+                                                        .size(13.0)
+                                                        .color(t::warn()),
+                                                );
+                                            }
                                             ui.add_space(14.0);
                                             let can_install = self.busy.is_none()
                                                 && !mc.is_empty()
@@ -1316,11 +1296,9 @@ impl App {
                                                 .family(bold_family()),
                                         );
                                         ui.label(
-                                            egui::RichText::new(
-                                                "拖入 .mrpack / .zip，自动安装加载器并解压",
-                                            )
-                                            .size(13.0)
-                                            .color(t::sub()),
+                                            egui::RichText::new("拖入或选择 .mrpack / .zip")
+                                                .size(13.0)
+                                                .color(t::sub()),
                                         );
                                     });
                                     ui.with_layout(
@@ -1345,30 +1323,6 @@ impl App {
                                     );
                                 });
                             });
-                        ui.add_space(14.0);
-                        egui::Frame::new()
-                            .fill(t::bg())
-                            .stroke(egui::Stroke::new(1.0, t::hairline()))
-                            .corner_radius(motion::R)
-                            .inner_margin(egui::Margin::symmetric(18, 14))
-                            .show(ui, |ui| {
-                                ui.set_width(width - 36.0);
-                                ui.horizontal(|ui| {
-                                    feature(ui, "断点续传", "下载中断后只补缺失部分");
-                                    ui.add_space(28.0);
-                                    feature(ui, "SHA1 校验", "每个文件落盘前校验");
-                                    ui.add_space(28.0);
-                                    feature(ui, "共享运行库", "多版本复用 libraries 与 assets");
-                                });
-                            });
-                        if !self.env.java_ok {
-                            ui.add_space(10.0);
-                            ui.label(
-                                egui::RichText::new("未检测到 Java 21，安装后无法启动")
-                                    .size(13.0)
-                                    .color(t::warn()),
-                            );
-                        }
                         ui.add_space(24.0);
                     });
                 });
@@ -1510,13 +1464,6 @@ fn stat_button(ui: &mut egui::Ui, value: usize, label: &str) -> egui::Response {
         t::sub(),
     );
     response
-}
-
-pub(crate) fn feature(ui: &mut egui::Ui, title: &str, detail: &str) {
-    ui.vertical(|ui| {
-        ui.label(egui::RichText::new(title).size(13.0).family(bold_family()));
-        ui.label(egui::RichText::new(detail).size(13.0).color(t::sub()));
-    });
 }
 
 pub(crate) fn loader_tile(

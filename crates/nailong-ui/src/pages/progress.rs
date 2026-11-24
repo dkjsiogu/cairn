@@ -129,7 +129,7 @@ impl App {
                         left.push(format!("{} / {}", bytes(bytes_done), bytes(bytes_total)));
                     }
                     let left = if bench {
-                        "后台跑模拟负载，不开游戏窗口；期间电脑会比较忙".to_string()
+                        "后台模拟负载测试中，期间 CPU 占用较高".to_string()
                     } else {
                         left.join(" · ")
                     };
@@ -246,7 +246,7 @@ impl App {
                         ui.add_space(4.0);
                         if activity.recent.is_empty() {
                             ui.label(
-                                egui::RichText::new("文件都已经在了，只核对一遍")
+                                egui::RichText::new("正在校验本地文件")
                                     .size(12.5)
                                     .color(t::dim()),
                             );
@@ -289,9 +289,9 @@ impl App {
                     ui.add_space(4.0);
                     ui.label(
                         egui::RichText::new(if bench {
-                            "不碰任何版本、存档和设置；停止后之前的结论保持不变"
+                            "随时可停止，不影响已有配置"
                         } else {
-                            "已下载的部分会保留，下次只补缺失的文件"
+                            "取消后保留已下载文件"
                         })
                         .size(13.0)
                         .color(t::dim()),

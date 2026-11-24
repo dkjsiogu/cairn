@@ -377,6 +377,19 @@ pub fn to_trash(path: &Path) -> Result<()> {
     }
 }
 
+/// Windows 上启动控制台子进程（如 `java.exe`）时不弹出黑色命令行窗口。
+#[cfg(windows)]
+pub fn no_window(cmd: &mut std::process::Command) -> &mut std::process::Command {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    cmd.creation_flags(CREATE_NO_WINDOW)
+}
+
+#[cfg(not(windows))]
+pub fn no_window(cmd: &mut std::process::Command) -> &mut std::process::Command {
+    cmd
+}
+
 #[cfg(test)]
 mod root_tests {
     use super::*;

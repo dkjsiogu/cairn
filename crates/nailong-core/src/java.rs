@@ -2,7 +2,7 @@ use crate::error::{Error, Result};
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 #[derive(Debug, Clone)]
 pub struct JavaRuntime {
@@ -135,10 +135,11 @@ pub fn probe(path: &Path) -> Result<JavaRuntime> {
     if let Some(rt) = probe_release(home, path) {
         return Ok(rt);
     }
-    let output = Command::new(path)
-        .args(["-XshowSettings:properties", "-version"])
-        .output()
-        .map_err(|_| Error::JavaNotFound(0))?;
+    let mut cmd = Command::new(path);
+    cmd.args(["-XshowSettings:properties", "-version"])
+        .stdin(Stdio::null());
+    crate::paths::no_window(&mut cmd);
+    let output = cmd.output().map_err(|_| Error::JavaNotFound(0))?;
     let text = String::from_utf8_lossy(&output.stderr);
     let mut version = None;
     let mut vendor = None;

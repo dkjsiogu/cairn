@@ -60,20 +60,7 @@ impl App {
                                 );
                             });
                         });
-                        ui.add_space(5.0);
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new("装得干净，坏了能救。")
-                                    .size(13.0)
-                                    .color(t::ink()),
-                            );
-                            ui.label(
-                                egui::RichText::new("第一次启动，只需要把这三件事准备好。")
-                                    .size(13.0)
-                                    .color(t::sub()),
-                            );
-                        });
-                        ui.add_space(20.0);
+                        ui.add_space(18.0);
                         egui::Frame::new()
                             .fill(t::surface())
                             .stroke(egui::Stroke::new(1.0, t::hairline()))
@@ -81,23 +68,11 @@ impl App {
                             .inner_margin(egui::Margin::symmetric(24, 20))
                             .show(ui, |ui| {
                                 ui.set_width(content_w);
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        egui::RichText::new("开始之前")
-                                            .size(15.0)
-                                            .family(display_family()),
-                                    );
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            ui.label(
-                                                egui::RichText::new("大约 1 分钟")
-                                                    .size(13.0)
-                                                    .color(t::sub()),
-                                            );
-                                        },
-                                    );
-                                });
+                                ui.label(
+                                    egui::RichText::new("开始之前")
+                                        .size(15.0)
+                                        .family(display_family()),
+                                );
                                 ui.add_space(10.0);
                                 ui.separator();
                                 ui.add_space(12.0);
@@ -116,21 +91,22 @@ impl App {
                                                     .size(15.0)
                                                     .family(bold_family()),
                                             );
-                                            ui.label(
-                                                egui::RichText::new(
-                                                    "启动游戏需要 Java 21 或更高；下载版本本身不需要。",
-                                                )
-                                                .size(13.0)
-                                                .color(t::sub()),
-                                            );
                                             if let Some(label) = &self.env.java_label {
-                                                ui.add_space(3.0);
+                                                ui.add_space(2.0);
                                                 ui.label(
                                                     egui::RichText::new(short_text(label, 46))
                                                         .size(13.0)
                                                         .color(t::ok()),
                                                 )
                                                 .on_hover_text(label);
+                                            } else {
+                                                ui.label(
+                                                    egui::RichText::new(
+                                                        "需要 Java 21+，启动时如缺失将自动下载",
+                                                    )
+                                                    .size(13.0)
+                                                    .color(t::sub()),
+                                                );
                                             }
                                         },
                                     );
@@ -162,7 +138,9 @@ impl App {
                                                         30.0,
                                                         10.5,
                                                     )
-                                                    .on_hover_text("下载 Mojang 官方的 Java 运行时，放在数据目录里，不改系统")
+                                                    .on_hover_text(
+                                                        "下载 Mojang 官方 Java 运行时到数据目录",
+                                                    )
                                                     .clicked()
                                                     {
                                                         download_java = true;
@@ -189,16 +167,14 @@ impl App {
                                         |ui| {
                                             ui.set_width(content_w - 236.0);
                                             ui.label(
-                                                egui::RichText::new("确认游戏目录")
+                                                egui::RichText::new("游戏目录")
                                                     .size(15.0)
                                                     .family(bold_family()),
                                             );
                                             ui.label(
-                                                egui::RichText::new(
-                                                    "版本、Mod 和存档都在这里，不写系统目录。",
-                                                )
-                                                .size(13.0)
-                                                .color(t::sub()),
+                                                egui::RichText::new("版本、Mod 和存档存放位置")
+                                                    .size(13.0)
+                                                    .color(t::sub()),
                                             );
                                         },
                                     );
@@ -233,16 +209,14 @@ impl App {
                                     ui.add_space(10.0);
                                     ui.vertical(|ui| {
                                         ui.label(
-                                            egui::RichText::new("装第一个游戏配置")
+                                            egui::RichText::new("安装游戏")
                                                 .size(15.0)
                                                 .family(bold_family()),
                                         );
                                         ui.label(
-                                            egui::RichText::new(
-                                                "原版 / Fabric / NeoForge 都可以；整合包会顺带装好加载器和 Mod。",
-                                            )
-                                            .size(13.0)
-                                            .color(t::sub()),
+                                            egui::RichText::new("选择版本，或直接导入整合包")
+                                                .size(13.0)
+                                                .color(t::sub()),
                                         );
                                     });
                                 });
@@ -271,44 +245,8 @@ impl App {
                                     {
                                         import_pack = true;
                                     }
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            ui.label(
-                                                egui::RichText::new(
-                                                    "装完就能在启动台点开始",
-                                                )
-                                                .size(13.0)
-                                                .color(t::sub()),
-                                            );
-                                        },
-                                    );
                                 });
                             });
-                        ui.add_space(12.0);
-                        ui.horizontal(|ui| {
-                            status_dot(ui, true);
-                            ui.label(
-                                egui::RichText::new(
-                                    "下载会校验完整性；内容变更前自动创建恢复点。Java 缺失时也能先装版本。",
-                                )
-                                .size(13.0)
-                                .color(t::sub()),
-                            );
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "v{}",
-                                            env!("CARGO_PKG_VERSION")
-                                        ))
-                                        .size(13.0)
-                                        .color(t::sub()),
-                                    );
-                                },
-                            );
-                        });
                         ui.add_space(24.0);
                     });
                 });
@@ -441,14 +379,14 @@ impl App {
                             if running {
                                 // 游戏开着：主按钮看这一局的输出，旁边能结束它。
                                 if motion::secondary_sized(ui, "查看日志", true, 104.0, 40.0, 14.0)
-                                    .on_hover_text("这一局的游戏输出，跟着游戏刷新")
+                                    .on_hover_text("实时查看游戏输出")
                                     .clicked()
                                 {
                                     primary = true;
                                 }
                                 if stop_confirm {
                                     if danger_button(ui, "确认结束", 96.0, 40.0)
-                                        .on_hover_text("没存盘的进度会丢")
+                                        .on_hover_text("未保存的进度会丢失")
                                         .clicked()
                                     {
                                         stop = Some(true);
@@ -466,7 +404,7 @@ impl App {
                                     40.0,
                                     14.0,
                                 )
-                                .on_hover_text("游戏卡住时用。正常退出请在游戏里退")
+                                .on_hover_text("强制结束进程（正常退出请在游戏内操作）")
                                 .clicked()
                                 {
                                     self.play.stop_confirm = Some(row.id.clone());

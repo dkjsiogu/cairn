@@ -89,11 +89,9 @@ impl App {
                 ui.add_space(14.0);
                 let minutes = (picked.len() as f32 * 1.4).ceil().max(1.0) as u32;
                 for line in [
-                    "不开游戏，也不碰任何版本：后台跑一个模拟游戏负载的小程序".to_string(),
-                    "负载照游戏来：常驻数据、区块缓存、生成线程、服务端和不封顶的渲染".to_string(),
-                    "比平均帧率、1% 低帧、能看出来的顿和 CPU，分常规和大型整合包两档".to_string(),
-                    format!("大约 {minutes} 分钟，期间电脑会比较忙，可以随时停止"),
-                    "内存大小不在这里测：正常玩一局，启动器会从游戏里学".to_string(),
+                    "后台模拟游戏负载，不开游戏窗口，不影响已有版本".to_string(),
+                    "对比常规与大型整合包两档下的 G1 与 ZGC 表现".to_string(),
+                    format!("约 {minutes} 分钟，期间 CPU 占用较高，可随时停止"),
                 ] {
                     ui.horizontal_wrapped(|ui| {
                         ui.label(egui::RichText::new("·").size(13.0).color(t::dim()));
@@ -222,18 +220,10 @@ impl App {
                 for warning in &plan.warnings {
                     ui.label(egui::RichText::new(warning).size(13.0).color(t::warn()));
                 }
-                // 内存从哪来：玩过就按实测，没玩过提示一句。
-                if plan.auto_memory
+                let estimated_mem = plan.auto_memory
                     && entry
                         .as_ref()
-                        .is_none_or(|(_, _, learned)| learned.as_ref().is_none_or(|l| l.live_mb.is_none()))
-                {
-                    ui.label(
-                        egui::RichText::new("内存现在按公式估算；正常玩一局后改按游戏里的实测")
-                            .size(13.0)
-                            .color(t::dim()),
-                    );
-                }
+                        .is_none_or(|(_, _, learned)| learned.as_ref().is_none_or(|l| l.live_mb.is_none()));
                 // 回收器从哪来：这台电脑测过没有。
                 let java = entry.as_ref().map(|(_, java, _)| java.clone());
                 let (text, color, action) = self.bench_status(java.as_ref());
@@ -245,7 +235,10 @@ impl App {
                     );
                     if let Some(action) = action {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if action_link(ui, action).clicked() {
+                            if action_link(ui, action)
+                                .on_hover_text("约 1–2 分钟，后台对比 G1 与 ZGC")
+                                .clicked()
+                            {
                                 self.bench_confirm = true;
                             }
                         });
@@ -260,6 +253,14 @@ impl App {
                         );
                     }
                     return;
+                }
+                if estimated_mem {
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new("内存当前按公式估算，玩过一局后改按游戏实测调整")
+                            .size(13.0)
+                            .color(t::dim()),
+                    );
                 }
                 ui.add_space(8.0);
                 for step in &plan.steps {
@@ -350,11 +351,7 @@ impl App {
         let testable = !bench::candidates(&self.env.javas).0.is_empty();
         let Some(store) = &self.env.bench else {
             return if testable {
-                (
-                    "回收器按经验选；测一下这台电脑更准，约 1–2 分钟".into(),
-                    t::dim(),
-                    Some("测一下"),
-                )
+                ("回收器按经验选择，未测试".into(), t::dim(), Some("测一下"))
             } else {
                 ("没有 Java 21+，回收器只能用 G1".into(), t::dim(), None)
             };
@@ -493,13 +490,10 @@ impl App {
                     );
                 });
                 ui.add_space(14.0);
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("改了就生效").size(13.0).color(t::dim()));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if motion::primary_sized(ui, "完成", true, 86.0, 32.0, 12.0) {
-                            actions.close = true;
-                        }
-                    });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if motion::primary_sized(ui, "完成", true, 86.0, 32.0, 12.0) {
+                        actions.close = true;
+                    }
                 });
             });
         if modal.backdrop_response.clicked() || escape_pressed(ctx) {
@@ -642,7 +636,7 @@ impl App {
             if toggle_row(
                 ui,
                 "游戏启动后收起启动器",
-                "窗口出来后收到任务栏，游戏退出再回来",
+                "启动后最小化，退出后恢复",
                 self.prefs.minimize_on_launch,
             ) {
                 self.prefs.minimize_on_launch = !self.prefs.minimize_on_launch;
@@ -699,9 +693,9 @@ impl App {
                 ui,
                 "截图写入地点和人物",
                 if self.prefs.embed_shots {
-                    "写进图片的文字块，不改像素"
+                    "写入 PNG 元数据，不改像素"
                 } else {
-                    "只保存在启动器里"
+                    "仅保存在启动器内"
                 },
                 self.prefs.embed_shots,
             ) {
@@ -736,11 +730,9 @@ impl App {
             });
             ui.add_space(4.0);
             ui.label(
-                egui::RichText::new(
-                    "版本、账户和设置都在数据目录里。可以换成别的启动器的 .minecraft",
-                )
-                .size(12.5)
-                .color(t::dim()),
+                egui::RichText::new("可切换至其他启动器的 .minecraft")
+                    .size(12.5)
+                    .color(t::dim()),
             );
         });
         ui.add_space(10.0);
@@ -963,7 +955,7 @@ const SOURCES: [(&str, &str, &str); 2] = [
     (
         "bmcl",
         "镜像优先",
-        "游戏文件和加载器先走 BMCLAPI，国内通常更快；Mod 平台仍先连官方",
+        "游戏与加载器优先 BMCLAPI；Mod 平台仍优先官方",
     ),
 ];
 

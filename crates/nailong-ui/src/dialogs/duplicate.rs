@@ -115,7 +115,7 @@ impl App {
         let mut close = false;
         let from = dup.from.clone();
         let ((), dismissed) = dialog(ctx, "duplicate", 420.0, |ui| {
-            dialog_title(ui, "复制版本", &format!("从「{from}」复制一份，原来的不动"));
+            dialog_title(ui, "复制版本", &format!("基于「{from}」"));
             ui.add_space(14.0);
             ui.label(egui::RichText::new("新名字").size(13.0).color(t::sub()));
             ui.add_space(4.0);
@@ -138,9 +138,9 @@ impl App {
                     ui,
                     &label,
                     if dup.worlds {
-                        "两边各玩各的"
+                        "独立复制存档"
                     } else {
-                        "新版本里没有存档"
+                        "不含存档"
                     },
                     dup.worlds,
                 ) && !working
@@ -150,7 +150,7 @@ impl App {
                 ui.add_space(6.0);
             }
             ui.label(
-                egui::RichText::new("Mod、配置、资源包和启动参数都带过去；日志、备份和恢复点不带")
+                egui::RichText::new("复制 Mod、配置、资源包与启动参数（不含日志和备份）")
                     .size(12.5)
                     .color(t::dim()),
             );

@@ -553,13 +553,6 @@ impl Shots {
                 if action_link(ui, "打开文件夹").clicked() {
                     open_folder_clicked = true;
                 }
-                if total > 0 {
-                    ui.label(
-                        egui::RichText::new("左键查看 · 右键复制图片")
-                            .size(12.0)
-                            .color(t::dim()),
-                    );
-                }
             });
         });
         ui.add_space(6.0);

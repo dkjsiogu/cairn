@@ -232,9 +232,7 @@ impl LogView {
                                 .family(display_family()),
                         );
                         let subtitle = match (self.tab, last) {
-                            (Tab::Launcher, _) | (_, None) => {
-                                "启动器做过的事，最近的在最下面".to_string()
-                            }
+                            (Tab::Launcher, _) | (_, None) => "启动器日志".to_string(),
                             (_, Some(last)) => {
                                 let outcome = match &last.outcome {
                                     Outcome::Running => "运行中".to_string(),
