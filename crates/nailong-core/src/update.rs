@@ -275,10 +275,42 @@ pub fn start_system_update() -> bool {
             .is_ok_and(|status| status.success())
 }
 
+/// Linux：`cairn-update.service` 是否正在后台运行，避免手动 `pkexec apt-get` 与其抢 dpkg 锁。
+pub fn system_update_active() -> bool {
+    if !cfg!(target_os = "linux") {
+        return false;
+    }
+    let Ok(out) = std::process::Command::new("systemctl")
+        .args([
+            "show",
+            "-p",
+            "ActiveState",
+            "--value",
+            "cairn-update.service",
+        ])
+        .output()
+    else {
+        return false;
+    };
+    out.status.success() && is_active_state(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn is_active_state(stdout: &str) -> bool {
+    matches!(stdout.trim(), "activating" | "active" | "reloading")
+}
+
 /// Linux：用 pkexec 弹出系统的授权窗口，装下载好的 deb。会一直等到玩家输完密码、装完。
+/// 加上 `DPkg::Lock::Timeout=30`，遇到短时后台 apt 任务（例如刚收尾的自动更新）时等锁释放，
+/// 不必立刻失败。
 pub fn install_deb(deb: &Path) -> Result<()> {
     let out = std::process::Command::new("pkexec")
-        .args(["/usr/bin/apt-get", "install", "-y"])
+        .args([
+            "/usr/bin/apt-get",
+            "install",
+            "-y",
+            "-o",
+            "DPkg::Lock::Timeout=30",
+        ])
         .arg(deb)
         .output()
         .map_err(|e| Error::Plain(format!("没能运行 pkexec：{e}")))?;
@@ -547,6 +579,17 @@ mod tests {
         )
         .unwrap();
         assert!(has_apt_source(etc));
+    }
+
+    #[test]
+    fn detects_active_systemd_states() {
+        assert!(is_active_state("activating\n"));
+        assert!(is_active_state("active\n"));
+        assert!(is_active_state("reloading"));
+        assert!(!is_active_state("inactive\n"));
+        assert!(!is_active_state("failed\n"));
+        assert!(!is_active_state("deactivating\n"));
+        assert!(!is_active_state(""));
     }
 
     #[test]

@@ -1,7 +1,7 @@
-# 14 · 原型实现状态（0.1 → 0.46.0）
+# 14 · 原型实现状态（0.1 → 0.46.1）
 
 > 日期：2026-11-24
-> 对应发布：GitHub Release `v0.46.0` 的 `cairn.exe`、`cairn_0.46.0_amd64.deb`，以及 apt 源 `https://dkjsiogu.github.io/cairn/apt`（0.37 起改名 Cairn）
+> 对应发布：GitHub Release `v0.46.1` 的 `cairn.exe`、`cairn_0.46.1_amd64.deb`，以及 apt 源 `https://dkjsiogu.github.io/cairn/apt`（0.37 起改名 Cairn）
 > 目的：把「设计稿」和「已经跑起来的代码」分开记账，避免把计划当成已完成。
 
 ## 1. 一句话结论
@@ -49,6 +49,8 @@
 0.34.1 修复 26.x 无法安装和启动：版本文件 `default-user-jvm` 的首条没有 `rules`，解析失败；`${natives_directory}` 误指向 `java` 子目录，`java.library.path` 变成 `.../java/java`。实测 26.1、26.3 原版可安装并进入世界。调参在版本文件带官方默认时跟随官方（26.x 为 ZGC + 紧凑对象头 + 预先占用 + 字符串去重，初始堆 2 GB）。Java 选择改为够用里最低的大版本，同版本优先 64 位 OpenJDK。
 
 0.42.5 手感（见 [21](21-handling.md) §4）。文字默认不可选中（`selectable_labels = false`），整行可点的列表、卡片点在字上也算；`motion::pointer_on_clickables` 让所有能点的地方悬停变手形，egui 按钮也设了 `interact_cursor`；`list_row_fill` 看整个 Response，悬停渐变、按下加深、右键菜单开着时保持高亮；次按钮加按下颜色。版本列表右键菜单（启动、打开文件夹、改名、移到回收站）和 ↑ ↓ 切换；日志行可拖选，错误提示加「复制」；右下角单独一条细边写版本号，点它打开设置。
+
+0.46.1 修复 Linux 自动更新与手动更新的 dpkg 锁冲突与状态残留：`update::system_update_active()` 通过 `systemctl show -p ActiveState --value cairn-update.service` 识别后台更新服务运行态；后台安装进行中禁用弹窗的手动「更新」按钮（显示「后台安装中」），服务结束后若未升级自动恢复按钮；`install_deb` 增加 `-o DPkg::Lock::Timeout=30`，且在授权前及失败后检测磁盘替换状态；`UpdateState::mark_ready` 统一清理 `error`/`manual`/`system`，杜绝「已装好」与锁冲突报错并存。
 
 0.46.0 雾蓝界面全面精修（Fog Craft）：`theme.rs` 扩展为深浅双套 5 级表面层次（`rail` / `bg` / `surface` / `elevated` / `wash` + `rim` 顶部微高光）与 `modal_shadow()`，深浅双套通过 WCAG AA 对比度测试；`motion.rs` 建立 `7 / 10 / 12` 圆角阶梯、自定义聚焦去重与触感主按钮；`widgets.rs` 新增 `active_accent_bar`、`kbd_badge`、`segmented_bar`、`underline_tab`、`elevated_modal_frame` 及全套自绘扁平控件；侧边栏改用沉降 `rail` 底色、三石几何 Cairn 徽标与顶部「快速搜索 `Ctrl+K`」入口；启动台升级为三张带微高光和悬停反馈的摘要卡、一体化分段启动参数条（修复 `Java Java 21` 重复显示与偏移）与带晕环/防越界提示的状态圆环；版本页释放副行宽度并新增直达「启动参数」入口；内容页用分段控件 + 下划线标签区分模式与内容类型，发现卡片底线对齐并换用自绘 26×26 `+` 按钮；存档页快照改为竖向无缝时间线并统一「删除世界」按钮高度；命令面板与全部弹窗统一提升式圆角框架。重拍 32 张深浅/窄窗截图与 `motion.gif`。
 

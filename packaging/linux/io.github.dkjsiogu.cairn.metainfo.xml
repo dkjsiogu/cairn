@@ -28,6 +28,11 @@
   <url type="bugtracker">https://github.com/dkjsiogu/cairn/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.46.1" date="2026-11-24">
+      <description>
+        <p>Fixed Linux auto-update vs manual update lock conflict: disable the manual Update button while cairn-update.service is actively running, check systemd unit state before invoking pkexec, add DPkg::Lock::Timeout=30 to apt-get install, and clear stale install errors whenever the updated binary is ready on disk so "installed, restart to apply" and a lock error can never appear together.</p>
+      </description>
+    </release>
     <release version="0.46.0" date="2026-11-24">
       <description>
         <p>Fog Craft UI overhaul across Dark and Light themes while keeping 0% idle CPU and WCAG AA contrast: five-level matte slate-fog elevation palette and 7/10/12 corner radius scale; recessed sidebar with geometric 3-stone Cairn mark, built-in Ctrl+K quick-search bar, and active indicator rail; redesigned Home 3-card summary, unified segmented launch spec bar, and refined status ring with clamped tooltips; clearer segmented and underlined Content tabs, baseline-aligned Discover cards with crisp install buttons; vertical snapshot backup timeline on Saves; Raycast-style Command Palette with keycaps; unified elevated modal frames across all dialogs.</p>

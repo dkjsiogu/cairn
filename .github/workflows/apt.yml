@@ -80,5 +80,9 @@ jobs:
         with:
           path: site
 
+      # Wait briefly for GitHub's artifact API to index the freshly uploaded Pages tarball.
+      - name: Wait for artifact indexing
+        run: sleep 5
+
       - id: deploy
         uses: actions/deploy-pages@v4

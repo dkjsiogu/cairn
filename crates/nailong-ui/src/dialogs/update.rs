@@ -16,6 +16,8 @@ enum UpdateMsg {
     Progress(Progress),
     /// Linux：下载好了，正在等系统的授权窗口。
     Authorizing,
+    /// Linux：后台 `cairn-update.service` 已在运行，交由其完成安装。
+    SystemRunning,
     /// 新版本就绪，重启 Cairn 就是它。
     Ready(String),
     /// 下载好了 deb，要玩家自己装；附上没能自动装的原因。
@@ -48,6 +50,8 @@ pub(crate) struct UpdateState {
     tick: Option<Instant>,
     /// Linux：已经在后台启动了系统的更新服务。
     system: bool,
+    /// Linux：标记后台更新服务启动的时间，留出 systemd 切入 activating 状态的缓冲。
+    system_started: Option<Instant>,
 }
 
 impl UpdateState {
@@ -63,7 +67,27 @@ impl UpdateState {
     }
 
     fn busy(&self) -> bool {
-        self.activity.is_some() || self.authorizing
+        self.activity.is_some() || self.authorizing || self.system
+    }
+
+    /// 新版本就绪时清空进行中的状态和过期的安装报错，避免「已装好」和报错同时出现。
+    fn mark_ready(&mut self, version: String) {
+        self.ready = Some(version);
+        self.activity = None;
+        self.authorizing = false;
+        self.system = false;
+        self.system_started = None;
+        self.manual = None;
+        self.error = None;
+    }
+
+    fn mark_system_running(&mut self) {
+        self.system = true;
+        self.system_started = Some(Instant::now());
+        self.activity = None;
+        self.authorizing = false;
+        self.manual = None;
+        self.error = None;
     }
 
     /// 截图核对用：`update`、`update-apt`、`update-ready`、`update-linux-ready`、
@@ -136,9 +160,17 @@ fn plain_notes(notes: &str) -> Vec<String> {
         .collect()
 }
 
+/// Linux：检查磁盘上的程序是否已经被新版本替换，返回已装好的版本号。
+fn detect_replaced_version() -> Option<String> {
+    if !update::replaced_on_disk() {
+        return None;
+    }
+    update::installed_version().filter(|version| update::is_newer(version, update::current()))
+}
+
 impl App {
     /// 每帧调用：第一次时清理上次更新留下的文件、检查新版本；之后每分钟（后台在装时每
-    /// 10 秒）看一次程序有没有被系统换掉；收后台结果。
+    /// 2 秒）看一次程序有没有被系统换掉；收后台结果。
     pub(crate) fn poll_update(&mut self, ctx: &egui::Context) {
         let cache = self.root.cache();
         let mut starting = false;
@@ -149,6 +181,12 @@ impl App {
             update::cleanup(&cache);
             // 上次关掉时没换成（比如被强制结束）：重启就换上。
             self.update.ready = update::staged(&cache).map(|staged| staged.version);
+            if self.update.ready.is_none()
+                && matches!(self.update.kind, Install::AptRepo | Install::Deb)
+                && update::system_update_active()
+            {
+                self.update.mark_system_running();
+            }
         }
         if starting
             && self.update.rx.is_none()
@@ -156,20 +194,32 @@ impl App {
         {
             self.check_update(ctx, false);
         }
-        let every = Duration::from_secs(if self.update.system { 10 } else { 60 });
+        let every = Duration::from_secs(if self.update.system { 2 } else { 60 });
         let due = self.update.tick.is_none_or(|tick| tick.elapsed() >= every);
         if due {
             self.update.tick = Some(Instant::now());
-            ctx.request_repaint_after(every + Duration::from_secs(1));
             if self.update.ready.is_none()
                 && matches!(self.update.kind, Install::AptRepo | Install::Deb)
-                && update::replaced_on_disk()
             {
-                self.update.ready = update::installed_version()
-                    .filter(|version| update::is_newer(version, update::current()));
+                if let Some(version) = detect_replaced_version() {
+                    self.update.mark_ready(version);
+                } else if self.update.system
+                    && self
+                        .update
+                        .system_started
+                        .is_none_or(|started| started.elapsed() >= Duration::from_secs(3))
+                    && !update::system_update_active()
+                {
+                    // 后台更新服务已经结束但没有换掉程序（例如 apt 源尚未同步或自动更新已关闭），
+                    // 退出「后台安装中」状态，把手动「更新」按钮还给玩家。
+                    self.update.system = false;
+                    self.update.system_started = None;
+                }
             }
+            let next = Duration::from_secs(if self.update.system { 2 } else { 60 });
+            ctx.request_repaint_after(next + Duration::from_secs(1));
         }
-        let Some(rx) = &self.update.rx else {
+        let Some(rx) = self.update.rx.take() else {
             return;
         };
         let mut done = false;
@@ -206,38 +256,49 @@ impl App {
                     self.update.activity = None;
                     self.update.authorizing = true;
                 }
+                UpdateMsg::SystemRunning => {
+                    done = true;
+                    if self.update.ready.is_none() {
+                        self.update.mark_system_running();
+                        self.update.tick = Some(Instant::now());
+                        ctx.request_repaint_after(Duration::from_secs(2));
+                    }
+                }
                 UpdateMsg::Ready(version) => {
                     done = true;
-                    self.update.activity = None;
-                    self.update.authorizing = false;
-                    self.update.ready = Some(version);
+                    self.update.mark_ready(version);
                 }
                 UpdateMsg::Manual(path, why) => {
                     done = true;
                     self.update.activity = None;
                     self.update.authorizing = false;
-                    self.update.manual = Some(path);
-                    self.update.error = why;
+                    if self.update.ready.is_none() {
+                        self.update.manual = Some(path);
+                        self.update.error = why;
+                    }
                 }
                 UpdateMsg::Failed(e) => {
                     done = true;
                     self.update.activity = None;
                     self.update.authorizing = false;
-                    self.update.error = Some(e);
+                    if self.update.ready.is_none() {
+                        self.update.error = Some(e);
+                    }
                 }
             }
         }
-        if done {
-            self.update.rx = None;
-        } else {
+        if !done {
+            self.update.rx = Some(rx);
             ctx.request_repaint_after(Duration::from_millis(100));
         }
         if auto {
             match self.update.kind {
                 Install::Exe if update::can_replace_exe() => self.start_update(ctx),
-                Install::AptRepo if !self.update.system => {
-                    // 不弹窗；授权不了就留着侧栏提示，玩家点「更新」时再输密码。
-                    self.update.system = update::start_system_update();
+                // 不弹窗；授权不了就留着侧栏提示，玩家点「更新」时再输密码。
+                Install::AptRepo if !self.update.system && update::start_system_update() => {
+                    self.update.mark_system_running();
+                    self.update.tick = Some(Instant::now());
+                    ctx.request_repaint_after(Duration::from_secs(2));
                 }
                 _ => {}
             }
@@ -267,8 +328,21 @@ impl App {
 
     /// 下载新版本，然后按装法接着做：Windows 记下等着换上，Linux 弹授权窗口装上。
     fn start_update(&mut self, ctx: &egui::Context) {
-        if self.update.rx.is_some() {
+        if self.update.rx.is_some() || self.update.ready.is_some() {
             return;
+        }
+        let kind = self.update.kind;
+        if matches!(kind, Install::AptRepo | Install::Deb) {
+            if let Some(version) = detect_replaced_version() {
+                self.update.mark_ready(version);
+                return;
+            }
+            if self.update.system || update::system_update_active() {
+                self.update.mark_system_running();
+                self.update.tick = Some(Instant::now());
+                ctx.request_repaint_after(Duration::from_secs(2));
+                return;
+            }
         }
         let Some(release) = self.update.latest.clone() else {
             return;
@@ -277,7 +351,6 @@ impl App {
             self.update.error = Some("这个系统没有现成的安装包，请到 GitHub 页面下载".into());
             return;
         };
-        let kind = self.update.kind;
         if kind == Install::Exe && !update::can_replace_exe() {
             self.update.error = Some("程序所在的文件夹不能写入，请到 GitHub 下载新版本".into());
             return;
@@ -309,11 +382,23 @@ impl App {
                     Err(e) => UpdateMsg::Failed(e.to_string()),
                 },
                 (Ok(path), Install::AptRepo | Install::Deb) => {
-                    let _ = tx.send(UpdateMsg::Authorizing);
-                    ctx.request_repaint();
-                    match update::install_deb(&path) {
-                        Ok(()) => UpdateMsg::Ready(release.version.clone()),
-                        Err(e) => UpdateMsg::Manual(path, Some(e.to_string())),
+                    if let Some(version) = detect_replaced_version() {
+                        UpdateMsg::Ready(version)
+                    } else if update::system_update_active() {
+                        UpdateMsg::SystemRunning
+                    } else {
+                        let _ = tx.send(UpdateMsg::Authorizing);
+                        ctx.request_repaint();
+                        match update::install_deb(&path) {
+                            Ok(()) => UpdateMsg::Ready(release.version.clone()),
+                            Err(e) => {
+                                if let Some(version) = detect_replaced_version() {
+                                    UpdateMsg::Ready(version)
+                                } else {
+                                    UpdateMsg::Manual(path, Some(e.to_string()))
+                                }
+                            }
+                        }
                     }
                 }
                 (Ok(path), Install::Other) => UpdateMsg::Manual(path, None),
@@ -471,7 +556,9 @@ impl App {
                 } else if self.update.system {
                     line(ui, "正在后台安装，装好后提示重启。", t::sub());
                 }
-                if let Some(error) = &self.update.error {
+                if self.update.ready.is_none()
+                    && let Some(error) = &self.update.error
+                {
                     line(ui, error, t::danger());
                 }
                 ui.add_space(14.0);
@@ -497,15 +584,16 @@ impl App {
                                     .on_hover_text("游戏运行中，退出游戏后再重启");
                             }
                         } else if self.update.manual.is_none() || kind.can_install() {
-                            let label = match kind {
-                                Install::Exe => "下载并更新",
-                                Install::AptRepo | Install::Deb => "更新",
-                                Install::Other => "下载 deb",
-                            };
-                            let label = if self.update.manual.is_some() {
+                            let label = if self.update.system {
+                                "后台安装中"
+                            } else if self.update.manual.is_some() {
                                 "再试一次"
                             } else {
-                                label
+                                match kind {
+                                    Install::Exe => "下载并更新",
+                                    Install::AptRepo | Install::Deb => "更新",
+                                    Install::Other => "下载 deb",
+                                }
                             };
                             if motion::primary_sized(
                                 ui,
@@ -614,5 +702,40 @@ mod tests {
             ..state
         };
         assert_eq!(state.badge("9.9.9"), Some(("9.9.9".into(), true)));
+    }
+
+    #[test]
+    fn mark_ready_clears_stale_error_and_system_state() {
+        let mut state = UpdateState {
+            system: true,
+            system_started: Some(Instant::now()),
+            authorizing: true,
+            manual: Some(PathBuf::from("/tmp/cairn.deb")),
+            error: Some("系统正在安装别的软件，稍后再试".into()),
+            ..Default::default()
+        };
+        assert!(state.busy());
+        state.mark_ready("0.46.1".into());
+        assert_eq!(state.ready.as_deref(), Some("0.46.1"));
+        assert!(!state.busy());
+        assert!(!state.system);
+        assert!(state.system_started.is_none());
+        assert!(state.manual.is_none());
+        assert!(state.error.is_none());
+    }
+
+    #[test]
+    fn system_update_blocks_parallel_manual_install() {
+        let mut state = UpdateState {
+            error: Some("旧错误".into()),
+            manual: Some(PathBuf::from("/tmp/old.deb")),
+            ..Default::default()
+        };
+        state.mark_system_running();
+        assert!(state.busy());
+        assert!(state.system);
+        assert!(state.system_started.is_some());
+        assert!(state.error.is_none());
+        assert!(state.manual.is_none());
     }
 }
