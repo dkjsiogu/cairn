@@ -725,16 +725,21 @@ impl App {
             ui.ctx()
                 .animate_bool_with_time(response.id.with("card_hover"), hovered, 0.16)
         };
-        let paint = rect;
-        ui.painter().rect(
+        let lift_y = if motion::reduced() {
+            0.0
+        } else if response.is_pointer_button_down_on() {
+            0.5
+        } else {
+            -2.0 * hover_t
+        };
+        let paint = rect.translate(egui::vec2(0.0, lift_y));
+        backdrop::paint_glass_card(
+            ui.painter(),
             paint,
             motion::R_CARD,
-            motion::mix(t::surface(), t::wash(), 0.72 * hover_t),
-            egui::Stroke::new(
-                1.0,
-                motion::mix(t::hairline(), t::tint(t::accent(), 0.65), hover_t),
-            ),
-            egui::StrokeKind::Inside,
+            motion::mix(t::surface_glass(), t::elevated(), 0.78 * hover_t),
+            motion::mix(t::glass_border(), t::tint(t::accent(), 0.72), hover_t),
+            true,
         );
 
         let inner = paint.shrink2(egui::vec2(14.0, 12.0));
@@ -750,11 +755,11 @@ impl App {
 
         child.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
-            let icon_size = egui::vec2(38.0, 38.0);
+            let icon_size = egui::vec2(40.0, 40.0);
             if let Some(texture) = self.content.icons.get(&key) {
                 let (icon_rect, _) = ui.allocate_exact_size(icon_size, egui::Sense::hover());
                 ui.painter().add(
-                    egui::epaint::RectShape::filled(icon_rect, motion::R, egui::Color32::WHITE)
+                    egui::epaint::RectShape::filled(icon_rect, motion::R + 1, egui::Color32::WHITE)
                         .with_texture(
                             texture.id(),
                             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
@@ -762,17 +767,28 @@ impl App {
                 );
                 ui.painter().rect_stroke(
                     icon_rect,
-                    motion::R,
-                    egui::Stroke::new(1.0, t::hairline()),
+                    motion::R + 1,
+                    egui::Stroke::new(1.0, t::glass_border()),
                     egui::StrokeKind::Inside,
                 );
             } else {
                 let (icon_rect, _) = ui.allocate_exact_size(icon_size, egui::Sense::hover());
+                let palette = [
+                    t::accent(),
+                    t::ok(),
+                    t::loader_color(LoaderKind::NeoForge),
+                    t::loader_pack(),
+                    t::loader_color(LoaderKind::Fabric),
+                ];
+                let hash = project.name.bytes().fold(0usize, |acc, b| {
+                    acc.wrapping_mul(31).wrapping_add(b as usize)
+                });
+                let tint = palette[hash % palette.len()];
                 ui.painter().rect(
                     icon_rect,
-                    motion::R,
-                    t::elevated(),
-                    egui::Stroke::new(1.0, t::hairline()),
+                    motion::R + 1,
+                    t::tint(tint, if t::is_light() { 0.13 } else { 0.17 }),
+                    egui::Stroke::new(1.0, t::tint(tint, if t::is_light() { 0.32 } else { 0.40 })),
                     egui::StrokeKind::Inside,
                 );
                 let letter = project
@@ -785,8 +801,8 @@ impl App {
                     icon_rect.center(),
                     egui::Align2::CENTER_CENTER,
                     letter,
-                    egui::FontId::new(16.0, bold_family()),
-                    t::sub(),
+                    egui::FontId::new(17.0, bold_family()),
+                    tint,
                 );
             }
             ui.add(

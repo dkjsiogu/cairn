@@ -2,7 +2,7 @@
 //! 模块之间不用互相记路径。新的公共组件放进 `widgets`，新的数据类型放进 `model`，这里就会自动带上。
 
 pub(crate) use crate::theme as t;
-pub(crate) use crate::{motion, rings};
+pub(crate) use crate::{backdrop, motion, rings};
 pub(crate) use eframe::egui;
 pub(crate) use nailong_core::auth;
 pub(crate) use nailong_core::bench;

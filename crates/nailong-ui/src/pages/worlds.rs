@@ -254,7 +254,7 @@ impl App {
         egui::Panel::top("saves_header")
             .frame(
                 egui::Frame::new()
-                    .fill(t::bg())
+                    .fill(t::tint(t::rail(), 0.42))
                     .inner_margin(egui::Margin::symmetric(28, 14)),
             )
             .show(ui, |ui| {
@@ -347,7 +347,7 @@ impl App {
             .exact_size(288.0)
             .frame(
                 egui::Frame::new()
-                    .fill(t::bg())
+                    .fill(t::tint(t::rail(), if t::is_light() { 0.42 } else { 0.44 }))
                     .inner_margin(egui::Margin::symmetric(14, 18)),
             )
             .show(ui, |ui| {
@@ -380,7 +380,7 @@ impl App {
                                 .get(&world.name)
                                 .map(|items| items.len())
                                 .unwrap_or(0);
-                            if save_world_row(ui, world, snapshots, active).clicked() {
+                            if save_world_row(ui, &game_dir, world, snapshots, active).clicked() {
                                 chosen_world = Some(world.name.clone());
                             }
                         }
@@ -408,6 +408,15 @@ impl App {
                     .inner_margin(egui::Margin::symmetric(24, 20)),
             )
             .show(ui, |ui| {
+                let world_fade = motion::key_fade(
+                    ui.ctx(),
+                    egui::Id::unique("cairn_world_detail_fade"),
+                    &self.worlds.selected,
+                    0.16,
+                );
+                if world_fade < 0.999 {
+                    ui.multiply_opacity(world_fade);
+                }
                 if self.worlds.list.is_empty() {
                     ui.vertical_centered(|ui| {
                         ui.add_space(54.0);
@@ -560,9 +569,10 @@ impl App {
                         }
                         if !snapshots.is_empty() {
                             egui::Frame::new()
-                                .fill(t::surface())
-                                .stroke(egui::Stroke::new(1.0, t::hairline()))
+                                .fill(t::surface_glass())
+                                .stroke(egui::Stroke::new(1.0, t::glass_border()))
                                 .corner_radius(motion::R_CARD)
+                                .shadow(t::card_shadow())
                                 .inner_margin(egui::Margin::symmetric(8, 6))
                                 .show(ui, |ui| {
                                     ui.spacing_mut().item_spacing.y = 0.0;
@@ -696,17 +706,32 @@ impl App {
 
 pub(crate) fn save_world_row(
     ui: &mut egui::Ui,
+    game_dir: &std::path::Path,
     world: &saves::World,
     snapshots: usize,
     active: bool,
 ) -> egui::Response {
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 56.0), egui::Sense::click());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 60.0), egui::Sense::click());
     list_row_fill(ui, rect, active, &response);
     if active {
+        ui.painter().rect_stroke(
+            rect,
+            motion::R,
+            egui::Stroke::new(1.0, t::tint(t::accent(), 0.30)),
+            egui::StrokeKind::Inside,
+        );
         active_accent_bar(ui.painter(), rect);
     }
-    let inner = rect.shrink2(egui::vec2(14.0, 8.0));
+    let thumb_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 31.0, rect.center().y),
+        egui::vec2(36.0, 36.0),
+    );
+    paint_world_thumb(ui.ctx(), ui.painter(), thumb_rect, game_dir, &world.name);
+    let inner = egui::Rect::from_min_max(
+        egui::pos2(thumb_rect.right() + 10.0, rect.top() + 8.0),
+        egui::pos2(rect.right() - 10.0, rect.bottom() - 8.0),
+    );
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(inner)
@@ -730,7 +755,7 @@ pub(crate) fn save_world_row(
                 human_age(world.modified),
                 snapshots
             ))
-            .size(12.5)
+            .size(12.0)
             .color(t::sub()),
         );
     });

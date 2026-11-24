@@ -94,10 +94,10 @@ impl App {
         let planned = self.plan_for(row, &cfg);
         let mut open = false;
         egui::Frame::new()
-            .fill(t::surface())
-            .stroke(egui::Stroke::new(1.0, t::hairline()))
+            .fill(t::surface_glass())
+            .stroke(egui::Stroke::new(1.0, t::glass_border()))
             .corner_radius(motion::R)
-            .inner_margin(egui::Margin::symmetric(3, 2))
+            .inner_margin(egui::Margin::symmetric(4, 3))
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
@@ -214,10 +214,15 @@ impl App {
         let mut download_java = false;
         let screen = ctx.content_rect();
         let width = (screen.width() - 120.0).clamp(520.0, 680.0);
-        let modal = egui::Modal::new(egui::Id::unique("launch_modal"))
-            .backdrop_color(t::veil(1.0))
+        let modal_id = egui::Id::unique("launch_modal");
+        let enter = motion::modal_enter(ctx, modal_id);
+        let modal = egui::Modal::new(modal_id)
+            .backdrop_color(t::veil(enter))
             .frame(elevated_modal_frame())
             .show(ctx, |ui| {
+                if enter < 0.999 {
+                    ui.multiply_opacity(enter);
+                }
                 ui.set_width(width);
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
@@ -559,6 +564,7 @@ impl App {
                     });
                 });
             });
+        apply_modal_slide(ctx, modal.response.layer_id, enter);
         if modal.backdrop_response.clicked() || escape_pressed(ctx) {
             close = true;
         }

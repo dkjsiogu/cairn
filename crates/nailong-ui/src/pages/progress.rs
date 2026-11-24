@@ -109,7 +109,8 @@ impl App {
                             ui.label(
                                 egui::RichText::new(format!("{:.0}%", shown * 100.0))
                                     .size(30.0)
-                                    .family(light_family()),
+                                    .family(bold_family())
+                                    .color(t::accent()),
                             );
                         });
                     }
@@ -154,9 +155,10 @@ impl App {
                 if !bench {
                     ui.add_space(14.0);
                     egui::Frame::new()
-                        .fill(t::surface())
-                        .stroke(egui::Stroke::new(1.0, t::hairline()))
+                        .fill(t::surface_glass())
+                        .stroke(egui::Stroke::new(1.0, t::glass_border()))
                         .corner_radius(motion::R_CARD)
+                        .shadow(t::card_shadow())
                         .inner_margin(egui::Margin::symmetric(18, 14))
                         .show(ui, |ui| {
                             let inner_w = width - 36.0;

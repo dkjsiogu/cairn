@@ -130,6 +130,15 @@ impl App {
                     }),
             )
             .show(ui, |ui| {
+                let kind_fade = motion::key_fade(
+                    ui.ctx(),
+                    egui::Id::unique("cairn_content_kind_fade"),
+                    self.content.kind as u8,
+                    0.16,
+                );
+                if kind_fade < 0.999 {
+                    ui.multiply_opacity(kind_fade);
+                }
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -248,6 +257,8 @@ impl App {
             ui.painter().rect_filled(sep, 0.0, t::hairline());
             ui.add_space(10.0);
             ui.spacing_mut().item_spacing.x = 4.0;
+            let bar_slot = ui.painter().add(egui::Shape::Noop);
+            let mut active_bar = None;
             for candidate in [
                 mods::ContentKind::Mod,
                 mods::ContentKind::ResourcePack,
@@ -259,13 +270,33 @@ impl App {
                     mods::ContentKind::ResourcePack => "材质与资源包",
                     mods::ContentKind::Shader => "光影",
                 };
-                if underline_tab(ui, candidate.label(), selected)
-                    .on_hover_text(tip)
-                    .clicked()
-                    && !selected
-                {
+                let resp =
+                    underline_tab_gliding(ui, candidate.label(), selected).on_hover_text(tip);
+                if selected {
+                    active_bar = Some(egui::Rect::from_min_max(
+                        egui::pos2(resp.rect.left() + 8.0, resp.rect.bottom() - 2.5),
+                        egui::pos2(resp.rect.right() - 8.0, resp.rect.bottom() - 0.5),
+                    ));
+                }
+                if resp.clicked() && !selected {
                     wanted_kind = Some(candidate);
                 }
+            }
+            if let Some(target) = active_bar {
+                let bar = motion::spring_rect(
+                    ui.ctx(),
+                    egui::Id::unique("cairn_content_kind_bar"),
+                    target,
+                );
+                let glow = bar.expand2(egui::vec2(2.0, 2.0));
+                ui.painter().set(
+                    bar_slot,
+                    egui::Shape::Vec(vec![
+                        egui::epaint::RectShape::filled(glow, 2.5, t::tint(t::accent(), 0.24))
+                            .into(),
+                        egui::epaint::RectShape::filled(bar, 1.5, t::accent()).into(),
+                    ]),
+                );
             }
         });
         if let Some(installed) = mode {

@@ -365,21 +365,25 @@ impl App {
         let screen = ctx.content_rect();
         let width = (screen.width() - 64.0).clamp(360.0, 580.0);
         let id = egui::Id::unique("palette");
+        let modal_enter = motion::modal_enter(ctx, id);
         let modal = egui::Modal::new(id)
             .area(egui::Modal::default_area(id).anchor(
                 egui::Align2::CENTER_TOP,
                 [0.0, (screen.height() * 0.14).max(48.0)],
             ))
-            .backdrop_color(t::veil(0.75))
+            .backdrop_color(t::veil(0.75 * modal_enter))
             .frame(
                 egui::Frame::new()
                     .fill(t::surface())
-                    .stroke(egui::Stroke::new(1.0, t::hairline()))
+                    .stroke(egui::Stroke::new(1.0, t::glass_border()))
                     .corner_radius(motion::R_MODAL)
                     .shadow(t::modal_shadow())
                     .inner_margin(egui::Margin::symmetric(10, 10)),
             )
             .show(ctx, |ui| {
+                if modal_enter < 0.999 {
+                    ui.multiply_opacity(modal_enter);
+                }
                 ui.set_width(width);
                 ui.spacing_mut().item_spacing.y = 2.0;
                 let before = palette.query.clone();
@@ -434,12 +438,19 @@ impl App {
                     });
                     ui.add_space(16.0);
                 }
+                let sel_bg_slot = ui.painter().add(egui::Shape::Noop);
+                let sel_bar_slot = ui.painter().add(egui::Shape::Noop);
+                let mut active_row_rect = None;
                 for position in first..(first + SHOWN).min(total) {
                     let item = match shown.get(position) {
                         Some(&index) => &palette.items[index],
                         None => &extra[position - shown.len()],
                     };
-                    let response = palette_row(ui, item, position == palette.cursor);
+                    let is_active = position == palette.cursor;
+                    let response = palette_row(ui, item, is_active);
+                    if is_active {
+                        active_row_rect = Some(response.rect);
+                    }
                     if response.clicked() {
                         run = Some(item.action.clone());
                     }
@@ -447,6 +458,19 @@ impl App {
                     if response.hovered() && ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO) {
                         palette.cursor = position;
                     }
+                }
+                if let Some(target) = active_row_rect {
+                    let pill = motion::spring_rect(
+                        ui.ctx(),
+                        egui::Id::unique("cairn_palette_cursor"),
+                        target,
+                    );
+                    ui.painter().set(
+                        sel_bg_slot,
+                        backdrop::nav_active_shape(ui.ctx(), pill, motion::R),
+                    );
+                    ui.painter()
+                        .set(sel_bar_slot, active_accent_bar_shape(pill));
                 }
                 ui.add_space(8.0);
                 let footer_line = ui.cursor().top();
@@ -490,6 +514,7 @@ impl App {
                     }
                 });
             });
+        apply_modal_slide(ctx, modal.response.layer_id, modal_enter);
         if modal.backdrop_response.clicked() {
             clicked_outside = true;
         }
@@ -609,30 +634,35 @@ impl App {
     }
 }
 
-/// 面板里的一行：选中带雾蓝左竖条，右侧胶囊类别徽章。
+/// 面板里的一行：激活柔光底由外层弹簧指示器滑行绘制，右侧按类别配色的胶囊徽章。
 fn palette_row(ui: &mut egui::Ui, item: &Item, active: bool) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 40.0), egui::Sense::click());
-    if active {
-        ui.painter().rect_filled(rect, motion::R, t::wash());
-        active_accent_bar(ui.painter(), rect);
-    }
+    let kind_color = match item.kind {
+        "版本" => t::accent(),
+        "世界" => t::ok(),
+        "操作" => t::loader_color(LoaderKind::NeoForge),
+        "设置" => t::loader_pack(),
+        "账户" => t::loader_color(LoaderKind::Fabric),
+        _ => t::sub(),
+    };
     let kind_font = egui::FontId::proportional(11.0);
-    let kind = ui.painter().layout_no_wrap(
-        item.kind.to_string(),
-        kind_font,
-        if active { t::sub() } else { t::dim() },
-    );
-    let pill_w = kind.size().x + 12.0;
+    let kind = ui
+        .painter()
+        .layout_no_wrap(item.kind.to_string(), kind_font, kind_color);
+    let pill_w = kind.size().x + 14.0;
     let pill_rect = egui::Rect::from_center_size(
         egui::pos2(rect.right() - 10.0 - pill_w * 0.5, rect.center().y),
         egui::vec2(pill_w, 20.0),
     );
     ui.painter().rect(
         pill_rect,
-        5,
-        if active { t::surface() } else { t::bg() },
-        egui::Stroke::new(1.0, t::hairline()),
+        6,
+        t::tint(kind_color, if t::is_light() { 0.11 } else { 0.15 }),
+        egui::Stroke::new(
+            1.0,
+            t::tint(kind_color, if t::is_light() { 0.28 } else { 0.34 }),
+        ),
         egui::StrokeKind::Inside,
     );
     ui.painter().galley(
@@ -641,7 +671,7 @@ fn palette_row(ui: &mut egui::Ui, item: &Item, active: bool) -> egui::Response {
             pill_rect.center().y - kind.size().y * 0.5,
         ),
         kind,
-        if active { t::sub() } else { t::dim() },
+        kind_color,
     );
     let left = rect.left() + 14.0;
     let room = rect.width() - 28.0 - pill_w - 12.0;

@@ -28,6 +28,11 @@
   <url type="bugtracker">https://github.com/dkjsiogu/cairn/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.47.0" date="2026-11-24">
+      <description>
+        <p>Alpine Horizon visual overhaul (Dark "Alpine Dusk" &amp; Light "Alpine Morning") while maintaining 0% idle CPU, zero extra dependencies, and WCAG AA contrast: GPU-cached procedural atmospheric backdrop and panoramic alpine-ridge Home hero stage; luminous gradient primary buttons and progress bar; upgraded Observatory status ring with ambient aura and jewel core; asymmetric Bento summary cards with real world icon.png or procedural biome thumbnails and colored icon badges; custom loader brand emblems across Versions and Install; translucent glass cards across Content, Saves, Gallery, Progress, and color-coded Command Palette.</p>
+      </description>
+    </release>
     <release version="0.46.1" date="2026-11-24">
       <description>
         <p>Fixed Linux auto-update vs manual update lock conflict: disable the manual Update button while cairn-update.service is actively running, check systemd unit state before invoking pkexec, add DPkg::Lock::Timeout=30 to apt-get install, and clear stale install errors whenever the updated binary is ready on disk so "installed, restart to apply" and a lock error can never appear together.</p>

@@ -91,11 +91,15 @@ impl App {
         let mut create = false;
         let mut restore: Option<String> = None;
         let mut delete: Option<String> = None;
-        let veil = t::veil(1.0);
-        let modal = egui::Modal::new(egui::Id::unique("rollback_modal"))
-            .backdrop_color(veil)
+        let modal_id = egui::Id::unique("rollback_modal");
+        let enter = motion::modal_enter(ctx, modal_id);
+        let modal = egui::Modal::new(modal_id)
+            .backdrop_color(t::veil(enter))
             .frame(elevated_modal_frame())
             .show(ctx, |ui| {
+                if enter < 0.999 {
+                    ui.multiply_opacity(enter);
+                }
                 ui.set_width(520.0);
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
@@ -261,6 +265,7 @@ impl App {
                         }
                     });
             });
+        apply_modal_slide(ctx, modal.response.layer_id, enter);
         if modal.backdrop_response.clicked() || escape_pressed(ctx) {
             close = true;
         }

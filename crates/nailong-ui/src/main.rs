@@ -13,6 +13,7 @@
 
 mod activity;
 mod app;
+mod backdrop;
 mod dialogs;
 mod fonts;
 mod model;

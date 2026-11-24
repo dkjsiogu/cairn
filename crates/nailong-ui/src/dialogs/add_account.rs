@@ -196,10 +196,15 @@ impl App {
         if std::mem::take(&mut form.check_now) {
             check = true;
         }
-        let modal = egui::Modal::new(egui::Id::unique("add_account"))
-            .backdrop_color(t::veil(1.0))
+        let modal_id = egui::Id::unique("add_account");
+        let enter = motion::modal_enter(ctx, modal_id);
+        let modal = egui::Modal::new(modal_id)
+            .backdrop_color(t::veil(enter))
             .frame(modal_frame())
             .show(ctx, |ui| {
+                if enter < 0.999 {
+                    ui.multiply_opacity(enter);
+                }
                 ui.set_width(420.0);
                 ui.label(
                     egui::RichText::new(if relogin {
@@ -509,6 +514,7 @@ impl App {
                     }
                 }
             });
+        apply_modal_slide(ctx, modal.response.layer_id, enter);
         let busy = form.busy || form.checking;
         if (modal.backdrop_response.clicked() || escape_pressed(ctx)) && !busy {
             close = true;
