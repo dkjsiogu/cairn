@@ -256,37 +256,9 @@ pub fn show(ui: &mut egui::Ui, rect: egui::Rect, data: &Data) -> Option<Layer> {
     } else {
         ctx.animate_bool_with_time(id.with("warn"), data.state == State::Missing, 0.4)
     };
-    let state_color = if data.state == State::Running {
-        t::ok()
-    } else {
-        motion::mix(t::accent(), t::warn(), warn_amount)
-    };
+    let state_color = motion::mix(t::accent(), t::warn(), warn_amount);
     let time = ctx.input(|input| input.time) as f32;
-    let painter = ui.painter_at(rect.expand(12.0));
-
-    // 天文观测仪背光晕（静态多层柔和径向光，空闲 0% CPU）
-    let aura_alpha = if t::is_light() { 0.06 } else { 0.08 };
-    painter.circle_filled(
-        center,
-        114.0 * scale,
-        t::tint(state_color, aura_alpha * 0.45),
-    );
-    painter.circle_filled(
-        center,
-        74.0 * scale,
-        t::tint(state_color, aura_alpha * 0.85),
-    );
-    // 中心表盘微透明底碟，增加精密仪器景深
-    painter.circle(
-        center,
-        (FILE_R - 4.0) * scale,
-        if t::is_light() {
-            Color32::from_rgba_unmultiplied(255, 255, 255, 130)
-        } else {
-            Color32::from_rgba_unmultiplied(12, 16, 26, 128)
-        },
-        Stroke::new(1.0, t::tint(t::glass_border(), 0.7)),
-    );
+    let painter = ui.painter_at(rect.expand(8.0));
 
     // 运行中：从中心缓慢向外扩散。窗口失焦时不动。
     let focused = ctx.input(|input| input.focused);
@@ -295,7 +267,7 @@ pub fn show(ui: &mut egui::Ui, rect: egui::Rect, data: &Data) -> Option<Layer> {
         painter.circle_stroke(
             center,
             (24.0 + phase * 96.0) * scale,
-            Stroke::new(1.4, t::tint(state_color, (1.0 - phase) * 0.65)),
+            Stroke::new(1.0, t::tint(state_color, (1.0 - phase) * 0.6)),
         );
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
@@ -314,7 +286,7 @@ pub fn show(ui: &mut egui::Ui, rect: egui::Rect, data: &Data) -> Option<Layer> {
         painter.circle_stroke(
             center,
             TICK_R * scale,
-            Stroke::new(1.0, t::tint(t::glass_border(), saves_fade)),
+            Stroke::new(1.0, t::tint(t::hairline(), saves_fade)),
         );
     } else {
         let spin = saves_spring * 6.0_f32.to_radians();
@@ -325,40 +297,31 @@ pub fn show(ui: &mut egui::Ui, rect: egui::Rect, data: &Data) -> Option<Layer> {
         for tick in 0..TICK_COUNT {
             let angle = tick as f32 / TICK_COUNT as f32 * TAU + spin;
             let major = marks.contains(&tick);
-            let (length, width, color) = if tick == 0 {
-                (16.0, 2.2, t::accent())
+            let (length, color) = if tick == 0 {
+                (14.0, t::accent())
             } else if major {
-                (13.0, 1.5, t::ok())
+                (14.0, t::dot())
             } else {
-                (5.0, 1.0, t::tint(t::dot(), 0.45))
+                (5.0, t::hairline())
             };
-            if tick == 0 {
-                painter.line_segment(
-                    [
-                        at(center, angle, (TICK_R - 1.0) * grow * scale),
-                        at(center, angle, (TICK_R + length + 1.0) * grow * scale),
-                    ],
-                    Stroke::new(5.0, t::tint(t::accent(), 0.22 * saves_fade)),
-                );
-            }
             painter.line_segment(
                 [
                     at(center, angle, TICK_R * grow * scale),
                     at(center, angle, (TICK_R + length) * grow * scale),
                 ],
-                Stroke::new(width + saves_hot * 0.4, t::tint(color, saves_fade)),
+                Stroke::new(1.0 + saves_hot * 0.4, t::tint(color, saves_fade)),
             );
         }
     }
 
-    // Mod 星轨环
+    // Mod 环
     let mods_fade = visibility(Layer::Mods);
     let mods_raw = hot_amounts[2];
     let waiting = data.state == State::Installing;
     painter.circle_stroke(
         center,
         MOD_R * scale,
-        Stroke::new(1.0, t::tint(t::glass_border(), mods_fade)),
+        Stroke::new(1.0, t::tint(t::hairline(), mods_fade)),
     );
     let colour_of = |dot: &ModDot| -> (Color32, bool) {
         if waiting {
@@ -366,33 +329,27 @@ pub fn show(ui: &mut egui::Ui, rect: egui::Rect, data: &Data) -> Option<Layer> {
         } else if dot.update {
             (t::accent(), true)
         } else if dot.enabled {
-            (
-                if t::is_light() {
-                    t::accent()
-                } else {
-                    motion::mix(t::ink(), t::accent(), 0.42)
-                },
-                true,
-            )
+            (t::dot(), true)
         } else {
             (t::dim(), false)
         }
     };
     if data.mods.len() > MAX_DOTS {
+        // 太多时按比例分段：可更新、启用、禁用。
         let total = data.mods.len() as f32;
         let updates = data.mods.iter().filter(|m| m.update).count() as f32;
         let enabled = data.mods.iter().filter(|m| m.enabled && !m.update).count() as f32;
         let mut from = 0.0;
         for (count, color) in [
             (updates, t::accent()),
-            (enabled, t::ok()),
+            (enabled, t::dot()),
             (total - updates - enabled, t::dim()),
         ] {
             let to = from + count / total * TAU;
             if count > 0.0 {
                 painter.add(Shape::line(
                     arc(center, MOD_R * scale, from + 0.02, to - 0.02),
-                    Stroke::new((3.2 + mods_raw * 2.0) * scale, t::tint(color, mods_fade)),
+                    Stroke::new((3.0 + mods_raw * 2.0) * scale, t::tint(color, mods_fade)),
                 ));
             }
             from = to;
@@ -401,44 +358,33 @@ pub fn show(ui: &mut egui::Ui, rect: egui::Rect, data: &Data) -> Option<Layer> {
         let count = data.mods.len().max(1) as f32;
         for (index, dot) in data.mods.iter().enumerate() {
             let angle = index as f32 / count * TAU + 0.25;
+            // 依次弹开：后面的点晚一点动。
             let delay = index as f32 / count * 0.35;
             let local = ((mods_raw - delay) / 0.65).clamp(0.0, 1.0);
             let back = local + (local * std::f32::consts::PI).sin() * 0.25;
             let pos = at(center, angle, (MOD_R + back * 8.0) * scale);
             let (color, filled) = colour_of(dot);
-            let radius = if dot.update && !waiting { 5.8 } else { 4.4 } * scale;
+            let radius = if dot.update && !waiting { 6.0 } else { 4.5 } * scale;
             let color = t::tint(color, mods_fade);
-            if filled {
-                painter.circle_filled(pos, radius + 3.2 * scale, t::tint(color, 0.18));
-            }
             painter.circle(
                 pos,
                 radius,
                 if filled {
                     color
-                } else if t::is_light() {
-                    Color32::from_rgba_unmultiplied(255, 255, 255, (200.0 * mods_fade) as u8)
                 } else {
-                    Color32::from_rgba_unmultiplied(24, 34, 54, (175.0 * mods_fade) as u8)
+                    t::tint(t::bg(), mods_fade)
                 },
-                Stroke::new(
-                    1.5,
-                    if filled {
-                        color
-                    } else {
-                        t::tint(t::sub(), 0.9 * mods_fade)
-                    },
-                ),
+                Stroke::new(1.0, color),
             );
         }
     }
 
-    // 文件完整度主环（带柔和外光晕）
+    // 文件环
     let files_fade = visibility(Layer::Files);
     painter.circle_stroke(
         center,
         FILE_R * scale,
-        Stroke::new(1.2, t::tint(t::glass_border(), files_fade)),
+        Stroke::new(1.0, t::tint(t::hairline(), files_fade)),
     );
     let fraction = motion::spring(
         &ctx,
@@ -448,32 +394,13 @@ pub fn show(ui: &mut egui::Ui, rect: egui::Rect, data: &Data) -> Option<Layer> {
         12.0,
     );
     if fraction > 0.002 {
-        let pts = arc(center, FILE_R * scale, 0.0, fraction.min(1.0) * TAU);
         painter.add(Shape::line(
-            pts.clone(),
+            arc(center, FILE_R * scale, 0.0, fraction.min(1.0) * TAU),
             Stroke::new(
-                (9.0 + hot_amounts[1] * 3.0) * scale,
-                t::tint(state_color, 0.15 * files_fade),
-            ),
-        ));
-        painter.add(Shape::line(
-            pts,
-            Stroke::new(
-                (3.6 + hot_amounts[1] * 2.4) * scale,
+                (3.0 + hot_amounts[1] * 3.0) * scale,
                 t::tint(state_color, files_fade),
             ),
         ));
-        // 顶部 12 点钟发光指示微珠
-        let tip_pos = at(
-            center,
-            (fraction.min(1.0) * TAU).rem_euclid(TAU),
-            FILE_R * scale,
-        );
-        painter.circle_filled(
-            tip_pos,
-            3.0 * scale,
-            t::tint(Color32::WHITE, 0.85 * files_fade),
-        );
     }
     if waiting && !motion::reduced() {
         let spin = (time / 2.4).rem_euclid(1.0) * TAU;
@@ -481,41 +408,35 @@ pub fn show(ui: &mut egui::Ui, rect: egui::Rect, data: &Data) -> Option<Layer> {
             let from = spin + dash as f32 / 12.0 * TAU;
             painter.add(Shape::line(
                 arc(center, 54.0 * scale, from, from + 0.2),
-                Stroke::new(1.2, t::tint(t::accent(), 0.7 * files_fade)),
+                Stroke::new(1.0, t::tint(t::dim(), files_fade)),
             ));
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
 
-    // 宝石质感中心核心圆点 + 同心微光晕 + 高光点
+    // 中心圆点 + 克制的哑光同心晕层（非霓虹）
     let core = motion::spring(
         &ctx,
         id.with("core"),
-        if hot == Some(Layer::Core) { 18.0 } else { 13.5 },
+        if hot == Some(Layer::Core) { 17.0 } else { 12.0 },
         420.0,
         20.0,
     );
     let core_fade = visibility(Layer::Core);
     painter.circle_filled(
         center,
-        (core + 15.0).max(1.0) * scale,
-        t::tint(state_color, 0.09 * core_fade),
+        (core + 14.0).max(1.0) * scale,
+        t::tint(state_color, 0.05 * core_fade),
     );
     painter.circle_filled(
         center,
-        (core + 7.0).max(1.0) * scale,
-        t::tint(state_color, 0.20 * core_fade),
+        (core + 6.0).max(1.0) * scale,
+        t::tint(state_color, 0.12 * core_fade),
     );
     painter.circle_filled(
         center,
         core.max(1.0) * scale,
         t::tint(state_color, core_fade),
-    );
-    // 左上镜面微高光，呈现立体晶石光泽
-    painter.circle_filled(
-        center + vec2(-core * 0.28 * scale, -core * 0.28 * scale),
-        (core * 0.34).max(1.5) * scale,
-        Color32::from_white_alpha((95.0 * core_fade) as u8),
     );
 
     if let Some(layer) = hot {

@@ -458,14 +458,11 @@ impl App {
         let mut reveal: Option<PathBuf> = None;
         let mut copy: Option<String> = None;
         let modal_id = egui::Id::unique("update_modal");
-        let enter = motion::modal_enter(ctx, modal_id);
+        let enter = transition::modal_enter(ctx, modal_id);
         let modal = egui::Modal::new(modal_id)
             .backdrop_color(t::veil(enter))
             .frame(elevated_modal_frame())
             .show(ctx, |ui| {
-                if enter < 0.999 {
-                    ui.multiply_opacity(enter);
-                }
                 ui.set_width(480.0);
                 ui.label(
                     egui::RichText::new(format!("Cairn {version}"))
@@ -619,17 +616,7 @@ impl App {
                     });
                 });
             });
-        ctx.set_transform_layer(
-            modal.response.layer_id,
-            if enter < 0.999 {
-                egui::emath::TSTransform::from_translation(egui::vec2(
-                    0.0,
-                    motion::modal_slide_y(enter),
-                ))
-            } else {
-                egui::emath::TSTransform::IDENTITY
-            },
-        );
+        transition::finish_modal(ctx, modal_id, modal.response.layer_id, enter, 1.0, true);
         if modal.backdrop_response.clicked() || escape_pressed(ctx) {
             close = true;
         }

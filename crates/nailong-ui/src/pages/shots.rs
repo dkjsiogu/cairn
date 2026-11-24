@@ -433,7 +433,6 @@ impl Shots {
         };
         let rect = base.expand(hover * 2.0);
         let painter = ui.painter();
-        painter.add(t::card_shadow().as_shape(rect, radius));
         painter.rect_filled(rect, radius, t::wash());
         let mut animating = hover > 0.0 && hover < 1.0;
         match self.thumbs.get(&shot.path) {

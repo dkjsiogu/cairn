@@ -8,7 +8,7 @@
 
 **简体中文** | [English](README.en.md)
 
-> 当前版本：**0.47.0**（预览版） · [完整更新日志](CHANGELOG.md) · [实现状态与边界](docs/design/14-implementation-status.md)
+> 当前版本：**0.47.1**（预览版） · [完整更新日志](CHANGELOG.md) · [实现状态与边界](docs/design/14-implementation-status.md)
 
 ## 为什么是 Cairn
 

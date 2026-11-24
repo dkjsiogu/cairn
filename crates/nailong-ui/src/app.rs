@@ -190,8 +190,6 @@ impl App {
             pending_install: None,
             version_cache: None,
             page_key: 255,
-            page_enter_at: 0.0,
-            page_slide: egui::Vec2::ZERO,
             version_query: String::new(),
             version_search_focus: false,
             settings_tab: Default::default(),
@@ -648,8 +646,7 @@ impl App {
         self.busy.is_some_and(Task::shows_progress) && (self.progress_open || self.page_locked())
     }
 
-    /// 根据视图编号计算语义滑入方向：
-    /// 一级侧栏上下切页沿纵向滑入；同模块内钻取（版本→安装、发现→详情/搜索、已安装↔发现）沿横向滑入。
+    /// 当前视图的编号，变了就放一次切页动效。
     pub(crate) fn view_key(&self) -> u8 {
         if self.progress_showing() {
             return 10;
@@ -836,16 +833,12 @@ impl App {
             .resizable(false)
             .show_separator_line(false)
             .exact_size(20.0)
-            .frame(
-                egui::Frame::new()
-                    .fill(egui::Color32::TRANSPARENT)
-                    .inner_margin(egui::Margin {
-                        left: 16,
-                        right: 16,
-                        top: 0,
-                        bottom: 5,
-                    }),
-            )
+            .frame(egui::Frame::new().fill(t::bg()).inner_margin(egui::Margin {
+                left: 16,
+                right: 16,
+                top: 0,
+                bottom: 5,
+            }))
             .show(ui, |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let version = env!("CARGO_PKG_VERSION");
@@ -1027,12 +1020,8 @@ pub(crate) struct App {
     pub(crate) progress_seen: Option<Task>,
     /// 设置里的「清理不用的文件」。
     pub(crate) cleanup: crate::dialogs::settings::CleanupState,
-    /// 当前视图的编号，变了就放一次切页动效。
+    /// 当前视图的编号，变了就同步刷新启动台缓存。
     pub(crate) page_key: u8,
-    /// 进入当前视图的时间。
-    pub(crate) page_enter_at: f64,
-    /// 本次切页的语义方向位移（侧栏上下切换纵向滑入，进退子页横向滑入）。
-    pub(crate) page_slide: egui::Vec2,
     /// 窗口上一帧是否在前台：回到窗口时重新核对内容目录。
     pub(crate) window_focused: bool,
     // ---- 各页面和弹窗自己的状态 ----
@@ -1157,58 +1146,33 @@ impl eframe::App for App {
             }
             self.progress_seen = self.busy;
         }
-        let now = ctx.input(|input| input.time);
-        let view = self.view_key();
-        if view != self.page_key {
-            let prev = self.page_key;
-            self.page_key = view;
-            // 别的页面可能改了内容或快照，回到启动台时重新读取。
-            self.home.cache = None;
-            self.home.verified = None;
-            self.play.tuning_cache.clear();
-            // 首次打开直接到位，不播放入场滑入；之后按页面层级方向丝滑切换。
-            if prev == 255 {
-                self.page_enter_at = now - 1.0;
-                self.page_slide = egui::Vec2::ZERO;
-            } else {
-                self.page_enter_at = now;
-                self.page_slide = transition_vector(prev, view);
-            }
-        }
-        let enter = if self.prefs.reduce_motion {
-            1.0
-        } else {
-            (((now - self.page_enter_at) / 0.21) as f32).clamp(0.0, 1.0)
-        };
-        let eased = motion::ease_out_quart(enter);
-        if enter < 1.0 {
-            ctx.request_repaint();
-        }
         #[cfg(debug_assertions)]
         if std::env::var_os("NAILONG_DEBUG_HOVER_CYCLE").is_some() {
             ctx.request_repaint_after(Duration::from_millis(33));
         }
         self.sidebar(ui);
+        let view = self.view_key();
+        if view != self.page_key {
+            self.page_key = view;
+            // 别的页面可能改了内容或快照，回到启动台时重新读取。
+            self.home.cache = None;
+            self.home.verified = None;
+            self.play.tuning_cache.clear();
+        }
+        let stage_key = self.stage_key();
         egui::CentralPanel::no_frame()
             .frame(egui::Frame::new().fill(t::bg()))
             .show(ui, |ui| {
-                // 大气画布始终固定在底层，切页时只淡入滑入前景内容，绝不闪黑屏。
-                backdrop::paint_canvas(&ctx, ui.painter(), ui.max_rect());
                 self.version_line(ui);
                 self.message_bar(ui);
                 let stage_rect = ui.available_rect_before_wrap();
-                let slide = if eased < 0.999 {
-                    self.page_slide * (1.0 - eased)
-                } else {
-                    egui::Vec2::ZERO
-                };
-                ui.scope_builder(
-                    egui::UiBuilder::new().max_rect(stage_rect.translate(slide)),
+                transition::run_region(
+                    ui,
+                    egui::Id::unique("cairn_main_stage"),
+                    stage_key as u64,
+                    stage_rect,
+                    page_direction,
                     |ui| {
-                        ui.set_clip_rect(stage_rect);
-                        if eased < 0.999 {
-                            ui.multiply_opacity(eased);
-                        }
                         if self.progress_showing() {
                             self.progress_view(ui);
                         } else {
@@ -1245,6 +1209,7 @@ impl eframe::App for App {
             }
         }
         self.palette_overlay(&ctx);
+        transition::paint_closing_modals(&ctx);
         self.remember_selection();
         motion::focus_ring(&ctx);
         motion::pointer_on_clickables(&ctx);
@@ -1259,6 +1224,23 @@ impl eframe::App for App {
 }
 
 impl App {
+    /// 主舞台级联切页键：内容页内部的「已安装/发现/搜索/详情」共用顶部栏，交由内容区自己的子转场处理，
+    /// 避免顶栏跟着重影晃动；其余一级页面和「版本↔安装」走主舞台双页合成转场。
+    fn stage_key(&self) -> u8 {
+        if self.progress_showing() {
+            7
+        } else {
+            match self.page {
+                Page::Home => 0,
+                Page::Install => 1,
+                Page::Versions => 2,
+                Page::Content => 3,
+                Page::Worlds => 8,
+                Page::Shots => 9,
+            }
+        }
+    }
+
     /// 记下窗口大小和缩放（关掉时写进 `ui.json`）。最大化时不记大小，还原后还是原来那么大。
     fn track_window(&mut self, ctx: &egui::Context) {
         let zoom = ctx.zoom_factor();
@@ -1282,11 +1264,10 @@ impl App {
     }
 }
 
-/// 根据源/目标视图编号计算切页语义方向：
-/// 一级侧栏上下切页沿纵向滑入（下移从下方滑入、上移从上方滑入）；
-/// 同一模块内钻取/切模式（版本↔安装、已安装↔发现↔详情）沿横向滑入。
-fn transition_vector(from: u8, to: u8) -> egui::Vec2 {
-    let nav_rank = |key: u8| -> i8 {
+/// 根据源/目标视图编号计算双页转场的语义方向：
+/// 一级侧栏上下切页沿纵向耦合滑行；同一模块内钻取/切模式（版本↔安装、已安装↔发现↔详情）沿横向推拉。
+fn page_direction(from: u64, to: u64) -> (egui::Vec2, transition::Spec) {
+    let nav_rank = |key: u64| -> i8 {
         match key {
             0 => 0,     // 启动台
             1 | 2 => 1, // 版本 / 安装
@@ -1300,13 +1281,25 @@ fn transition_vector(from: u8, to: u8) -> egui::Vec2 {
     let r_to = nav_rank(to);
     if r_from != r_to {
         let sign = if r_to > r_from { 1.0 } else { -1.0 };
-        egui::vec2(0.0, sign * 18.0)
+        (egui::vec2(0.0, sign), transition::Spec::PAGE_VERTICAL)
     } else {
-        // 同模块内切换：版本(2)→安装(1) 向左钻入，反之向右退回；内容按层级左右滑动
-        let forward = (from == 2 && to == 1)
-            || (from == 6 && to == 3)
-            || (to > from && !(from == 1 && to == 2));
-        let sign = if forward { 1.0 } else { -1.0 };
-        egui::vec2(sign * 20.0, 0.0)
+        // 同模块内切换：版本(2)→安装(1) 向左钻入，反之向右退回；已安装(6)→发现(3)→搜索(4)→详情(5) 横向推进
+        let sub_rank = |key: u64| -> i8 {
+            match key {
+                2 => 0, // 版本列表
+                1 => 1, // 安装新版本
+                6 => 0, // 已安装
+                3 => 1, // 发现
+                4 => 2, // 搜索结果
+                5 => 3, // 项目详情
+                _ => 0,
+            }
+        };
+        let sign = if sub_rank(to) >= sub_rank(from) {
+            1.0
+        } else {
+            -1.0
+        };
+        (egui::vec2(sign, 0.0), transition::Spec::PAGE_HORIZONTAL)
     }
 }

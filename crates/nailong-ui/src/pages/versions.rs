@@ -386,7 +386,7 @@ impl App {
             .exact_size(292.0)
             .frame(
                 egui::Frame::new()
-                    .fill(t::tint(t::rail(), if t::is_light() { 0.42 } else { 0.44 }))
+                    .fill(t::bg())
                     .inner_margin(egui::Margin::symmetric(14, 18)),
             )
             .show(ui, |ui| {
@@ -529,6 +529,26 @@ impl App {
                     .inner_margin(egui::Margin::symmetric(30, 26)),
             )
             .show(ui, |ui| {
+                let stage_rect = ui.available_rect_before_wrap();
+                let row_idx = selected
+                    .as_ref()
+                    .and_then(|s| self.rows.iter().position(|r| r.id == s.id))
+                    .unwrap_or(0) as u64;
+                let detail_key = (row_idx << 32)
+                    | (selected
+                        .as_ref()
+                        .map_or(0, |s| transition::hash_u64(&s.id))
+                        & 0xFFFF_FFFF);
+                transition::run_region(
+                    ui,
+                    egui::Id::unique("cairn_version_detail_stage"),
+                    detail_key,
+                    stage_rect,
+                    |from, to| {
+                        let sign = if (to >> 32) >= (from >> 32) { 1.0 } else { -1.0 };
+                        (egui::vec2(0.0, sign), transition::Spec::SUB_PANE)
+                    },
+                    |ui| {
                 let Some(row) = selected.clone() else {
                     ui.vertical_centered(|ui| {
                         ui.add_space(110.0);
@@ -557,118 +577,81 @@ impl App {
                     });
                     return;
                 };
-                let detail_fade = motion::key_fade(
-                    ui.ctx(),
-                    egui::Id::unique("cairn_version_detail_fade"),
-                    &row.id,
-                    0.16,
-                );
-                if detail_fade < 0.999 {
-                    ui.multiply_opacity(detail_fade);
-                }
 
                 let compact = ui.available_width() < 900.0;
-                let loader_col = if row.pack.is_some() {
-                    t::loader_pack()
-                } else {
-                    t::loader_color(row.loader)
-                };
-                egui::Frame::new()
-                    .fill(t::surface_glass())
-                    .stroke(egui::Stroke::new(1.0, t::glass_border()))
-                    .corner_radius(motion::R_CARD)
-                    .shadow(t::card_shadow())
-                    .inner_margin(egui::Margin::symmetric(18, 16))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            let (emblem_rect, _) = ui.allocate_exact_size(
-                                egui::vec2(44.0, 44.0),
-                                egui::Sense::hover(),
-                            );
-                            loader_emblem_box(
-                                ui.painter(),
-                                emblem_rect,
-                                row.loader,
-                                row.pack.is_some(),
-                            );
-                            ui.add_space(10.0);
-                            let title_w = if compact {
-                                (ui.available_width() - 8.0).max(160.0)
-                            } else {
-                                (ui.available_width() - 320.0).max(200.0)
-                            };
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(title_w, 48.0),
-                                egui::Layout::top_down(egui::Align::LEFT),
-                                |ui| {
+                ui.horizontal(|ui| {
+                    let title_w = if compact {
+                        ui.available_width()
+                    } else {
+                        (ui.available_width() - 300.0).max(240.0)
+                    };
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(title_w, 64.0),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            ui.horizontal_top(|ui| {
+                                ui.vertical(|ui| {
+                                    // 长名字换行完整显示，不截断。
                                     ui.add(
                                         egui::Label::new(
                                             egui::RichText::new(&row.id)
-                                                .size(22.0)
-                                                .family(bold_family())
+                                                .size(24.0)
+                                                .family(display_family())
                                                 .color(t::ink()),
                                         )
                                         .wrap(),
                                     );
-                                    ui.add_space(2.0);
-                                    ui.horizontal(|ui| {
-                                        status_dot(ui, row.health.missing == 0);
-                                        ui.label(
-                                            egui::RichText::new(row_kind(&row))
-                                                .size(13.0)
-                                                .color(loader_col),
-                                        );
-                                        ui.label(
-                                            egui::RichText::new("·").size(13.0).color(t::sub()),
-                                        );
-                                        ui.label(
-                                            egui::RichText::new(if row.health.missing == 0 {
-                                                "安装完整".to_string()
-                                            } else {
-                                                format!("缺 {} 个文件", row.health.missing)
-                                            })
-                                            .size(13.0)
-                                            .color(if row.health.missing == 0 {
-                                                t::ok()
-                                            } else {
-                                                t::warn()
-                                            }),
-                                        );
-                                        if row.health.missing > 0
-                                            && ui
-                                                .add(
-                                                    egui::Button::new(
-                                                        egui::RichText::new("补全").size(13.0),
-                                                    )
-                                                    .fill(t::bg())
-                                                    .stroke(egui::Stroke::new(1.0, t::hairline()))
-                                                    .corner_radius(motion::R)
-                                                    .min_size(egui::vec2(40.0, 20.0)),
-                                                )
-                                                .clicked()
-                                        {
-                                            self.selected = Some(row.id.clone());
-                                            self.start_repair(row.clone());
-                                        }
-                                    });
-                                },
-                            );
-                            if !compact {
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        self.version_actions(ui, &row, &mut open_dir);
-                                    },
-                                );
-                            }
-                        });
-                        if compact {
-                            ui.add_space(12.0);
-                            ui.horizontal(|ui| {
-                                self.version_actions(ui, &row, &mut open_dir);
+                                });
                             });
-                        }
+                            ui.add_space(1.0);
+                            ui.horizontal(|ui| {
+                                status_dot(ui, row.health.missing == 0);
+                                ui.label(
+                                    egui::RichText::new(row_kind(&row))
+                                        .size(13.0)
+                                        .color(t::sub()),
+                                );
+                                ui.label(egui::RichText::new("·").size(13.0).color(t::sub()));
+                                ui.label(
+                                    egui::RichText::new(if row.health.missing == 0 {
+                                        "安装完整".to_string()
+                                    } else {
+                                        format!("缺 {} 个文件", row.health.missing)
+                                    })
+                                    .size(13.0)
+                                    .color(if row.health.missing == 0 { t::ok() } else { t::warn() }),
+                                );
+                                if row.health.missing > 0
+                                    && ui
+                                        .add(
+                                            egui::Button::new(
+                                                egui::RichText::new("补全").size(13.0),
+                                            )
+                                            .fill(t::bg())
+                                            .stroke(egui::Stroke::new(1.0, t::hairline()))
+                                            .corner_radius(motion::R)
+                                            .min_size(egui::vec2(40.0, 20.0)),
+                                        )
+                                        .clicked()
+                                {
+                                    self.selected = Some(row.id.clone());
+                                    self.start_repair(row.clone());
+                                }
+                            });
+                        },
+                    );
+                    if !compact {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            self.version_actions(ui, &row, &mut open_dir);
+                        });
+                    }
+                });
+                if compact {
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        self.version_actions(ui, &row, &mut open_dir);
                     });
+                }
 
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
@@ -680,11 +663,10 @@ impl App {
                         let mut go_content: Option<mods::ContentKind> = None;
                         let mut go_worlds = false;
                         egui::Frame::new()
-                            .fill(t::surface_glass())
-                            .stroke(egui::Stroke::new(1.0, t::glass_border()))
+                            .fill(t::surface())
+                            .stroke(egui::Stroke::new(1.0, t::hairline()))
                             .corner_radius(motion::R_CARD)
-                            .shadow(t::card_shadow())
-                            .inner_margin(egui::Margin::symmetric(12, 12))
+                            .inner_margin(egui::Margin::symmetric(10, 10))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing.x = 0.0;
@@ -752,10 +734,9 @@ impl App {
                         );
                         ui.add_space(8.0);
                         egui::Frame::new()
-                            .fill(t::surface_glass())
-                            .stroke(egui::Stroke::new(1.0, t::glass_border()))
+                            .fill(t::surface())
+                            .stroke(egui::Stroke::new(1.0, t::hairline()))
                             .corner_radius(motion::R_CARD)
-                            .shadow(t::card_shadow())
                             .inner_margin(egui::Margin::symmetric(16, 14))
                             .show(ui, |ui| {
                                 self.name_line(ui, &row);
@@ -881,6 +862,8 @@ impl App {
                             }
                         });
                     });
+                    },
+                );
             });
 
         if let Some(row) = chosen {
@@ -1506,7 +1489,7 @@ impl App {
 
 /// 版本详情里一格能点的数字：大一点的数，下面是它是什么。
 fn stat_button(ui: &mut egui::Ui, value: usize, label: &str, divider: bool) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(88.0, 56.0), egui::Sense::click());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(84.0, 52.0), egui::Sense::click());
     let hover = motion::hover_amount(ui, response.id.with("stat_hover"), response.hovered());
     if divider {
         ui.painter().vline(
@@ -1515,16 +1498,16 @@ fn stat_button(ui: &mut egui::Ui, value: usize, label: &str, divider: bool) -> e
             egui::Stroke::new(1.0, t::hairline()),
         );
     }
-    list_row_fill(ui, rect.shrink2(egui::vec2(4.0, 1.0)), false, &response);
+    list_row_fill(ui, rect.shrink2(egui::vec2(3.0, 1.0)), false, &response);
     ui.painter().text(
-        rect.left_top() + egui::vec2(14.0, 6.0),
+        rect.left_top() + egui::vec2(12.0, 7.0),
         egui::Align2::LEFT_TOP,
         value.to_string(),
-        egui::FontId::new(21.0, bold_family()),
+        egui::FontId::new(18.0, bold_family()),
         motion::mix(t::ink(), t::accent(), hover),
     );
     ui.painter().text(
-        rect.left_top() + egui::vec2(14.0, 33.0),
+        rect.left_top() + egui::vec2(12.0, 31.0),
         egui::Align2::LEFT_TOP,
         label,
         egui::FontId::proportional(12.5),
@@ -1541,56 +1524,33 @@ pub(crate) fn loader_tile(
     enabled: bool,
     width: f32,
 ) -> egui::Response {
+    // 不可用的不响应点击，也不会变成手形光标。
     let sense = if enabled {
         egui::Sense::click()
     } else {
         egui::Sense::hover()
     };
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 66.0), sense);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 62.0), sense);
     let hover = motion::hover_amount(ui, response.id.with("hover"), enabled && response.hovered());
-    let brand = t::loader_color(kind);
     let fill = if selected {
-        t::tint(brand, if t::is_light() { 0.11 } else { 0.16 })
+        t::tint(t::accent(), 0.13)
     } else if hover > 0.0 {
-        motion::mix(t::surface_glass(), t::elevated(), hover)
+        t::tint(t::wash(), hover)
     } else {
-        t::surface_glass()
+        t::bg()
     };
     let border = if selected {
-        egui::Stroke::new(1.5, brand)
+        egui::Stroke::new(1.5, t::accent())
     } else {
-        egui::Stroke::new(1.0, motion::mix(t::glass_border(), brand, 0.5 * hover))
+        egui::Stroke::new(1.0, motion::mix(t::hairline(), t::control(), hover))
     };
     ui.painter()
-        .rect(rect, motion::R_CARD, fill, border, egui::StrokeKind::Inside);
+        .rect(rect, motion::R, fill, border, egui::StrokeKind::Inside);
     if selected {
         ui.painter().circle_filled(
             egui::pos2(rect.right() - 10.0, rect.top() + 10.0),
-            3.5,
-            brand,
-        );
-    }
-    let emblem_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 21.0, rect.center().y),
-        egui::vec2(26.0, 26.0),
-    );
-    if enabled {
-        loader_emblem_box(ui.painter(), emblem_rect, kind, false);
-    } else {
-        ui.painter().rect(
-            emblem_rect,
-            7,
-            t::wash(),
-            egui::Stroke::new(1.0, t::hairline()),
-            egui::StrokeKind::Inside,
-        );
-        backdrop::paint_loader_icon(
-            ui.painter(),
-            emblem_rect.center(),
-            14.0,
-            kind,
-            false,
-            t::dim(),
+            3.2,
+            t::accent(),
         );
     }
     let sub = if enabled && !subtitle.is_empty() {
@@ -1600,13 +1560,12 @@ pub(crate) fn loader_tile(
     } else {
         "不可用".to_string()
     };
-    let text_x = emblem_rect.right() + 8.0;
     ui.painter().text(
-        egui::pos2(text_x, rect.top() + 14.0),
+        rect.left_top() + egui::vec2(12.0, 12.0),
         egui::Align2::LEFT_TOP,
         kind.name(),
         egui::FontId::new(
-            13.5,
+            14.0,
             if selected {
                 bold_family()
             } else {
@@ -1616,11 +1575,11 @@ pub(crate) fn loader_tile(
         if enabled { t::ink() } else { t::dim() },
     );
     ui.painter().text(
-        egui::pos2(text_x, rect.top() + 36.0),
+        rect.left_top() + egui::vec2(12.0, 34.0),
         egui::Align2::LEFT_TOP,
         sub,
         egui::FontId::proportional(12.5),
-        if selected { brand } else { t::sub() },
+        if selected { t::accent() } else { t::sub() },
     );
     response
 }
@@ -1636,7 +1595,8 @@ enum RowAction {
     Delete,
 }
 
-/// 版本列表的一行：定制加载器色标方块 + 名字、游戏版本和加载器，运行中显示翠绿实时角标。
+/// 版本列表的一行：名字、游戏版本和加载器；第一行右侧留给「运行中」或上次游玩时间，
+/// 第二行占满整行宽度避免过早截断加载器版本号。
 pub(crate) fn version_row(
     ui: &mut egui::Ui,
     row: &Row,
@@ -1644,42 +1604,39 @@ pub(crate) fn version_row(
     note: Option<(String, bool)>,
 ) -> egui::Response {
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 60.0), egui::Sense::click());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 56.0), egui::Sense::click());
     list_row_fill(ui, rect, active, &response);
     if active {
-        ui.painter().rect_stroke(
-            rect,
-            motion::R,
-            egui::Stroke::new(1.0, t::tint(t::accent(), 0.30)),
-            egui::StrokeKind::Inside,
-        );
         active_accent_bar(ui.painter(), rect);
     }
-    let emblem_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 29.0, rect.center().y),
-        egui::vec2(32.0, 32.0),
-    );
-    loader_emblem_box(ui.painter(), emblem_rect, row.loader, row.pack.is_some());
-    // 运行中或缺失文件时在徽章右上角显示状态圆点
-    let running = matches!(&note, Some((_, true)));
-    if running || row.health.missing > 0 {
-        let dot_col = if running { t::ok() } else { t::warn() };
-        ui.painter().circle(
-            emblem_rect.right_top() + egui::vec2(-1.0, 1.0),
-            4.2,
-            dot_col,
-            egui::Stroke::new(1.5, if active { t::wash() } else { t::bg() }),
-        );
+    let dot_pos = egui::pos2(rect.left() + 18.0, rect.top() + 20.0);
+    match &note {
+        Some((_, true)) => {
+            ui.painter()
+                .circle_filled(dot_pos, 6.0, t::tint(t::ok(), 0.22));
+            ui.painter().circle_filled(dot_pos, 3.2, t::ok());
+        }
+        _ => {
+            ui.painter().circle_filled(
+                dot_pos,
+                3.2,
+                if row.health.missing == 0 {
+                    t::ok()
+                } else {
+                    t::warn()
+                },
+            );
+        }
     }
-    let text_left = emblem_rect.right() + 10.0;
-    let right_edge = rect.right() - 10.0;
-    let note_w = if let Some((text, is_running)) = &note {
+    let text_left = rect.left() + 30.0;
+    let right_edge = rect.right() - 12.0;
+    let note_w = if let Some((text, running)) = &note {
         let font = egui::FontId::proportional(11.5);
-        let color = if *is_running { t::ok() } else { t::dim() };
+        let color = if *running { t::ok() } else { t::dim() };
         let galley = ui.painter().layout_no_wrap(text.clone(), font, color);
         let w = galley.size().x;
         ui.painter()
-            .galley(egui::pos2(right_edge - w, rect.top() + 13.0), galley, color);
+            .galley(egui::pos2(right_edge - w, rect.top() + 12.0), galley, color);
         w + 8.0
     } else {
         0.0
@@ -1692,21 +1649,21 @@ pub(crate) fn version_row(
             egui::FontFamily::Proportional
         },
     );
-    let name_w = (right_edge - text_left - note_w).max(56.0);
+    let name_w = (right_edge - text_left - note_w).max(60.0);
     let name_shown = elide_middle(ui, &row.id, &name_font, name_w);
     ui.painter().text(
-        egui::pos2(text_left, rect.top() + 20.0),
+        egui::pos2(text_left, rect.top() + 19.0),
         egui::Align2::LEFT_CENTER,
         name_shown,
         name_font,
         t::ink(),
     );
-    let kind_font = egui::FontId::proportional(12.0);
+    let kind_font = egui::FontId::proportional(12.5);
     let kind_text = row_kind(row);
-    let kind_w = (right_edge - text_left).max(76.0);
+    let kind_w = (right_edge - text_left).max(80.0);
     let kind_shown = elide_middle(ui, &kind_text, &kind_font, kind_w);
     ui.painter().text(
-        egui::pos2(text_left, rect.top() + 41.0),
+        egui::pos2(text_left, rect.top() + 39.0),
         egui::Align2::LEFT_CENTER,
         kind_shown,
         kind_font,
@@ -1727,21 +1684,17 @@ pub(crate) fn row_kind(row: &Row) -> String {
     }
 }
 
-/// 首次启动的步骤编号：完成用翡翠圆章，未完成用雾蓝圆章。
+/// 首次启动的步骤编号：完成的一步用绿色，未完成用暖色。
 pub(crate) fn onboarding_badge(ui: &mut egui::Ui, number: &str, done: bool) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::hover());
-    let color = if done { t::ok() } else { t::accent() };
-    ui.painter().circle(
-        rect.center(),
-        12.5,
-        t::tint(color, if t::is_light() { 0.12 } else { 0.16 }),
-        egui::Stroke::new(1.2, t::tint(color, 0.65)),
-    );
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::hover());
+    let color = if done { t::ok() } else { t::sub() };
+    ui.painter()
+        .circle_stroke(rect.center(), 11.0, egui::Stroke::new(1.0, color));
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         if done { "✓" } else { number },
-        egui::FontId::new(13.0, bold_family()),
+        egui::FontId::proportional(13.0),
         color,
     );
 }

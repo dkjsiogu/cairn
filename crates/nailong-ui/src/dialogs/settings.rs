@@ -55,14 +55,11 @@ impl App {
         let mut start = false;
         let mut close = false;
         let modal_id = egui::Id::unique("bench_modal");
-        let enter = motion::modal_enter(ctx, modal_id);
+        let enter = transition::modal_enter(ctx, modal_id);
         let modal = egui::Modal::new(modal_id)
             .backdrop_color(t::veil(enter))
             .frame(elevated_modal_frame())
             .show(ctx, |ui| {
-                if enter < 0.999 {
-                    ui.multiply_opacity(enter);
-                }
                 ui.set_width(440.0);
                 ui.label(
                     egui::RichText::new("测一下这台电脑")
@@ -108,7 +105,7 @@ impl App {
                     }
                 });
             });
-        apply_modal_slide(ctx, modal.response.layer_id, enter);
+        transition::finish_modal(ctx, modal_id, modal.response.layer_id, enter, 1.0, true);
         if modal.backdrop_response.clicked() || escape_pressed(ctx) {
             close = true;
         }
@@ -410,33 +407,30 @@ impl App {
         let body_h = (screen.height() - 170.0).clamp(300.0, 470.0);
         let nav_w = 148.0;
         let modal_id = egui::Id::unique("settings_modal");
-        let enter = motion::modal_enter(ctx, modal_id);
+        let enter = transition::modal_enter(ctx, modal_id);
         let modal = egui::Modal::new(modal_id)
             .backdrop_color(t::veil(enter))
             .frame(
                 egui::Frame::new()
                     .fill(t::surface())
-                    .stroke(egui::Stroke::new(1.0, t::glass_border()))
+                    .stroke(egui::Stroke::new(1.0, t::hairline()))
                     .corner_radius(motion::R_MODAL)
                     .shadow(t::modal_shadow())
                     .inner_margin(egui::Margin::symmetric(24, 20)),
             )
             .show(ctx, |ui| {
-                if enter < 0.999 {
-                    ui.multiply_opacity(enter);
-                }
                 ui.set_width(width);
                 ui.horizontal_top(|ui| {
                     let spacing = ui.spacing().item_spacing.x;
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    // 左边：标题和分栏（选中项带弹簧滑行光带）。
+                    // 左边：标题和分栏（弹簧滑行激活底板 + 雾蓝指示条）。
                     ui.allocate_ui_with_layout(
                         egui::vec2(nav_w, body_h),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
                             ui.set_width(nav_w);
                             ui.set_min_height(body_h);
-                            ui.spacing_mut().item_spacing.y = 3.0;
+                            ui.spacing_mut().item_spacing.y = 2.0;
                             ui.horizontal(|ui| {
                                 ui.add_space(10.0);
                                 ui.label(
@@ -482,7 +476,7 @@ impl App {
                                 );
                                 ui.painter().set(
                                     tab_bg_slot,
-                                    backdrop::nav_active_shape(ui.ctx(), pill, motion::R + 1),
+                                    egui::epaint::RectShape::filled(pill, motion::R, t::wash()),
                                 );
                                 ui.painter()
                                     .set(tab_bar_slot, active_accent_bar_shape(pill));
@@ -494,40 +488,51 @@ impl App {
                         ui.allocate_exact_size(egui::vec2(1.0, body_h), egui::Sense::hover());
                     ui.painter().rect_filled(line, 0.0, t::hairline());
                     ui.add_space(20.0);
-                    // 右边：这一栏的内容（切栏时柔和淡入）。
+                    // 右边：这一栏的内容（双页合成平滑切换）。
                     let body_w = ui.available_width();
-                    let tab_t = motion::key_fade(
-                        ui.ctx(),
-                        egui::Id::unique("cairn_settings_tab_fade"),
-                        self.settings_tab as u8,
-                        0.16,
-                    );
                     ui.allocate_ui_with_layout(
                         egui::vec2(body_w, body_h),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
-                            if tab_t < 0.999 {
-                                ui.multiply_opacity(tab_t);
-                            }
                             ui.set_width(body_w);
                             ui.spacing_mut().item_spacing.x = spacing;
-                            egui::ScrollArea::vertical()
-                                .id_salt(("settings_body", self.settings_tab as u8))
-                                .max_height(body_h)
-                                .auto_shrink([false, false])
-                                .show(ui, |ui| {
-                                    // 给滚动条让出位置，卡片的右边不被压住。
-                                    ui.set_width(ui.available_width() - 12.0);
-                                    match self.settings_tab {
-                                        SettingsTab::Game => self.settings_game(ui, &mut actions),
-                                        SettingsTab::Launcher => self.settings_launcher(ui),
-                                        SettingsTab::Storage => {
-                                            self.settings_storage(ui, &mut actions)
-                                        }
-                                        SettingsTab::About => self.settings_about(ui, &mut actions),
-                                    }
-                                    ui.add_space(4.0);
-                                });
+                            let pane_rect = egui::Rect::from_min_size(
+                                ui.cursor().min,
+                                egui::vec2(body_w, body_h),
+                            );
+                            transition::run_region(
+                                ui,
+                                egui::Id::unique("cairn_settings_body_stage"),
+                                self.settings_tab as u64,
+                                pane_rect,
+                                |from, to| {
+                                    let sign = if to >= from { 1.0 } else { -1.0 };
+                                    (egui::vec2(0.0, sign), transition::Spec::SUB_PANE)
+                                },
+                                |ui| {
+                                    egui::ScrollArea::vertical()
+                                        .id_salt(("settings_body", self.settings_tab as u8))
+                                        .max_height(body_h)
+                                        .auto_shrink([false, false])
+                                        .show(ui, |ui| {
+                                            // 给滚动条让出位置，卡片的右边不被压住。
+                                            ui.set_width(ui.available_width() - 12.0);
+                                            match self.settings_tab {
+                                                SettingsTab::Game => {
+                                                    self.settings_game(ui, &mut actions)
+                                                }
+                                                SettingsTab::Launcher => self.settings_launcher(ui),
+                                                SettingsTab::Storage => {
+                                                    self.settings_storage(ui, &mut actions)
+                                                }
+                                                SettingsTab::About => {
+                                                    self.settings_about(ui, &mut actions)
+                                                }
+                                            }
+                                            ui.add_space(4.0);
+                                        });
+                                },
+                            );
                         },
                     );
                 });
@@ -538,17 +543,7 @@ impl App {
                     }
                 });
             });
-        ctx.set_transform_layer(
-            modal.response.layer_id,
-            if enter < 0.999 {
-                egui::emath::TSTransform::from_translation(egui::vec2(
-                    0.0,
-                    motion::modal_slide_y(enter),
-                ))
-            } else {
-                egui::emath::TSTransform::IDENTITY
-            },
-        );
+        transition::finish_modal(ctx, modal_id, modal.response.layer_id, enter, 1.0, true);
         if modal.backdrop_response.clicked() || escape_pressed(ctx) {
             actions.close = true;
         }

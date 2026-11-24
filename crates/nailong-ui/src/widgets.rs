@@ -31,246 +31,19 @@ pub(crate) fn busy_spinner(ui: &mut egui::Ui) {
     }
 }
 
-/// 左侧激活态竖条 Shape：带微光晕的 3px 雾蓝圆角指示条，可放入底层占位槽随弹簧滑行。
-pub(crate) fn active_accent_bar_shape(rect: egui::Rect) -> egui::Shape {
-    let h = (rect.height() - 14.0).clamp(14.0, 24.0);
-    let glow = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 3.5, rect.center().y),
-        egui::vec2(7.0, h + 4.0),
-    );
-    let bar = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 3.5, rect.center().y),
-        egui::vec2(3.0, h),
-    );
-    egui::Shape::Vec(vec![
-        egui::epaint::RectShape::filled(glow, 3.5, t::tint(t::accent(), 0.22)).into(),
-        egui::epaint::RectShape::filled(bar, 2.0, t::accent()).into(),
-    ])
-}
-
-/// 左侧激活态竖条：带微光晕的 3px 雾蓝圆角指示条。
+/// 左侧激活态竖条：导航项、版本行、世界行、设置分栏与命令面板统一使用。
 pub(crate) fn active_accent_bar(painter: &egui::Painter, rect: egui::Rect) {
     painter.add(active_accent_bar_shape(rect));
 }
 
-/// 定制的加载器图标圆角方徽章（NeoForge 暖琥珀 / Fabric 羊皮金 / Forge 铁砧蓝 / 原版翡翠绿 / 整合包紫晶）。
-pub(crate) fn loader_emblem_box(
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    loader: crate::model::LoaderKind,
-    is_pack: bool,
-) {
-    let color = if is_pack {
-        t::loader_pack()
-    } else {
-        t::loader_color(loader)
-    };
-    let r = (rect.width() * 0.26).clamp(6.0, 10.0) as u8;
-    painter.rect(
-        rect,
-        r,
-        t::tint(color, if t::is_light() { 0.13 } else { 0.17 }),
-        egui::Stroke::new(1.0, t::tint(color, if t::is_light() { 0.34 } else { 0.42 })),
-        egui::StrokeKind::Inside,
+/// 生成左侧雾蓝激活竖条图形，供弹簧滑行槽位直接复用（纯哑光，无外发光）。
+pub(crate) fn active_accent_bar_shape(rect: egui::Rect) -> egui::Shape {
+    let h = (rect.height() - 14.0).clamp(12.0, 22.0);
+    let bar = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 3.0, rect.center().y),
+        egui::vec2(2.5, h),
     );
-    backdrop::paint_loader_icon(
-        painter,
-        rect.center(),
-        rect.width() * 0.56,
-        loader,
-        is_pack,
-        color,
-    );
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum BadgeGlyph {
-    Cubes,
-    Shield,
-    Camera,
-    Pin,
-    Users,
-    Disk,
-}
-
-/// 精致的彩色微图标圆角方徽章，用于启动台 Bento 卡片与截图总览 KPI。
-pub(crate) fn icon_squircle(
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    color: egui::Color32,
-    glyph: BadgeGlyph,
-) {
-    let r = (rect.width() * 0.27).clamp(6.0, 10.0) as u8;
-    painter.rect(
-        rect,
-        r,
-        t::tint(color, if t::is_light() { 0.12 } else { 0.16 }),
-        egui::Stroke::new(1.0, t::tint(color, if t::is_light() { 0.30 } else { 0.36 })),
-        egui::StrokeKind::Inside,
-    );
-    let c = rect.center();
-    let s = rect.width() / 34.0;
-    let p = |x: f32, y: f32| c + egui::vec2(x * s, y * s);
-    let stroke = egui::Stroke::new(1.5 * s.max(0.85), color);
-    match glyph {
-        BadgeGlyph::Cubes => {
-            for (x, y) in [(-6.5, -6.5), (1.0, -6.5), (-6.5, 1.0), (1.0, 1.0)] {
-                painter.rect_stroke(
-                    egui::Rect::from_min_size(p(x, y), egui::vec2(5.5 * s, 5.5 * s)),
-                    1.2,
-                    stroke,
-                    egui::StrokeKind::Inside,
-                );
-            }
-        }
-        BadgeGlyph::Shield => {
-            painter.add(egui::Shape::closed_line(
-                vec![
-                    p(0.0, -7.2),
-                    p(6.4, -4.4),
-                    p(5.8, 2.0),
-                    p(0.0, 7.2),
-                    p(-5.8, 2.0),
-                    p(-6.4, -4.4),
-                ],
-                stroke,
-            ));
-            painter.add(egui::Shape::line(
-                vec![p(-2.8, 0.2), p(-0.6, 2.5), p(3.4, -2.2)],
-                stroke,
-            ));
-        }
-        BadgeGlyph::Camera => {
-            painter.rect_stroke(
-                egui::Rect::from_center_size(
-                    c + egui::vec2(0.0, 1.0 * s),
-                    egui::vec2(14.0 * s, 10.0 * s),
-                ),
-                2.0,
-                stroke,
-                egui::StrokeKind::Middle,
-            );
-            painter.circle_stroke(c + egui::vec2(0.0, 1.0 * s), 2.8 * s, stroke);
-        }
-        BadgeGlyph::Pin => {
-            painter.circle_stroke(p(0.0, -2.0), 4.5 * s, stroke);
-            painter.circle_filled(p(0.0, -2.0), 1.4 * s, color);
-            painter.add(egui::Shape::line(
-                vec![p(-3.2, 1.6), p(0.0, 6.8), p(3.2, 1.6)],
-                stroke,
-            ));
-        }
-        BadgeGlyph::Users => {
-            painter.circle_stroke(p(0.0, -3.2), 3.0 * s, stroke);
-            painter.add(egui::Shape::line(
-                vec![p(-5.6, 5.6), p(-3.2, 2.4), p(3.2, 2.4), p(5.6, 5.6)],
-                stroke,
-            ));
-        }
-        BadgeGlyph::Disk => {
-            painter.rect_stroke(
-                egui::Rect::from_center_size(c, egui::vec2(13.0 * s, 13.0 * s)),
-                2.0,
-                stroke,
-                egui::StrokeKind::Middle,
-            );
-            painter.line_segment([p(-6.0, 1.5), p(6.0, 1.5)], stroke);
-            painter.circle_filled(p(3.2, 4.0), 1.2 * s, color);
-        }
-    }
-}
-
-/// 懒加载并缓存 Minecraft 世界的真实 `icon.png` 纹理（每个世界路径只读盘一次，空闲 0% CPU）。
-pub(crate) fn world_icon_texture(
-    ctx: &egui::Context,
-    game_dir: &std::path::Path,
-    world_name: &str,
-) -> Option<egui::TextureHandle> {
-    let icon_path = game_dir.join("saves").join(world_name).join("icon.png");
-    let cache_id = egui::Id::unique(("cairn_world_icon", icon_path.clone()));
-    if let Some(cached) = ctx.data(|d| d.get_temp::<Option<egui::TextureHandle>>(cache_id)) {
-        return cached;
-    }
-    let loaded = std::fs::read(&icon_path)
-        .ok()
-        .and_then(|bytes| image::load_from_memory(&bytes).ok())
-        .map(|img| {
-            let rgba = img.to_rgba8();
-            let size = [rgba.width() as usize, rgba.height() as usize];
-            let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
-            ctx.load_texture(
-                format!("world_icon:{}", icon_path.display()),
-                color,
-                egui::TextureOptions::LINEAR,
-            )
-        });
-    ctx.data_mut(|d| d.insert_temp(cache_id, loaded.clone()));
-    loaded
-}
-
-/// 绘制世界缩略图：有 `icon.png` 显示实景图标，否则显示定制程序化方块风景占位图。
-pub(crate) fn paint_world_thumb(
-    ctx: &egui::Context,
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    game_dir: &std::path::Path,
-    world_name: &str,
-) {
-    let r = 8u8;
-    if let Some(tex) = world_icon_texture(ctx, game_dir, world_name) {
-        painter.add(
-            egui::epaint::RectShape::filled(rect, r, egui::Color32::WHITE).with_texture(
-                tex.id(),
-                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-            ),
-        );
-        painter.rect_stroke(
-            rect,
-            r,
-            egui::Stroke::new(1.0, t::glass_border()),
-            egui::StrokeKind::Inside,
-        );
-    } else {
-        backdrop::paint_world_placeholder(painter, rect, world_name);
-    }
-}
-
-/// 带自定义主题色的小号强调按钮（用于「▶ 进入」直达世界等高优先快捷操作）。
-pub(crate) fn small_tinted_button(
-    ui: &mut egui::Ui,
-    text: &str,
-    color: egui::Color32,
-) -> egui::Response {
-    let font = egui::FontId::new(12.5, bold_family());
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, color);
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2((galley.size().x + 22.0).max(52.0), 28.0),
-        egui::Sense::click(),
-    );
-    let hover = motion::hover_amount(ui, response.id.with("stint_hover"), response.hovered());
-    ui.painter().rect(
-        rect,
-        motion::R,
-        t::tint(
-            color,
-            if t::is_light() {
-                0.12 + 0.08 * hover
-            } else {
-                0.16 + 0.12 * hover
-            },
-        ),
-        egui::Stroke::new(1.0, t::tint(color, 0.55 + 0.30 * hover)),
-        egui::StrokeKind::Inside,
-    );
-    ui.painter().galley(
-        egui::pos2(
-            rect.center().x - galley.size().x * 0.5,
-            rect.center().y - galley.size().y * 0.5,
-        ),
-        galley,
-        color,
-    );
-    response
+    egui::epaint::RectShape::filled(bar, 2.0, t::accent()).into()
 }
 
 /// 键盘快捷键小键帽（如 `Ctrl+K`、`Esc`、`Enter`）。
@@ -319,27 +92,16 @@ pub(crate) fn segmented_bar(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) 
                 .flatten()
             {
                 let pill = motion::spring_rect(ui.ctx(), bar_id, target);
-                let mut shapes = vec![
+                ui.painter().set(
+                    pill_slot,
                     egui::epaint::RectShape::new(
                         pill,
                         motion::R,
                         t::surface(),
-                        egui::Stroke::new(1.0, t::glass_border()),
+                        egui::Stroke::new(1.0, t::hairline()),
                         egui::StrokeKind::Inside,
-                    )
-                    .into(),
-                ];
-                let r = motion::R as f32;
-                if pill.width() > r * 2.0 {
-                    shapes.push(egui::Shape::line_segment(
-                        [
-                            egui::pos2(pill.left() + r, pill.top() + 1.0),
-                            egui::pos2(pill.right() - r, pill.top() + 1.0),
-                        ],
-                        egui::Stroke::new(1.0, t::rim()),
-                    ));
-                }
-                ui.painter().set(pill_slot, egui::Shape::Vec(shapes));
+                    ),
+                );
             }
         });
 }
@@ -426,7 +188,7 @@ pub(crate) fn content_tab(
     response
 }
 
-/// 下划线式次级标签（如 Mod / 资源包 / 光影），外层配合 `spring_rect` 绘制丝滑滑动下划线。
+/// 下划线式次级标签（如 Mod / 资源包 / 光影），底部雾蓝指示条由外层弹簧滑行绘制。
 pub(crate) fn underline_tab_gliding(
     ui: &mut egui::Ui,
     label: &str,
@@ -614,10 +376,9 @@ pub(crate) fn list_row_fill(
 
 pub(crate) fn card() -> egui::Frame {
     egui::Frame::new()
-        .fill(t::surface_glass())
-        .stroke(egui::Stroke::new(1.0, t::glass_border()))
+        .fill(t::surface())
+        .stroke(egui::Stroke::new(1.0, t::hairline()))
         .corner_radius(motion::R_CARD)
-        .shadow(t::card_shadow())
         .inner_margin(egui::Margin::same(18))
 }
 
@@ -1196,32 +957,18 @@ pub(crate) fn danger_button(
     response
 }
 
-/// 统一的浮层弹窗框架：`R_MODAL` 圆角 + 柔和投影 + 玻璃细边。
+/// 统一的浮层弹窗框架：`R_MODAL` 圆角 + 柔和投影 + 细边。
 pub(crate) fn elevated_modal_frame() -> egui::Frame {
     egui::Frame::new()
         .fill(t::surface())
-        .stroke(egui::Stroke::new(1.0, t::glass_border()))
+        .stroke(egui::Stroke::new(1.0, t::hairline()))
         .corner_radius(motion::R_MODAL)
         .shadow(t::modal_shadow())
         .inner_margin(egui::Margin::symmetric(26, 22))
 }
 
-/// 对任意弹窗/浮层的 `LayerId` 施加统一的入场轻柔上浮位移；到位后恢复 `IDENTITY` 零开销。
-pub(crate) fn apply_modal_slide(ctx: &egui::Context, layer_id: egui::LayerId, enter: f32) {
-    ctx.set_transform_layer(
-        layer_id,
-        if enter < 0.999 {
-            egui::emath::TSTransform::from_translation(egui::vec2(
-                0.0,
-                motion::modal_slide_y(enter),
-            ))
-        } else {
-            egui::emath::TSTransform::IDENTITY
-        },
-    );
-}
-
-/// 弹窗的外框：带柔和入场淡入与轻柔上浮，遮罩、`surface` 底、玻璃边与投影。
+/// 弹窗的外框：带丝滑开合动效、遮罩、`surface` 底、细边与柔和投影。返回（内容的返回值，点了遮罩或按了 Esc）。
+/// 新弹窗都用它，外观和关闭方式就一致了；别忘了把开关加进 `App::modal_open`。
 pub(crate) fn dialog<R>(
     ctx: &egui::Context,
     id: &str,
@@ -1229,18 +976,15 @@ pub(crate) fn dialog<R>(
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> (R, bool) {
     let modal_id = egui::Id::unique(("dialog", id));
-    let enter = motion::modal_enter(ctx, modal_id);
+    let enter = transition::modal_enter(ctx, modal_id);
     let modal = egui::Modal::new(modal_id)
         .backdrop_color(t::veil(enter))
         .frame(elevated_modal_frame())
         .show(ctx, |ui| {
-            if enter < 0.999 {
-                ui.multiply_opacity(enter);
-            }
             ui.set_width(width);
             add(ui)
         });
-    apply_modal_slide(ctx, modal.response.layer_id, enter);
+    transition::finish_modal(ctx, modal_id, modal.response.layer_id, enter, 1.0, true);
     let dismissed = modal.backdrop_response.clicked() || escape_pressed(ctx);
     (modal.inner, dismissed)
 }

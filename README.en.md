@@ -8,7 +8,7 @@ A small, native Minecraft: Java Edition launcher written in Rust (formerly nailo
 
 [简体中文](README.md) | **English**
 
-> Current version: **0.47.0** (preview) · [Changelog](CHANGELOG.md) · [Implementation status](docs/design/14-implementation-status.md)
+> Current version: **0.47.1** (preview) · [Changelog](CHANGELOG.md) · [Implementation status](docs/design/14-implementation-status.md)
 
 ## Why Cairn
 

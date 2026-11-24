@@ -129,14 +129,11 @@ impl App {
         let mut start = false;
         let mut reveal: Option<PathBuf> = None;
         let modal_id = egui::Id::unique("export_modal");
-        let enter = motion::modal_enter(ctx, modal_id);
+        let enter = transition::modal_enter(ctx, modal_id);
         let modal = egui::Modal::new(modal_id)
             .backdrop_color(t::veil(enter))
             .frame(crate::dialogs::account::modal_frame())
             .show(ctx, |ui| {
-                if enter < 0.999 {
-                    ui.multiply_opacity(enter);
-                }
                 ui.set_width(520.0);
                 ui.label(
                     egui::RichText::new("导出整合包")
@@ -176,7 +173,7 @@ impl App {
                     }
                 }
             });
-        apply_modal_slide(ctx, modal.response.layer_id, enter);
+        transition::finish_modal(ctx, modal_id, modal.response.layer_id, enter, 1.0, true);
         if modal.backdrop_response.clicked() || escape_pressed(ctx) {
             close = true;
         }

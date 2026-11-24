@@ -254,7 +254,7 @@ impl App {
         egui::Panel::top("saves_header")
             .frame(
                 egui::Frame::new()
-                    .fill(t::tint(t::rail(), 0.42))
+                    .fill(t::bg())
                     .inner_margin(egui::Margin::symmetric(28, 14)),
             )
             .show(ui, |ui| {
@@ -347,7 +347,7 @@ impl App {
             .exact_size(288.0)
             .frame(
                 egui::Frame::new()
-                    .fill(t::tint(t::rail(), if t::is_light() { 0.42 } else { 0.44 }))
+                    .fill(t::bg())
                     .inner_margin(egui::Margin::symmetric(14, 18)),
             )
             .show(ui, |ui| {
@@ -380,7 +380,7 @@ impl App {
                                 .get(&world.name)
                                 .map(|items| items.len())
                                 .unwrap_or(0);
-                            if save_world_row(ui, &game_dir, world, snapshots, active).clicked() {
+                            if save_world_row(ui, world, snapshots, active).clicked() {
                                 chosen_world = Some(world.name.clone());
                             }
                         }
@@ -408,204 +408,238 @@ impl App {
                     .inner_margin(egui::Margin::symmetric(24, 20)),
             )
             .show(ui, |ui| {
-                let world_fade = motion::key_fade(
-                    ui.ctx(),
-                    egui::Id::unique("cairn_world_detail_fade"),
-                    &self.worlds.selected,
-                    0.16,
-                );
-                if world_fade < 0.999 {
-                    ui.multiply_opacity(world_fade);
-                }
-                if self.worlds.list.is_empty() {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(54.0);
-                        egui::Frame::new()
-                            .fill(t::surface())
-                            .stroke(egui::Stroke::new(1.0, t::hairline()))
-                            .corner_radius(motion::R)
-                            .inner_margin(egui::Margin::symmetric(30, 28))
-                            .show(ui, |ui| {
-                                ui.set_width(360.0);
-                                ui.label(
-                                    egui::RichText::new("这个版本还没有存档")
-                                        .size(15.0)
-                                        .family(bold_family()),
-                                );
-                                ui.add_space(6.0);
-                                ui.label(
-                                    egui::RichText::new(
-                                        "进游戏建一个世界，或者把世界文件夹、zip 拖进来。",
-                                    )
-                                    .size(13.0)
-                                    .color(t::sub()),
-                                );
-                                ui.add_space(16.0);
-                                if primary_wide(ui, "打开游戏目录", true, 180.0) {
-                                    open_dir = Some(game_dir.clone());
-                                }
-                                ui.add_space(4.0);
-                                if action_link(ui, "刷新").clicked() {
-                                    reload = true;
-                                }
-                            });
-                    });
-                    return;
-                }
-                let Some(world) = self.worlds.selected.clone() else {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(90.0);
-                        ui.label(
-                            egui::RichText::new("选择左边的世界查看快照")
-                                .size(13.0)
-                                .color(t::sub()),
-                        );
-                    });
-                    return;
-                };
-                let snapshots = self
+                let stage_rect = ui.available_rect_before_wrap();
+                let world_idx = self
                     .worlds
-                    .snapshots
-                    .get(&world)
-                    .cloned()
-                    .unwrap_or_default();
-                ui.horizontal(|ui| {
-                    ui.add_space(12.0);
-                    ui.vertical(|ui| {
-                        ui.label(
-                            egui::RichText::new("快照")
-                                .size(24.0)
-                                .family(display_family())
-                                .color(t::ink()),
-                        );
-                    });
-                    ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new(format!("{} 份", snapshots.len()))
-                            .size(13.0)
-                            .color(t::dim()),
-                    );
-                    // 这个世界里截过的图：数字就是入口，点了去截图页看这一本相簿。
-                    let shot_count = self.gallery.shots.as_ref().map_or(0, |shots| {
-                        shots
-                            .list
-                            .iter()
-                            .filter(|shot| {
-                                shot.game_dir == game_dir
-                                    && shot.meta.world.as_deref() == Some(world.as_str())
-                            })
-                            .count()
-                    });
-                    if shot_count > 0 {
-                        ui.add_space(8.0);
-                        if action_link(ui, &format!("{shot_count} 张截图 ›")).clicked() {
-                            open_shots = Some(world.clone());
-                        }
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // 能直接进世界的版本（1.20 起）：一步开游戏进这个世界。
-                        if can_enter {
-                            let block = self.launch_block(&row);
-                            let response = ui.add_enabled_ui(block.is_none(), |ui| {
-                                motion::primary_sized_glyph(
-                                    ui,
-                                    "进入",
-                                    block.is_none(),
-                                    84.0,
-                                    32.0,
-                                    13.0,
-                                    motion::PrimaryGlyph::Play,
-                                )
-                            });
-                            match block {
-                                Some(reason) => {
-                                    response.response.on_disabled_hover_text(reason);
-                                }
-                                None if response.inner => enter_world = Some(world.clone()),
-                                None => {}
-                            }
-                        }
-                        if motion::secondary_sized(
-                            ui,
-                            "立即快照",
-                            !self.worlds.busy,
-                            92.0,
-                            32.0,
-                            13.0,
-                        )
-                        .clicked()
-                        {
-                            new_snapshot = Some(world.clone());
-                        }
-                        if self.worlds.confirm.as_deref() == Some(world.as_str()) {
-                            if motion::secondary_sized(ui, "取消", true, 64.0, 32.0, 12.5).clicked()
-                            {
-                                self.worlds.confirm = None;
-                            }
-                            if danger_button(ui, "确认删除世界", 112.0, 32.0).clicked() {
-                                delete_world = Some(world.clone());
-                            }
-                        } else if ghost_button(ui, "删除世界").clicked() {
-                            self.worlds.confirm = Some(world.clone());
-                        }
-                    });
-                });
-                ui.add_space(10.0);
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        if snapshots.is_empty() {
-                            let (objects, bytes) = snapshots::repo_stats(&game_dir);
-                            if saves_empty_card(
-                                ui,
-                                objects,
-                                bytes,
-                                self.worlds.backup.enabled,
-                                self.worlds.backup.interval_minutes,
-                                self.worlds.backup.keep,
-                            ) {
-                                new_snapshot = Some(world.clone());
-                            }
-                        }
-                        if !snapshots.is_empty() {
-                            egui::Frame::new()
-                                .fill(t::surface_glass())
-                                .stroke(egui::Stroke::new(1.0, t::glass_border()))
-                                .corner_radius(motion::R_CARD)
-                                .shadow(t::card_shadow())
-                                .inner_margin(egui::Margin::symmetric(8, 6))
-                                .show(ui, |ui| {
-                                    ui.spacing_mut().item_spacing.y = 0.0;
-                                    for (index, snapshot) in snapshots.iter().enumerate() {
-                                        let confirming = self.worlds.confirm_backup.as_deref()
-                                            == Some(snapshot.id.as_str());
-                                        let action = snapshot_row(
-                                            ui,
-                                            snapshot,
-                                            confirming,
-                                            index == 0,
-                                            index + 1 == snapshots.len(),
+                    .selected
+                    .as_deref()
+                    .and_then(|name| self.worlds.list.iter().position(|w| w.name == name))
+                    .unwrap_or(0) as u64;
+                let world_key = (world_idx << 32)
+                    | (self
+                        .worlds
+                        .selected
+                        .as_deref()
+                        .map_or(0, |name| transition::hash_u64(&name))
+                        & 0xFFFF_FFFF);
+                transition::run_region(
+                    ui,
+                    egui::Id::unique("cairn_world_detail_stage"),
+                    world_key,
+                    stage_rect,
+                    |from, to| {
+                        let sign = if (to >> 32) >= (from >> 32) {
+                            1.0
+                        } else {
+                            -1.0
+                        };
+                        (egui::vec2(0.0, sign), transition::Spec::SUB_PANE)
+                    },
+                    |ui| {
+                        if self.worlds.list.is_empty() {
+                            ui.vertical_centered(|ui| {
+                                ui.add_space(54.0);
+                                egui::Frame::new()
+                                    .fill(t::surface())
+                                    .stroke(egui::Stroke::new(1.0, t::hairline()))
+                                    .corner_radius(motion::R)
+                                    .inner_margin(egui::Margin::symmetric(30, 28))
+                                    .show(ui, |ui| {
+                                        ui.set_width(360.0);
+                                        ui.label(
+                                            egui::RichText::new("这个版本还没有存档")
+                                                .size(15.0)
+                                                .family(bold_family()),
                                         );
-                                        if action.restore {
-                                            restore = Some((world.clone(), snapshot.id.clone()));
+                                        ui.add_space(6.0);
+                                        ui.label(
+                                            egui::RichText::new(
+                                                "进游戏建一个世界，或者把世界文件夹、zip 拖进来。",
+                                            )
+                                            .size(13.0)
+                                            .color(t::sub()),
+                                        );
+                                        ui.add_space(16.0);
+                                        if primary_wide(ui, "打开游戏目录", true, 180.0) {
+                                            open_dir = Some(game_dir.clone());
                                         }
-                                        if action.chunks {
-                                            chunks = Some((world.clone(), snapshot.clone()));
+                                        ui.add_space(4.0);
+                                        if action_link(ui, "刷新").clicked() {
+                                            reload = true;
                                         }
-                                        if action.ask_delete {
-                                            self.worlds.confirm_backup = Some(snapshot.id.clone());
-                                        }
-                                        if action.cancel_delete {
-                                            self.worlds.confirm_backup = None;
-                                        }
-                                        if action.delete {
-                                            delete_snapshot =
-                                                Some((world.clone(), snapshot.id.clone()));
+                                    });
+                            });
+                            return;
+                        }
+                        let Some(world) = self.worlds.selected.clone() else {
+                            ui.vertical_centered(|ui| {
+                                ui.add_space(90.0);
+                                ui.label(
+                                    egui::RichText::new("选择左边的世界查看快照")
+                                        .size(13.0)
+                                        .color(t::sub()),
+                                );
+                            });
+                            return;
+                        };
+                        let snapshots = self
+                            .worlds
+                            .snapshots
+                            .get(&world)
+                            .cloned()
+                            .unwrap_or_default();
+                        ui.horizontal(|ui| {
+                            ui.add_space(12.0);
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    egui::RichText::new("快照")
+                                        .size(24.0)
+                                        .family(display_family())
+                                        .color(t::ink()),
+                                );
+                            });
+                            ui.add_space(4.0);
+                            ui.label(
+                                egui::RichText::new(format!("{} 份", snapshots.len()))
+                                    .size(13.0)
+                                    .color(t::dim()),
+                            );
+                            // 这个世界里截过的图：数字就是入口，点了去截图页看这一本相簿。
+                            let shot_count = self.gallery.shots.as_ref().map_or(0, |shots| {
+                                shots
+                                    .list
+                                    .iter()
+                                    .filter(|shot| {
+                                        shot.game_dir == game_dir
+                                            && shot.meta.world.as_deref() == Some(world.as_str())
+                                    })
+                                    .count()
+                            });
+                            if shot_count > 0 {
+                                ui.add_space(8.0);
+                                if action_link(ui, &format!("{shot_count} 张截图 ›")).clicked()
+                                {
+                                    open_shots = Some(world.clone());
+                                }
+                            }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    // 能直接进世界的版本（1.20 起）：一步开游戏进这个世界。
+                                    if can_enter {
+                                        let block = self.launch_block(&row);
+                                        let response = ui.add_enabled_ui(block.is_none(), |ui| {
+                                            motion::primary_sized_glyph(
+                                                ui,
+                                                "进入",
+                                                block.is_none(),
+                                                84.0,
+                                                32.0,
+                                                13.0,
+                                                motion::PrimaryGlyph::Play,
+                                            )
+                                        });
+                                        match block {
+                                            Some(reason) => {
+                                                response.response.on_disabled_hover_text(reason);
+                                            }
+                                            None if response.inner => {
+                                                enter_world = Some(world.clone())
+                                            }
+                                            None => {}
                                         }
                                     }
-                                });
-                        }
-                    });
+                                    if motion::secondary_sized(
+                                        ui,
+                                        "立即快照",
+                                        !self.worlds.busy,
+                                        92.0,
+                                        32.0,
+                                        13.0,
+                                    )
+                                    .clicked()
+                                    {
+                                        new_snapshot = Some(world.clone());
+                                    }
+                                    if self.worlds.confirm.as_deref() == Some(world.as_str()) {
+                                        if motion::secondary_sized(
+                                            ui, "取消", true, 64.0, 32.0, 12.5,
+                                        )
+                                        .clicked()
+                                        {
+                                            self.worlds.confirm = None;
+                                        }
+                                        if danger_button(ui, "确认删除世界", 112.0, 32.0).clicked()
+                                        {
+                                            delete_world = Some(world.clone());
+                                        }
+                                    } else if ghost_button(ui, "删除世界").clicked() {
+                                        self.worlds.confirm = Some(world.clone());
+                                    }
+                                },
+                            );
+                        });
+                        ui.add_space(10.0);
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                if snapshots.is_empty() {
+                                    let (objects, bytes) = snapshots::repo_stats(&game_dir);
+                                    if saves_empty_card(
+                                        ui,
+                                        objects,
+                                        bytes,
+                                        self.worlds.backup.enabled,
+                                        self.worlds.backup.interval_minutes,
+                                        self.worlds.backup.keep,
+                                    ) {
+                                        new_snapshot = Some(world.clone());
+                                    }
+                                }
+                                if !snapshots.is_empty() {
+                                    egui::Frame::new()
+                                        .fill(t::surface())
+                                        .stroke(egui::Stroke::new(1.0, t::hairline()))
+                                        .corner_radius(motion::R_CARD)
+                                        .inner_margin(egui::Margin::symmetric(8, 6))
+                                        .show(ui, |ui| {
+                                            ui.spacing_mut().item_spacing.y = 0.0;
+                                            for (index, snapshot) in snapshots.iter().enumerate() {
+                                                let confirming =
+                                                    self.worlds.confirm_backup.as_deref()
+                                                        == Some(snapshot.id.as_str());
+                                                let action = snapshot_row(
+                                                    ui,
+                                                    snapshot,
+                                                    confirming,
+                                                    index == 0,
+                                                    index + 1 == snapshots.len(),
+                                                );
+                                                if action.restore {
+                                                    restore =
+                                                        Some((world.clone(), snapshot.id.clone()));
+                                                }
+                                                if action.chunks {
+                                                    chunks =
+                                                        Some((world.clone(), snapshot.clone()));
+                                                }
+                                                if action.ask_delete {
+                                                    self.worlds.confirm_backup =
+                                                        Some(snapshot.id.clone());
+                                                }
+                                                if action.cancel_delete {
+                                                    self.worlds.confirm_backup = None;
+                                                }
+                                                if action.delete {
+                                                    delete_snapshot =
+                                                        Some((world.clone(), snapshot.id.clone()));
+                                                }
+                                            }
+                                        });
+                                }
+                            });
+                    },
+                );
             });
 
         if let Some(dir) = open_dir {
@@ -706,32 +740,17 @@ impl App {
 
 pub(crate) fn save_world_row(
     ui: &mut egui::Ui,
-    game_dir: &std::path::Path,
     world: &saves::World,
     snapshots: usize,
     active: bool,
 ) -> egui::Response {
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 60.0), egui::Sense::click());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 56.0), egui::Sense::click());
     list_row_fill(ui, rect, active, &response);
     if active {
-        ui.painter().rect_stroke(
-            rect,
-            motion::R,
-            egui::Stroke::new(1.0, t::tint(t::accent(), 0.30)),
-            egui::StrokeKind::Inside,
-        );
         active_accent_bar(ui.painter(), rect);
     }
-    let thumb_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 31.0, rect.center().y),
-        egui::vec2(36.0, 36.0),
-    );
-    paint_world_thumb(ui.ctx(), ui.painter(), thumb_rect, game_dir, &world.name);
-    let inner = egui::Rect::from_min_max(
-        egui::pos2(thumb_rect.right() + 10.0, rect.top() + 8.0),
-        egui::pos2(rect.right() - 10.0, rect.bottom() - 8.0),
-    );
+    let inner = rect.shrink2(egui::vec2(14.0, 8.0));
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(inner)
@@ -755,7 +774,7 @@ pub(crate) fn save_world_row(
                 human_age(world.modified),
                 snapshots
             ))
-            .size(12.0)
+            .size(12.5)
             .color(t::sub()),
         );
     });

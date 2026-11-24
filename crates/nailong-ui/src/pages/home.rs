@@ -50,60 +50,22 @@ impl App {
                     ui.add_space(pad);
                     ui.vertical(|ui| {
                         ui.set_width(width);
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 14.0;
-                            let (badge_rect, _) = ui
-                                .allocate_exact_size(egui::vec2(44.0, 44.0), egui::Sense::hover());
-                            ui.painter()
-                                .add(t::glow_shadow(t::accent(), 0.55).as_shape(badge_rect, 12));
-                            backdrop::paint_primary_fill(
-                                ui.ctx(),
-                                ui.painter(),
-                                badge_rect,
-                                12,
-                                0.0,
-                                false,
-                            );
-                            let cx = badge_rect.center().x;
-                            let bottom = badge_rect.bottom() - 9.0;
-                            ui.painter().rect_filled(
-                                egui::Rect::from_center_size(
-                                    egui::pos2(cx, bottom - 3.0),
-                                    egui::vec2(24.0, 5.5),
-                                ),
-                                2.8,
-                                egui::Color32::from_white_alpha(180),
-                            );
-                            ui.painter().rect_filled(
-                                egui::Rect::from_center_size(
-                                    egui::pos2(cx, bottom - 11.0),
-                                    egui::vec2(17.0, 5.2),
-                                ),
-                                2.6,
-                                egui::Color32::from_white_alpha(220),
-                            );
-                            ui.painter().rect_filled(
-                                egui::Rect::from_center_size(
-                                    egui::pos2(cx, bottom - 18.5),
-                                    egui::vec2(10.0, 5.0),
-                                ),
-                                2.5,
-                                egui::Color32::WHITE,
-                            );
-                            ui.label(
-                                egui::RichText::new("欢迎使用 Cairn")
-                                    .size(34.0)
-                                    .family(bold_family())
-                                    .color(t::ink()),
-                            );
+                        ui.horizontal_top(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    egui::RichText::new("欢迎使用 Cairn")
+                                        .size(36.0)
+                                        .family(light_family())
+                                        .color(t::ink()),
+                                );
+                            });
                         });
                         ui.add_space(18.0);
                         egui::Frame::new()
-                            .fill(t::surface_glass())
-                            .stroke(egui::Stroke::new(1.0, t::glass_border()))
+                            .fill(t::surface())
+                            .stroke(egui::Stroke::new(1.0, t::hairline()))
                             .corner_radius(motion::R_CARD)
-                            .shadow(t::card_shadow())
-                            .inner_margin(egui::Margin::symmetric(24, 22))
+                            .inner_margin(egui::Margin::symmetric(24, 20))
                             .show(ui, |ui| {
                                 ui.set_width(content_w);
                                 ui.label(
@@ -326,8 +288,8 @@ impl App {
             .filter(|_| !running && self.quick_play_ok(&row))
             .map(|world| world.name.clone());
         let compact_h = ui.ctx().content_rect().height() < 680.0;
-        let hero_h: f32 = if compact_h { 242.0 } else { 278.0 };
-        let width = (ui.available_width() - 64.0).clamp(320.0, 1020.0);
+        let hero_h: f32 = if compact_h { 230.0 } else { 290.0 };
+        let width = (ui.available_width() - 72.0).clamp(320.0, 1000.0);
         let pad = ((ui.available_width() - width) / 2.0).max(0.0);
 
         let mut chosen: Option<String> = None;
@@ -343,41 +305,38 @@ impl App {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                let spare = ui.available_height() - hero_h - 160.0;
-                ui.add_space((spare * 0.22).max(if compact_h { 12.0 } else { 22.0 }));
+                // 内容不满一屏时整体略偏上居中，避免都挤在顶部。
+                let spare = ui.available_height() - hero_h - 150.0;
+                ui.add_space((spare * 0.4).max(if compact_h { 16.0 } else { 34.0 }));
                 ui.horizontal(|ui| {
                     ui.add_space(pad);
                     ui.vertical(|ui| {
                         ui.set_width(width);
-                        // 英雄舞台：星野夜雾 / 晨曦云岩大气全景卡片
                         let (hero, _) =
                             ui.allocate_exact_size(egui::vec2(width, hero_h), egui::Sense::hover());
-                        backdrop::paint_hero_stage(ui.ctx(), ui.painter(), hero, motion::R_HERO);
-
-                        let ring_size = (hero_h - 18.0).min(260.0);
-                        let ring_w = ring_size * 1.12;
-                        let ring_rect = egui::Rect::from_center_size(
-                            egui::pos2(hero.right() - ring_w * 0.5 - 12.0, hero.center().y),
-                            egui::vec2(ring_w, ring_size),
+                        let ring_w = hero_h * 300.0 / 260.0;
+                        let ring_rect = egui::Rect::from_min_size(
+                            egui::pos2(hero.right() - ring_w, hero.top()),
+                            egui::vec2(ring_w, hero_h),
                         );
                         clicked_layer = rings::show(ui, ring_rect, &ring_data);
 
                         let left = egui::Rect::from_min_max(
-                            hero.left_top() + egui::vec2(26.0, 16.0),
-                            egui::pos2(ring_rect.left() - 8.0, hero.bottom() - 14.0),
+                            hero.left_top(),
+                            egui::pos2(ring_rect.left() - 12.0, hero.bottom()),
                         );
                         let mut child = ui.new_child(
                             egui::UiBuilder::new()
                                 .max_rect(left)
                                 .layout(egui::Layout::top_down(egui::Align::LEFT)),
                         );
-                        let inner_block_h = if compact_h { 184.0 } else { 198.0 };
-                        child.add_space(((left.height() - inner_block_h).max(0.0)) * 0.44);
+                        child.add_space((hero_h - 206.0).max(0.0) / 2.0);
                         let status = match (&session_status, ring_data.state) {
                             (Some(status), _) => status.clone(),
                             (None, rings::State::Missing) => {
                                 format!("缺 {} 个文件", row.health.missing)
                             }
+                            // 玩过的写玩了多久；没玩过的只说装好了。
                             (None, _) if stat.seconds >= 60 => {
                                 format!("玩了 {}", nailong_core::played::human(stat.seconds))
                             }
@@ -387,46 +346,52 @@ impl App {
                             Some(version) => format!("{} {version}", row.loader.name()),
                             None => row.loader.name().to_string(),
                         };
+                        // 起过名字的版本：大字是名字，这一行补上游戏版本。
                         let kind = if named {
                             format!("{} · {loader}", row.mc)
                         } else {
                             loader
                         };
-                        let loader_col = if row.pack.is_some() {
-                            t::loader_pack()
-                        } else {
-                            t::loader_color(row.loader)
-                        };
-                        let status_col = if row.health.missing > 0 {
-                            t::warn()
-                        } else if running {
-                            t::ok()
-                        } else {
-                            t::sub()
-                        };
-                        // 双胶囊身份标牌：左侧加载器专属色牌 + 右侧运行/游玩状态牌
                         child.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 8.0;
-                            hero_badge(ui, &kind, loader_col, true);
-                            hero_badge(ui, &status, status_col, running || row.health.missing > 0);
+                            ui.spacing_mut().item_spacing.x = 7.0;
+                            let dot_color = if row.health.missing > 0 {
+                                t::warn()
+                            } else if running {
+                                t::ok()
+                            } else {
+                                t::accent()
+                            };
+                            let (dot, _) =
+                                ui.allocate_exact_size(egui::vec2(8.0, 14.0), egui::Sense::hover());
+                            ui.painter().circle_filled(dot.center(), 3.2, dot_color);
+                            ui.label(
+                                egui::RichText::new(format!("{kind} · {status}"))
+                                    .size(13.0)
+                                    .color(if row.health.missing > 0 {
+                                        t::warn()
+                                    } else if running {
+                                        t::ok()
+                                    } else {
+                                        t::sub()
+                                    }),
+                            );
                         });
-                        child.add_space(if compact_h { 4.0 } else { 6.0 });
+                        // 版本名完整显示：放得下用大字，放不下按宽度缩小，太长才换成两行。
                         let (size, wrap) = fit_title(&child, &title, left.width());
-                        let max_title = if compact_h { 46.0 } else { 54.0 };
                         let label = egui::Label::new(
                             egui::RichText::new(&title)
-                                .size(size.min(max_title))
-                                .family(bold_family())
+                                .size(size)
+                                .family(light_family())
                                 .color(t::ink()),
                         );
                         child
                             .add(if wrap { label.wrap() } else { label.extend() })
                             .on_hover_text(format!("{}\n{}", row.id, row_kind(&row)));
-                        child.add_space(if compact_h { 8.0 } else { 10.0 });
+                        child.add_space(14.0);
                         child.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 10.0;
                             if running {
-                                if motion::secondary_sized(ui, "查看日志", true, 108.0, 40.0, 14.0)
+                                // 游戏开着：主按钮看这一局的输出，旁边能结束它。
+                                if motion::secondary_sized(ui, "查看日志", true, 104.0, 40.0, 14.0)
                                     .on_hover_text("实时查看游戏输出")
                                     .clicked()
                                 {
@@ -465,7 +430,7 @@ impl App {
                                     _ => ("开始游戏", motion::PrimaryGlyph::Play),
                                 };
                                 if motion::primary_sized_glyph(
-                                    ui, label, true, 166.0, 40.0, 14.5, glyph,
+                                    ui, label, true, 150.0, 40.0, 14.0, glyph,
                                 ) {
                                     primary = true;
                                 }
@@ -476,22 +441,22 @@ impl App {
                                 chosen = Some(id);
                             }
                         });
-                        child.add_space(if compact_h { 8.0 } else { 10.0 });
+                        child.add_space(12.0);
                         self.launch_pills(&mut child, &row);
-                        let overflow = child.min_rect().bottom() - (hero.bottom() - 8.0);
+                        // 名字换成两行、窄窗口参数折行时，左边可能比预留的高：把多出来的让出来，
+                        // 不压到下面的摘要。
+                        let overflow = child.min_rect().bottom() - hero.bottom();
                         if overflow > 0.0 {
-                            ui.add_space(overflow + 6.0);
+                            ui.add_space(overflow + 8.0);
                         }
 
-                        ui.add_space(if compact_h { 12.0 } else { 16.0 });
+                        ui.add_space(if compact_h { 8.0 } else { 14.0 });
 
-                        // 非对称三栏 Bento 卡片：最近世界带实景/程序化缩略图占更宽席位，内容与快照带彩色微图标徽章
-                        let card_gap = 14.0;
-                        let world_w = ((width - card_gap * 2.0) * 0.40).round();
-                        let side_w = ((width - card_gap * 2.0 - world_w) * 0.5).floor();
-                        let card_h = if compact_h { 88.0 } else { 96.0 };
+                        // 三栏摘要卡片：独立轻表面，悬停边框微亮，整卡可点。
+                        let card_gap = 12.0;
+                        let cell_w = (width - card_gap * 2.0) / 3.0;
                         let (cells, _) =
-                            ui.allocate_exact_size(egui::vec2(width, card_h), egui::Sense::hover());
+                            ui.allocate_exact_size(egui::vec2(width, 86.0), egui::Sense::hover());
                         let (world_main, world_sub) = match &cache.latest_world {
                             Some(world) => (short_text(&world.name, 14), human_age(world.modified)),
                             None => ("还没有世界".to_string(), "进游戏后显示".to_string()),
@@ -514,80 +479,54 @@ impl App {
                             None => ("还没有快照".to_string(), "打开存档页创建".to_string()),
                         };
                         let content_highlight = !ring_data.update_names.is_empty();
-
-                        // 1) 最近世界 Bento 卡片
-                        let world_rect = egui::Rect::from_min_size(
-                            cells.left_top(),
-                            egui::vec2(world_w, card_h),
-                        );
-                        let world_enter = quick_world.as_ref().map(|world| {
-                            let button = egui::Rect::from_center_size(
-                                egui::pos2(world_rect.right() - 48.0, world_rect.center().y),
-                                egui::vec2(72.0, 28.0),
+                        for (index, (kicker, main, sub, accent_val)) in [
+                            ("最近世界", world_main, world_sub, false),
+                            ("内容", content_main, content_sub, content_highlight),
+                            ("备份", backup_main, backup_sub, false),
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        {
+                            let rect = egui::Rect::from_min_size(
+                                cells.left_top()
+                                    + egui::vec2((cell_w + card_gap) * index as f32, 0.0),
+                                egui::vec2(cell_w, cells.height()),
                             );
-                            (button, world)
-                        });
-                        let world_card = bento_world_card(
-                            ui,
-                            world_rect,
-                            &game_dir,
-                            cache.latest_world.as_ref().map(|w| w.name.as_str()),
-                            &world_main,
-                            &world_sub,
-                            world_enter.is_none(),
-                        );
-                        let mut on_world_btn = false;
-                        if let Some((button, world)) = world_enter {
-                            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(button));
-                            let response = small_tinted_button(&mut child, "▶ 进入", t::ok())
-                                .on_hover_text(format!("开始游戏，直接进「{world}」"));
-                            on_world_btn = response.hovered();
-                            if response.clicked() {
-                                enter_world = true;
+                            let enter = (index == 0).then_some(quick_world.as_ref()).flatten().map(
+                                |world| {
+                                    let button = egui::Rect::from_center_size(
+                                        egui::pos2(rect.right() - 48.0, rect.center().y + 6.0),
+                                        egui::vec2(68.0, 28.0),
+                                    );
+                                    (button, world)
+                                },
+                            );
+                            let cell = summary_cell(
+                                ui,
+                                rect,
+                                kicker,
+                                &main,
+                                &sub,
+                                accent_val,
+                                enter.is_none(),
+                            );
+                            let mut on_button = false;
+                            if let Some((button, world)) = enter {
+                                let mut child =
+                                    ui.new_child(egui::UiBuilder::new().max_rect(button));
+                                let response = small_accent(&mut child, "▶ 进入")
+                                    .on_hover_text(format!("开始游戏，直接进「{world}」"));
+                                on_button = response.hovered();
+                                if response.clicked() {
+                                    enter_world = true;
+                                }
                             }
-                        }
-                        if world_card.clicked() && !on_world_btn {
-                            open_saves = true;
-                        }
-
-                        // 2) 内容 Bento 卡片
-                        let content_rect = egui::Rect::from_min_size(
-                            cells.left_top() + egui::vec2(world_w + card_gap, 0.0),
-                            egui::vec2(side_w, card_h),
-                        );
-                        if bento_metric_card(
-                            ui,
-                            content_rect,
-                            "内容库",
-                            &content_main,
-                            &content_sub,
-                            content_highlight,
-                            t::accent(),
-                            BadgeGlyph::Cubes,
-                        )
-                        .clicked()
-                        {
-                            open_content = true;
-                        }
-
-                        // 3) 快照保护 Bento 卡片
-                        let backup_rect = egui::Rect::from_min_size(
-                            cells.left_top() + egui::vec2(world_w + side_w + card_gap * 2.0, 0.0),
-                            egui::vec2(width - world_w - side_w - card_gap * 2.0, card_h),
-                        );
-                        if bento_metric_card(
-                            ui,
-                            backup_rect,
-                            "快照保护",
-                            &backup_main,
-                            &backup_sub,
-                            false,
-                            t::ok(),
-                            BadgeGlyph::Shield,
-                        )
-                        .clicked()
-                        {
-                            open_saves = true;
+                            if cell.clicked() && !on_button {
+                                match index {
+                                    1 => open_content = true,
+                                    _ => open_saves = true,
+                                }
+                            }
                         }
 
                         self.screenshot_strip(ui, &row, width);
@@ -977,188 +916,74 @@ fn switch_row(
     }
 }
 
-/// 英雄舞台顶部的玻璃质感状态/加载器徽标胶囊。
-fn hero_badge(ui: &mut egui::Ui, text: &str, color: egui::Color32, tinted: bool) {
-    let font = egui::FontId::new(12.5, bold_family());
-    let text_color = if tinted { color } else { t::sub() };
-    let galley = ui
-        .painter()
-        .layout_no_wrap(text.to_owned(), font, text_color);
-    let w = galley.size().x + 26.0;
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, 24.0), egui::Sense::hover());
-    let (fill, stroke) = if tinted {
-        (
-            t::tint(color, if t::is_light() { 0.14 } else { 0.18 }),
-            t::tint(color, if t::is_light() { 0.35 } else { 0.42 }),
-        )
-    } else {
-        (t::surface_glass(), t::glass_border())
-    };
-    ui.painter().rect(
-        rect,
-        12,
-        fill,
-        egui::Stroke::new(1.0, stroke),
-        egui::StrokeKind::Inside,
-    );
-    ui.painter()
-        .circle_filled(egui::pos2(rect.left() + 10.5, rect.center().y), 3.2, color);
-    ui.painter().galley(
-        egui::pos2(rect.left() + 18.0, rect.center().y - galley.size().y * 0.5),
-        galley,
-        text_color,
-    );
-}
-
-/// 启动台左侧「最近世界」Bento 卡片：带世界缩略图（`icon.png` 或程序化风景）、名称、时间与快捷进入槽。
-fn bento_world_card(
-    ui: &mut egui::Ui,
-    rect: egui::Rect,
-    game_dir: &std::path::Path,
-    world_name: Option<&str>,
-    main: &str,
-    sub: &str,
-    show_chevron: bool,
-) -> egui::Response {
-    let response = ui.interact(
-        rect,
-        egui::Id::unique("bento_world_card"),
-        egui::Sense::click(),
-    );
-    let hover = motion::hover_amount(ui, response.id.with("hover"), response.hovered());
-    let lift_y = if motion::reduced() {
-        0.0
-    } else if response.is_pointer_button_down_on() {
-        0.5
-    } else {
-        -2.0 * hover
-    };
-    let rect = rect.translate(egui::vec2(0.0, lift_y));
-    let fill = if response.is_pointer_button_down_on() {
-        motion::mix(t::wash(), t::control(), 0.25)
-    } else {
-        motion::mix(t::surface_glass(), t::elevated(), 0.78 * hover)
-    };
-    let border = motion::mix(t::glass_border(), t::tint(t::ok(), 0.72), hover);
-    backdrop::paint_glass_card(ui.painter(), rect, motion::R_CARD, fill, border, true);
-
-    let thumb_size = (rect.height() - 28.0).clamp(46.0, 58.0);
-    let thumb_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 16.0 + thumb_size * 0.5, rect.center().y),
-        egui::vec2(thumb_size, thumb_size),
-    );
-    if let Some(name) = world_name {
-        paint_world_thumb(ui.ctx(), ui.painter(), thumb_rect, game_dir, name);
-    } else {
-        backdrop::paint_world_placeholder(ui.painter(), thumb_rect, "empty");
-    }
-
-    let left = thumb_rect.right() + 14.0;
-    let right_reserve = if show_chevron { 28.0 } else { 96.0 };
-    let max_w = (rect.right() - right_reserve - left).max(60.0);
-    let top_y = rect.center().y - 26.0;
-    ui.painter().text(
-        egui::pos2(left, top_y),
-        egui::Align2::LEFT_TOP,
-        "最近世界",
-        egui::FontId::proportional(11.5),
-        t::dim(),
-    );
-    let main_font = egui::FontId::new(15.5, bold_family());
-    ui.painter().text(
-        egui::pos2(left, top_y + 17.0),
-        egui::Align2::LEFT_TOP,
-        elide_middle(ui, main, &main_font, max_w),
-        main_font,
-        t::ink(),
-    );
-    ui.painter().text(
-        egui::pos2(left, top_y + 39.0),
-        egui::Align2::LEFT_TOP,
-        sub,
-        egui::FontId::proportional(12.5),
-        t::sub(),
-    );
-    if show_chevron {
-        ui.painter().text(
-            egui::pos2(rect.right() - 14.0, rect.top() + 13.0),
-            egui::Align2::RIGHT_TOP,
-            "›",
-            egui::FontId::proportional(16.0),
-            motion::mix(t::dim(), t::ink(), hover),
-        );
-    }
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
-}
-
-/// 启动台 Bento 指标卡片（内容库 / 快照保护）：带彩色微图标徽章、大字主数据与微投影。
-#[allow(clippy::too_many_arguments)]
-fn bento_metric_card(
+/// 启动台的一张摘要卡片：轻表面 + 三层信息层级 + 悬停微亮箭头。
+pub(crate) fn summary_cell(
     ui: &mut egui::Ui,
     rect: egui::Rect,
     kicker: &str,
     main: &str,
     sub: &str,
     accent_main: bool,
-    badge_color: egui::Color32,
-    glyph: BadgeGlyph,
+    show_chevron: bool,
 ) -> egui::Response {
     let response = ui.interact(
         rect,
-        egui::Id::unique("bento_metric").with(kicker),
+        egui::Id::unique("summary_cell").with(kicker),
         egui::Sense::click(),
     );
     let hover = motion::hover_amount(ui, response.id.with("hover"), response.hovered());
-    let lift_y = if motion::reduced() {
-        0.0
-    } else if response.is_pointer_button_down_on() {
-        0.5
-    } else {
-        -2.0 * hover
-    };
-    let rect = rect.translate(egui::vec2(0.0, lift_y));
     let fill = if response.is_pointer_button_down_on() {
         motion::mix(t::wash(), t::control(), 0.25)
     } else {
-        motion::mix(t::surface_glass(), t::elevated(), 0.78 * hover)
+        motion::mix(t::surface(), t::wash(), 0.7 * hover)
     };
-    let border = motion::mix(t::glass_border(), t::tint(badge_color, 0.72), hover);
-    backdrop::paint_glass_card(ui.painter(), rect, motion::R_CARD, fill, border, true);
-
-    let icon_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 34.0, rect.center().y),
-        egui::vec2(38.0, 38.0),
+    ui.painter().rect(
+        rect,
+        motion::R_CARD,
+        fill,
+        egui::Stroke::new(1.0, motion::mix(t::hairline(), t::control(), hover)),
+        egui::StrokeKind::Inside,
     );
-    icon_squircle(ui.painter(), icon_rect, badge_color, glyph);
-
-    let left = icon_rect.right() + 14.0;
-    let max_w = (rect.right() - 26.0 - left).max(60.0);
-    let top_y = rect.center().y - 26.0;
+    ui.painter().line_segment(
+        [
+            egui::pos2(rect.left() + motion::R_CARD as f32, rect.top() + 1.0),
+            egui::pos2(rect.right() - motion::R_CARD as f32, rect.top() + 1.0),
+        ],
+        egui::Stroke::new(1.0, t::rim()),
+    );
+    let left = rect.left() + 16.0;
     ui.painter().text(
-        egui::pos2(left, top_y),
+        egui::pos2(left, rect.top() + 13.0),
         egui::Align2::LEFT_TOP,
         kicker,
-        egui::FontId::proportional(11.5),
+        egui::FontId::proportional(12.0),
         t::dim(),
     );
-    ui.painter().text(
-        egui::pos2(rect.right() - 14.0 + 2.5 * hover, rect.top() + 13.0),
-        egui::Align2::RIGHT_TOP,
-        "›",
-        egui::FontId::proportional(16.0),
-        motion::mix(t::dim(), t::ink(), hover),
-    );
+    if show_chevron {
+        ui.painter().text(
+            egui::pos2(rect.right() - 14.0, rect.top() + 12.0),
+            egui::Align2::RIGHT_TOP,
+            "›",
+            egui::FontId::proportional(15.0),
+            motion::mix(t::dim(), t::ink(), hover),
+        );
+    }
     let main_color = if accent_main { t::accent() } else { t::ink() };
-    let main_font = egui::FontId::new(15.5, bold_family());
+    let main_font = egui::FontId::new(15.0, bold_family());
+    let max_main_w = if show_chevron {
+        rect.width() - 32.0
+    } else {
+        (rect.width() - 104.0).max(80.0)
+    };
     ui.painter().text(
-        egui::pos2(left, top_y + 17.0),
+        egui::pos2(left, rect.top() + 33.0),
         egui::Align2::LEFT_TOP,
-        elide_middle(ui, main, &main_font, max_w),
+        elide_middle(ui, main, &main_font, max_main_w),
         main_font,
         main_color,
     );
     ui.painter().text(
-        egui::pos2(left, top_y + 39.0),
+        egui::pos2(left, rect.top() + 57.0),
         egui::Align2::LEFT_TOP,
         sub,
         egui::FontId::proportional(12.5),

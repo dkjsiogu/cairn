@@ -365,7 +365,7 @@ impl App {
         let screen = ctx.content_rect();
         let width = (screen.width() - 64.0).clamp(360.0, 580.0);
         let id = egui::Id::unique("palette");
-        let modal_enter = motion::modal_enter(ctx, id);
+        let modal_enter = transition::modal_enter(ctx, id);
         let modal = egui::Modal::new(id)
             .area(egui::Modal::default_area(id).anchor(
                 egui::Align2::CENTER_TOP,
@@ -375,15 +375,12 @@ impl App {
             .frame(
                 egui::Frame::new()
                     .fill(t::surface())
-                    .stroke(egui::Stroke::new(1.0, t::glass_border()))
+                    .stroke(egui::Stroke::new(1.0, t::hairline()))
                     .corner_radius(motion::R_MODAL)
                     .shadow(t::modal_shadow())
                     .inner_margin(egui::Margin::symmetric(10, 10)),
             )
             .show(ctx, |ui| {
-                if modal_enter < 0.999 {
-                    ui.multiply_opacity(modal_enter);
-                }
                 ui.set_width(width);
                 ui.spacing_mut().item_spacing.y = 2.0;
                 let before = palette.query.clone();
@@ -467,7 +464,7 @@ impl App {
                     );
                     ui.painter().set(
                         sel_bg_slot,
-                        backdrop::nav_active_shape(ui.ctx(), pill, motion::R),
+                        egui::epaint::RectShape::filled(pill, motion::R, t::wash()),
                     );
                     ui.painter()
                         .set(sel_bar_slot, active_accent_bar_shape(pill));
@@ -514,7 +511,7 @@ impl App {
                     }
                 });
             });
-        apply_modal_slide(ctx, modal.response.layer_id, modal_enter);
+        transition::finish_modal(ctx, id, modal.response.layer_id, modal_enter, 0.75, true);
         if modal.backdrop_response.clicked() {
             clicked_outside = true;
         }
@@ -634,35 +631,27 @@ impl App {
     }
 }
 
-/// 面板里的一行：激活柔光底由外层弹簧指示器滑行绘制，右侧按类别配色的胶囊徽章。
+/// 面板里的一行：选中带雾蓝左竖条，右侧胶囊类别徽章。
 fn palette_row(ui: &mut egui::Ui, item: &Item, active: bool) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 40.0), egui::Sense::click());
-    let kind_color = match item.kind {
-        "版本" => t::accent(),
-        "世界" => t::ok(),
-        "操作" => t::loader_color(LoaderKind::NeoForge),
-        "设置" => t::loader_pack(),
-        "账户" => t::loader_color(LoaderKind::Fabric),
-        _ => t::sub(),
-    };
+    // 选中底板与雾蓝竖条由外层弹簧滑行槽位统一绘制。
     let kind_font = egui::FontId::proportional(11.0);
-    let kind = ui
-        .painter()
-        .layout_no_wrap(item.kind.to_string(), kind_font, kind_color);
-    let pill_w = kind.size().x + 14.0;
+    let kind = ui.painter().layout_no_wrap(
+        item.kind.to_string(),
+        kind_font,
+        if active { t::sub() } else { t::dim() },
+    );
+    let pill_w = kind.size().x + 12.0;
     let pill_rect = egui::Rect::from_center_size(
         egui::pos2(rect.right() - 10.0 - pill_w * 0.5, rect.center().y),
         egui::vec2(pill_w, 20.0),
     );
     ui.painter().rect(
         pill_rect,
-        6,
-        t::tint(kind_color, if t::is_light() { 0.11 } else { 0.15 }),
-        egui::Stroke::new(
-            1.0,
-            t::tint(kind_color, if t::is_light() { 0.28 } else { 0.34 }),
-        ),
+        5,
+        if active { t::surface() } else { t::bg() },
+        egui::Stroke::new(1.0, t::hairline()),
         egui::StrokeKind::Inside,
     );
     ui.painter().galley(
@@ -671,7 +660,7 @@ fn palette_row(ui: &mut egui::Ui, item: &Item, active: bool) -> egui::Response {
             pill_rect.center().y - kind.size().y * 0.5,
         ),
         kind,
-        kind_color,
+        if active { t::sub() } else { t::dim() },
     );
     let left = rect.left() + 14.0;
     let room = rect.width() - 28.0 - pill_w - 12.0;

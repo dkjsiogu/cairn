@@ -130,32 +130,61 @@ impl App {
                     }),
             )
             .show(ui, |ui| {
-                let kind_fade = motion::key_fade(
-                    ui.ctx(),
-                    egui::Id::unique("cairn_content_kind_fade"),
-                    self.content.kind as u8,
-                    0.16,
+                let stage_rect = ui.available_rect_before_wrap();
+                let mode_rank: u64 = if self.content.show_installed {
+                    0
+                } else if self.content.selected.is_some() {
+                    3
+                } else if self.content.searching {
+                    2
+                } else {
+                    1
+                };
+                let kind_rank: u64 = match self.content.kind {
+                    mods::ContentKind::Mod => 0,
+                    mods::ContentKind::ResourcePack => 1,
+                    mods::ContentKind::Shader => 2,
+                };
+                // 高 32 位记录「已安装/发现/搜索/详情」主模式，低 32 位记录「Mod/资源包/光影」类型，
+                // 顶部栏保持静止，仅下方正文按语义方向横向丝滑切换。
+                let body_key = (mode_rank << 32) | kind_rank;
+                transition::run_region(
+                    ui,
+                    egui::Id::unique("cairn_content_body_stage"),
+                    body_key,
+                    stage_rect,
+                    |from, to| {
+                        let (fm, fk) = (from >> 32, from & 0xFFFF_FFFF);
+                        let (tm, tk) = (to >> 32, to & 0xFFFF_FFFF);
+                        let forward = if fm != tm { tm > fm } else { tk >= fk };
+                        let sign = if forward { 1.0 } else { -1.0 };
+                        let spec = if fm != tm {
+                            transition::Spec::PAGE_HORIZONTAL
+                        } else {
+                            transition::Spec::SUB_TAB
+                        };
+                        (egui::vec2(sign, 0.0), spec)
+                    },
+                    |ui| {
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                mods_column(ui, 1000.0, |ui| {
+                                    ui.add_space(14.0);
+                                    if self.content.show_installed {
+                                        self.installed_view(ui);
+                                    } else if self.content.selected.is_some() {
+                                        self.detail_view(ui);
+                                    } else if self.content.searching {
+                                        self.results_view(ui);
+                                    } else {
+                                        self.browse_view(ui);
+                                    }
+                                    ui.add_space(24.0);
+                                });
+                            });
+                    },
                 );
-                if kind_fade < 0.999 {
-                    ui.multiply_opacity(kind_fade);
-                }
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        mods_column(ui, 1000.0, |ui| {
-                            ui.add_space(14.0);
-                            if self.content.show_installed {
-                                self.installed_view(ui);
-                            } else if self.content.selected.is_some() {
-                                self.detail_view(ui);
-                            } else if self.content.searching {
-                                self.results_view(ui);
-                            } else {
-                                self.browse_view(ui);
-                            }
-                            ui.add_space(24.0);
-                        });
-                    });
             });
     }
 
@@ -257,8 +286,7 @@ impl App {
             ui.painter().rect_filled(sep, 0.0, t::hairline());
             ui.add_space(10.0);
             ui.spacing_mut().item_spacing.x = 4.0;
-            let bar_slot = ui.painter().add(egui::Shape::Noop);
-            let mut active_bar = None;
+            let mut active_kind_rect = None;
             for candidate in [
                 mods::ContentKind::Mod,
                 mods::ContentKind::ResourcePack,
@@ -273,30 +301,23 @@ impl App {
                 let resp =
                     underline_tab_gliding(ui, candidate.label(), selected).on_hover_text(tip);
                 if selected {
-                    active_bar = Some(egui::Rect::from_min_max(
-                        egui::pos2(resp.rect.left() + 8.0, resp.rect.bottom() - 2.5),
-                        egui::pos2(resp.rect.right() - 8.0, resp.rect.bottom() - 0.5),
-                    ));
+                    active_kind_rect = Some(resp.rect);
                 }
                 if resp.clicked() && !selected {
                     wanted_kind = Some(candidate);
                 }
             }
-            if let Some(target) = active_bar {
+            if let Some(target) = active_kind_rect {
+                let bar_target = egui::Rect::from_min_max(
+                    egui::pos2(target.left() + 8.0, target.bottom() - 2.5),
+                    egui::pos2(target.right() - 8.0, target.bottom() - 0.5),
+                );
                 let bar = motion::spring_rect(
                     ui.ctx(),
                     egui::Id::unique("cairn_content_kind_bar"),
-                    target,
+                    bar_target,
                 );
-                let glow = bar.expand2(egui::vec2(2.0, 2.0));
-                ui.painter().set(
-                    bar_slot,
-                    egui::Shape::Vec(vec![
-                        egui::epaint::RectShape::filled(glow, 2.5, t::tint(t::accent(), 0.24))
-                            .into(),
-                        egui::epaint::RectShape::filled(bar, 1.5, t::accent()).into(),
-                    ]),
-                );
+                ui.painter().rect_filled(bar, 1.5, t::accent());
             }
         });
         if let Some(installed) = mode {

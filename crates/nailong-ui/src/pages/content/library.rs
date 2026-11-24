@@ -739,11 +739,14 @@ impl App {
 
 pub(crate) fn toggle_switch(ui: &mut egui::Ui, on: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(34.0, 19.0), egui::Sense::click());
-    let value = if motion::reduced() {
-        if on { 1.0 } else { 0.0 }
-    } else {
-        ui.ctx().animate_bool_with_time(response.id, on, 0.15)
-    };
+    let value = motion::spring(
+        ui.ctx(),
+        response.id.with("cairn_toggle_spring"),
+        if on { 1.0 } else { 0.0 },
+        420.0,
+        36.0,
+    )
+    .clamp(0.0, 1.0);
     let track = motion::mix(t::wash(), t::accent(), value);
     let border = motion::mix(t::control(), t::accent(), value);
     ui.painter().rect(

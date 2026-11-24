@@ -132,7 +132,7 @@ impl App {
 
     pub(crate) fn sidebar(&mut self, ui: &mut egui::Ui) {
         let wide = ui.ctx().content_rect().width() >= 1080.0;
-        let width = if wide { 204.0 } else { 66.0 };
+        let width = if wide { 196.0 } else { 64.0 };
         let active = self.nav_active();
         let current = self.current_account().cloned();
         let face = self.face(ui.ctx(), current.as_ref().and_then(|a| a.skin.as_deref()));
@@ -166,19 +166,19 @@ impl App {
                 ui.spacing_mut().item_spacing.y = 3.0;
                 if wide {
                     ui.horizontal(|ui| {
+                        ui.add_space(10.0);
+                        cairn_mark(ui, 18.0);
                         ui.add_space(6.0);
-                        cairn_mark(ui, 28.0);
-                        ui.add_space(8.0);
                         ui.label(
                             egui::RichText::new("Cairn")
-                                .size(19.0)
-                                .family(bold_family())
+                                .size(20.0)
+                                .family(light_family())
                                 .color(t::ink()),
                         );
                     });
                 } else {
                     ui.vertical_centered(|ui| {
-                        cairn_mark(ui, 30.0);
+                        cairn_mark(ui, 22.0);
                     });
                 }
                 ui.add_space(12.0);
@@ -207,7 +207,7 @@ impl App {
                     );
                     ui.painter().set(
                         nav_bg_slot,
-                        backdrop::nav_active_shape(ui.ctx(), pill, motion::R + 1),
+                        egui::epaint::RectShape::filled(pill, motion::R, t::wash()),
                     );
                     ui.painter()
                         .set(nav_bar_slot, active_accent_bar_shape(pill));
@@ -233,14 +233,14 @@ impl App {
                     .filter(|_| !self.progress_open);
                 let locked = login_busy || matches!(self.busy, Some(Task::Bench));
                 let footer =
-                    16.0 + if update_badge.is_some() && !locked {
+                    14.0 + if update_badge.is_some() && !locked {
                         38.0
                     } else {
                         0.0
                     } + if locked {
                         40.0
                     } else {
-                        88.0 + if task_card.is_some() {
+                        80.0 + if task_card.is_some() {
                             if wide { 64.0 } else { 44.0 }
                         } else {
                             0.0
@@ -248,7 +248,7 @@ impl App {
                     } + if locked {
                         0.0
                     } else {
-                        games.len() as f32 * 44.0 + if games.is_empty() { 0.0 } else { 6.0 }
+                        games.len() as f32 * 39.0 + if games.is_empty() { 0.0 } else { 6.0 }
                     };
                 ui.add_space((ui.available_height() - footer).max(10.0));
                 let div_y = ui.cursor().top();
@@ -364,49 +364,39 @@ impl App {
     }
 }
 
-/// 宝石蓝渐变压印方徽章内的三石路标：Cairn 的品牌徽记。
+/// 三块叠放的哑光石堆图形：Cairn（路标石堆）的几何品牌标记。
 fn cairn_mark(ui: &mut egui::Ui, size: f32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
-    let r = (size * 0.28).clamp(6.0, 9.0) as u8;
-    ui.painter()
-        .add(t::glow_shadow(t::accent(), 0.45).as_shape(rect, r));
-    backdrop::paint_primary_fill(ui.ctx(), ui.painter(), rect, r, 0.0, false);
-    ui.painter().rect_stroke(
-        rect,
-        r,
-        egui::Stroke::new(1.0, egui::Color32::from_white_alpha(64)),
-        egui::StrokeKind::Inside,
-    );
     let cx = rect.center().x;
-    let bottom = rect.bottom() - size * 0.20;
-    let s = size / 28.0;
+    let bottom = rect.bottom() - 1.5;
+    let s = size / 20.0;
     let painter = ui.painter();
-    let stone_a = egui::Color32::from_white_alpha(175);
-    let stone_b = egui::Color32::from_white_alpha(215);
-    let stone_c = egui::Color32::WHITE;
+    // 底层宽石
     painter.rect_filled(
         egui::Rect::from_center_size(
-            egui::pos2(cx, bottom - 2.2 * s),
-            egui::vec2(16.0 * s, 3.8 * s),
+            egui::pos2(cx, bottom - 2.6 * s),
+            egui::vec2(16.0 * s, 4.4 * s),
+        ),
+        2.2 * s,
+        t::dim(),
+    );
+    // 中层石
+    painter.rect_filled(
+        egui::Rect::from_center_size(
+            egui::pos2(cx, bottom - 8.2 * s),
+            egui::vec2(11.4 * s, 4.0 * s),
         ),
         2.0 * s,
-        stone_a,
+        t::sub(),
     );
+    // 顶层雾蓝路标石
     painter.rect_filled(
         egui::Rect::from_center_size(
-            egui::pos2(cx, bottom - 7.4 * s),
-            egui::vec2(11.4 * s, 3.6 * s),
+            egui::pos2(cx, bottom - 13.4 * s),
+            egui::vec2(6.6 * s, 3.6 * s),
         ),
         1.8 * s,
-        stone_b,
-    );
-    painter.rect_filled(
-        egui::Rect::from_center_size(
-            egui::pos2(cx, bottom - 12.2 * s),
-            egui::vec2(6.8 * s, 3.4 * s),
-        ),
-        1.7 * s,
-        stone_c,
+        t::accent(),
     );
 }
 
@@ -417,7 +407,7 @@ fn sidebar_search(ui: &mut egui::Ui, wide: bool, enabled: bool) -> egui::Respons
     } else {
         egui::Sense::hover()
     };
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), sense);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 32.0), sense);
     let hover = motion::hover_amount(
         ui,
         response.id.with("ssearch"),
@@ -426,37 +416,37 @@ fn sidebar_search(ui: &mut egui::Ui, wide: bool, enabled: bool) -> egui::Respons
     ui.painter().rect(
         rect,
         motion::R,
-        motion::mix(t::surface(), t::elevated(), hover),
-        egui::Stroke::new(1.0, motion::mix(t::hairline(), t::accent(), 0.65 * hover)),
+        motion::mix(t::bg(), t::surface(), hover),
+        egui::Stroke::new(1.0, motion::mix(t::hairline(), t::control(), hover)),
         egui::StrokeKind::Inside,
     );
-    let icon_color = motion::mix(t::dim(), t::accent(), hover);
+    let icon_color = motion::mix(t::dim(), t::ink(), hover);
     let c = if wide {
         egui::pos2(rect.left() + 14.0, rect.center().y - 1.0)
     } else {
         egui::pos2(rect.center().x - 1.0, rect.center().y - 1.0)
     };
     ui.painter()
-        .circle_stroke(c, 4.2, egui::Stroke::new(1.4, icon_color));
+        .circle_stroke(c, 4.2, egui::Stroke::new(1.3, icon_color));
     ui.painter().line_segment(
         [c + egui::vec2(3.1, 3.1), c + egui::vec2(6.0, 6.0)],
-        egui::Stroke::new(1.5, icon_color),
+        egui::Stroke::new(1.4, icon_color),
     );
     if wide {
         ui.painter().text(
-            egui::pos2(rect.left() + 27.0, rect.center().y),
+            egui::pos2(rect.left() + 26.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
             "快速搜索",
             egui::FontId::proportional(12.5),
-            motion::mix(t::dim(), t::ink(), hover),
+            motion::mix(t::dim(), t::sub(), hover),
         );
         let badge = egui::Rect::from_center_size(
             egui::pos2(rect.right() - 25.0, rect.center().y),
-            egui::vec2(38.0, 19.0),
+            egui::vec2(38.0, 18.0),
         );
         ui.painter().rect(
             badge,
-            5,
+            4,
             t::rail(),
             egui::Stroke::new(1.0, t::hairline()),
             egui::StrokeKind::Inside,
@@ -466,48 +456,39 @@ fn sidebar_search(ui: &mut egui::Ui, wide: bool, enabled: bool) -> egui::Respons
             egui::Align2::CENTER_CENTER,
             "Ctrl+K",
             egui::FontId::proportional(10.5),
-            t::sub(),
+            t::dim(),
         );
     }
     response.on_hover_text("快速搜索版本、世界、页面与操作（Ctrl+K）")
 }
 
-/// 侧栏里一个正在运行的游戏：翠绿实时状态卡，点它看这一局的输出。
+/// 侧栏里一个正在运行的游戏：实时圆点、版本名和状态。点它看这一局的输出。
 fn game_row(ui: &mut egui::Ui, name: &str, status: &str, wide: bool) -> egui::Response {
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 40.0), egui::Sense::click());
-    let hover = motion::hover_amount(ui, response.id.with("game_hover"), response.hovered());
-    ui.painter().rect(
-        rect,
-        motion::R,
-        t::tint(t::ok(), 0.10 + 0.06 * hover),
-        egui::Stroke::new(1.0, t::tint(t::ok(), 0.30 + 0.25 * hover)),
-        egui::StrokeKind::Inside,
-    );
+    let (rect, response, color) = nav_row(ui, 36.0, false, true);
     let center = if wide {
-        egui::pos2(rect.left() + 18.0, rect.center().y)
+        egui::pos2(rect.left() + 21.0, rect.center().y)
     } else {
         rect.center()
     };
     ui.painter()
-        .circle_filled(center, 7.0, t::tint(t::ok(), 0.24));
-    ui.painter().circle_filled(center, 3.6, t::ok());
+        .circle_filled(center, 6.5, t::tint(t::ok(), 0.20));
+    ui.painter().circle_filled(center, 3.5, t::ok());
     if wide {
-        let font = egui::FontId::new(12.5, bold_family());
-        let width = rect.right() - 10.0 - (rect.left() + 34.0);
+        let font = egui::FontId::proportional(13.0);
+        let width = rect.right() - 12.0 - (rect.left() + 40.0);
         ui.painter().text(
-            egui::pos2(rect.left() + 34.0, rect.center().y - 7.5),
+            egui::pos2(rect.left() + 40.0, rect.center().y - 8.0),
             egui::Align2::LEFT_CENTER,
             elide_middle(ui, name, &font, width),
             font,
-            t::ink(),
+            color,
         );
         ui.painter().text(
-            egui::pos2(rect.left() + 34.0, rect.center().y + 8.0),
+            egui::pos2(rect.left() + 40.0, rect.center().y + 8.0),
             egui::Align2::LEFT_CENTER,
             status,
             egui::FontId::proportional(11.5),
-            t::ok(),
+            t::dim(),
         );
     }
     response.on_hover_text(format!("{name} · {status}\n点开看游戏输出"))
@@ -592,7 +573,16 @@ fn task_card_widget(
 }
 
 /// 侧边栏的一级入口：宽窗口带文字，窄窗口只有图标。
-/// `draw_active_bg` 为 false 时，激活底色由外层弹簧指示器统一绘制以实现丝滑滑行。
+pub(crate) fn nav_row(
+    ui: &mut egui::Ui,
+    height: f32,
+    active: bool,
+    enabled: bool,
+) -> (egui::Rect, egui::Response, egui::Color32) {
+    nav_row_styled(ui, height, active, enabled, true)
+}
+
+/// 侧栏与设置分栏共用的行分配：`draw_active_bg = false` 时由外层弹簧统一绘制滑行背景与色条。
 pub(crate) fn nav_row_styled(
     ui: &mut egui::Ui,
     height: f32,
@@ -609,12 +599,14 @@ pub(crate) fn nav_row_styled(
         },
     );
     let hover = motion::hover_amount(ui, response.id.with("hover"), enabled && response.hovered());
-    if active && draw_active_bg {
-        backdrop::paint_nav_active(ui.ctx(), ui.painter(), rect, motion::R + 1);
-        active_accent_bar(ui.painter(), rect);
-    } else if !active && hover > 0.0 {
+    if active {
+        if draw_active_bg {
+            ui.painter().rect_filled(rect, motion::R, t::wash());
+            active_accent_bar(ui.painter(), rect);
+        }
+    } else if hover > 0.0 {
         ui.painter()
-            .rect_filled(rect, motion::R + 1, t::tint(t::wash(), 0.72 * hover));
+            .rect_filled(rect, motion::R, t::tint(t::wash(), 0.72 * hover));
     }
     let color = if !enabled {
         t::dim()
@@ -626,15 +618,6 @@ pub(crate) fn nav_row_styled(
     (rect, response, color)
 }
 
-pub(crate) fn nav_row(
-    ui: &mut egui::Ui,
-    height: f32,
-    active: bool,
-    enabled: bool,
-) -> (egui::Rect, egui::Response, egui::Color32) {
-    nav_row_styled(ui, height, active, enabled, true)
-}
-
 /// 侧边栏的一级入口：宽窗口带文字，窄窗口只有图标。
 pub(crate) fn sidebar_item(
     ui: &mut egui::Ui,
@@ -643,7 +626,7 @@ pub(crate) fn sidebar_item(
     wide: bool,
     enabled: bool,
 ) -> egui::Response {
-    let (rect, response, color) = nav_row_styled(ui, 38.0, active, enabled, false);
+    let (rect, response, color) = nav_row_styled(ui, 36.0, active, enabled, false);
     let icon = if wide {
         egui::pos2(rect.left() + 22.0, rect.center().y)
     } else {
@@ -740,53 +723,30 @@ pub(crate) fn sidebar_account(
     face: Option<&egui::TextureHandle>,
     wide: bool,
 ) -> egui::Response {
-    let h = if wide { 44.0 } else { 38.0 };
-    let (rect, response, color) = nav_row(ui, h, false, true);
+    let (rect, response, color) = nav_row(ui, 36.0, false, true);
     let name = account.map(|a| a.name.as_str()).unwrap_or("添加账户");
     let center = if wide {
         egui::pos2(rect.left() + 21.0, rect.center().y)
     } else {
         rect.center()
     };
-    let icon = egui::Rect::from_center_size(center, egui::vec2(26.0, 26.0));
+    let icon = egui::Rect::from_center_size(center, egui::vec2(22.0, 22.0));
     draw_avatar(ui.painter(), icon, name, face);
-    ui.painter().rect_stroke(
-        icon,
-        6,
-        egui::Stroke::new(1.0, t::glass_border()),
-        egui::StrokeKind::Inside,
-    );
     if account.is_some_and(|a| a.stale) {
         ui.painter().circle(
             icon.right_top(),
-            3.8,
+            3.5,
             t::warn(),
-            egui::Stroke::new(1.5, t::rail()),
+            egui::Stroke::new(1.5, t::bg()),
         );
     }
     if wide {
         ui.painter().text(
-            egui::pos2(rect.left() + 42.0, rect.center().y - 7.5),
+            egui::pos2(rect.left() + 40.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
             short_text(name, 14),
-            egui::FontId::new(13.5, bold_family()),
+            egui::FontId::proportional(14.0),
             color,
-        );
-        let sub = match account {
-            Some(a) if a.stale => "需要重新登录".to_string(),
-            Some(a) => a.kind_label(),
-            None => "点击登录".to_string(),
-        };
-        ui.painter().text(
-            egui::pos2(rect.left() + 42.0, rect.center().y + 8.5),
-            egui::Align2::LEFT_CENTER,
-            sub,
-            egui::FontId::proportional(11.5),
-            if account.is_some_and(|a| a.stale) {
-                t::warn()
-            } else {
-                t::dim()
-            },
         );
     }
     let hint = match account {

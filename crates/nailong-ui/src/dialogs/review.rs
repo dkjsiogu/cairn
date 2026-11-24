@@ -12,14 +12,11 @@ impl App {
         let mut cancel = false;
         let mut confirm = false;
         let modal_id = egui::Id::unique("install_review_modal");
-        let enter = motion::modal_enter(ctx, modal_id);
+        let enter = transition::modal_enter(ctx, modal_id);
         let modal = egui::Modal::new(modal_id)
             .backdrop_color(t::veil(enter))
             .frame(elevated_modal_frame())
             .show(ctx, |ui| {
-                if enter < 0.999 {
-                    ui.multiply_opacity(enter);
-                }
                 ui.set_width(500.0);
                 ui.horizontal(|ui| {
                     ui.label(
@@ -208,7 +205,7 @@ impl App {
                     });
                 });
             });
-        apply_modal_slide(ctx, modal.response.layer_id, enter);
+        transition::finish_modal(ctx, modal_id, modal.response.layer_id, enter, 1.0, true);
         if modal.backdrop_response.clicked()
             || ctx.input(|input| input.key_pressed(egui::Key::Escape))
         {

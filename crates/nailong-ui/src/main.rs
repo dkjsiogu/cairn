@@ -13,7 +13,6 @@
 
 mod activity;
 mod app;
-mod backdrop;
 mod dialogs;
 mod fonts;
 mod model;
@@ -27,6 +26,7 @@ mod rings;
 #[cfg(test)]
 mod tests;
 mod theme;
+mod transition;
 mod widgets;
 
 use prelude::*;

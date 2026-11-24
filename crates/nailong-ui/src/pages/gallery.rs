@@ -428,23 +428,29 @@ impl App {
                 );
             });
         } else {
-            let tab_fade = motion::key_fade(
-                ui.ctx(),
-                egui::Id::unique("cairn_gallery_tab_fade"),
-                self.gallery.tab as u8,
-                0.17,
-            );
-            ui.scope(|ui| {
-                if tab_fade < 0.999 {
-                    ui.multiply_opacity(tab_fade);
-                }
-                match self.gallery.tab {
+            let stage_rect = ui.available_rect_before_wrap();
+            let tab_key = match self.gallery.tab {
+                GalleryTab::Overview => 0u64,
+                GalleryTab::Time => 1,
+                GalleryTab::Places => 2,
+                GalleryTab::People => 3,
+            };
+            transition::run_region(
+                ui,
+                egui::Id::unique("cairn_gallery_tab_stage"),
+                tab_key,
+                stage_rect,
+                |from, to| {
+                    let sign = if to >= from { 1.0 } else { -1.0 };
+                    (egui::vec2(sign, 0.0), transition::Spec::SUB_TAB)
+                },
+                |ui| match self.gallery.tab {
                     GalleryTab::Overview => self.overview(ui, &mut shots, &faces),
                     GalleryTab::Time => self.time_view(ui, &mut shots, &visible, &faces),
                     GalleryTab::Places => self.places_view(ui, &mut shots),
                     GalleryTab::People => self.people_view(ui, &mut shots, &faces),
-                }
-            });
+                },
+            );
         }
         self.gallery.shots = Some(shots);
         if let Some(dir) = open_folder_dir {
@@ -521,83 +527,60 @@ impl App {
                         let versions: BTreeSet<&str> =
                             list.iter().map(|s| s.version.as_str()).collect();
                         let cells = [
-                            (
-                                format!("{total}"),
-                                "张截图".to_string(),
-                                GalleryTab::Time,
-                                t::accent(),
-                                BadgeGlyph::Camera,
-                            ),
-                            (
-                                span,
-                                "时间跨度".to_string(),
-                                GalleryTab::Time,
-                                t::loader_color(LoaderKind::NeoForge),
-                                BadgeGlyph::Disk,
-                            ),
+                            (format!("{total}"), "张截图".to_string(), GalleryTab::Time),
+                            (span, "时间".to_string(), GalleryTab::Time),
                             (
                                 format!("{} 个地点", albums.len()),
                                 format!("{} 个版本", versions.len()),
                                 GalleryTab::Places,
-                                t::ok(),
-                                BadgeGlyph::Pin,
                             ),
                             (
                                 format!("{} 个人", people.len()),
                                 "账户".to_string(),
                                 GalleryTab::People,
-                                t::loader_pack(),
-                                BadgeGlyph::Users,
                             ),
                         ];
                         let (row, _) =
-                            ui.allocate_exact_size(egui::vec2(width, 76.0), egui::Sense::hover());
-                        backdrop::paint_glass_card(
-                            ui.painter(),
+                            ui.allocate_exact_size(egui::vec2(width, 68.0), egui::Sense::hover());
+                        ui.painter().rect(
                             row,
                             motion::R_CARD,
-                            t::surface_glass(),
-                            t::glass_border(),
-                            true,
+                            t::surface(),
+                            egui::Stroke::new(1.0, t::hairline()),
+                            egui::StrokeKind::Inside,
                         );
                         let cell_w = width / cells.len() as f32;
-                        for (i, (value, label, tab, color, glyph)) in cells.iter().enumerate() {
+                        for (i, (value, label, tab)) in cells.iter().enumerate() {
                             let rect = egui::Rect::from_min_size(
                                 egui::pos2(row.left() + i as f32 * cell_w, row.top()),
-                                egui::vec2(cell_w, 76.0),
+                                egui::vec2(cell_w, 68.0),
                             );
                             let response = ui.interact(
                                 rect,
                                 egui::Id::unique(("overview_cell", i)),
                                 egui::Sense::click(),
                             );
-                            list_row_fill(ui, rect.shrink(5.0), false, &response);
+                            list_row_fill(ui, rect.shrink(4.0), false, &response);
                             if i > 0 {
                                 ui.painter().vline(
                                     rect.left(),
-                                    rect.y_range().shrink(14.0),
+                                    rect.y_range().shrink(12.0),
                                     egui::Stroke::new(1.0, t::hairline()),
                                 );
                             }
-                            let badge_rect = egui::Rect::from_center_size(
-                                egui::pos2(rect.left() + 30.0, rect.center().y),
-                                egui::vec2(34.0, 34.0),
-                            );
-                            icon_squircle(ui.painter(), badge_rect, *color, *glyph);
-                            let tx = badge_rect.right() + 12.0;
                             ui.painter().text(
-                                egui::pos2(tx, rect.top() + 16.0),
+                                rect.left_top() + egui::vec2(16.0, 12.0),
                                 egui::Align2::LEFT_TOP,
                                 value,
-                                egui::FontId::new(19.0, bold_family()),
+                                egui::FontId::new(20.0, light_family()),
                                 t::ink(),
                             );
                             ui.painter().text(
-                                egui::pos2(tx, rect.top() + 44.0),
+                                rect.left_top() + egui::vec2(16.0, 42.0),
                                 egui::Align2::LEFT_TOP,
                                 label,
                                 egui::FontId::proportional(12.5),
-                                t::sub(),
+                                t::dim(),
                             );
                             if response
                                 .on_hover_cursor(egui::CursorIcon::PointingHand)

@@ -257,15 +257,12 @@ impl App {
         let mut relogin: Option<String> = None;
         let mut remove: Option<String> = None;
         let area_id = egui::Id::unique("account_menu");
-        let enter = motion::modal_enter(ctx, area_id);
+        let enter = transition::modal_enter(ctx, area_id);
         let area = egui::Area::new(area_id)
             .order(egui::Order::Foreground)
             .pivot(egui::Align2::LEFT_BOTTOM)
             .fixed_pos(egui::pos2(anchor.left(), anchor.top() - 6.0))
             .show(ctx, |ui| {
-                if enter < 0.999 {
-                    ui.multiply_opacity(enter);
-                }
                 egui::Frame::new()
                     .fill(t::surface())
                     .stroke(egui::Stroke::new(1.0, t::hairline()))
@@ -351,7 +348,7 @@ impl App {
                         }
                     });
             });
-        apply_modal_slide(ctx, area.response.layer_id, enter);
+        transition::finish_modal(ctx, area_id, area.response.layer_id, enter, 0.0, false);
         let popup_open = egui::Popup::is_any_open(ctx);
         let pointer_in_anchor = ctx
             .input(|i| i.pointer.interact_pos())
@@ -392,14 +389,11 @@ impl App {
         let mut confirm = false;
         let mut close = false;
         let modal_id = egui::Id::unique("remove_account");
-        let enter = motion::modal_enter(ctx, modal_id);
+        let enter = transition::modal_enter(ctx, modal_id);
         let modal = egui::Modal::new(modal_id)
             .backdrop_color(t::veil(enter))
             .frame(modal_frame())
             .show(ctx, |ui| {
-                if enter < 0.999 {
-                    ui.multiply_opacity(enter);
-                }
                 ui.set_width(340.0);
                 ui.label(
                     egui::RichText::new(format!("移除 {}？", account.name))
@@ -435,7 +429,7 @@ impl App {
                     }
                 });
             });
-        apply_modal_slide(ctx, modal.response.layer_id, enter);
+        transition::finish_modal(ctx, modal_id, modal.response.layer_id, enter, 1.0, true);
         if modal.backdrop_response.clicked() || escape_pressed(ctx) {
             close = true;
         }
@@ -456,14 +450,11 @@ impl App {
         let mut open = false;
         let mut cancel_login = false;
         let modal_id = egui::Id::unique("login_modal");
-        let enter = motion::modal_enter(ctx, modal_id);
+        let enter = transition::modal_enter(ctx, modal_id);
         let modal = egui::Modal::new(modal_id)
             .backdrop_color(t::veil(enter))
             .frame(modal_frame())
             .show(ctx, |ui| {
-                if enter < 0.999 {
-                    ui.multiply_opacity(enter);
-                }
                 ui.set_width(368.0);
                 ui.vertical_centered(|ui| {
                     ui.label(
@@ -515,7 +506,7 @@ impl App {
                     );
                 });
             });
-        apply_modal_slide(ctx, modal.response.layer_id, enter);
+        transition::finish_modal(ctx, modal_id, modal.response.layer_id, enter, 1.0, true);
         if modal.backdrop_response.clicked() || escape_pressed(ctx) {
             cancel_login = true;
         }
@@ -540,14 +531,11 @@ impl App {
         let mut close = false;
         let mut retry = false;
         let modal_id = egui::Id::unique("login_error_modal");
-        let enter = motion::modal_enter(ctx, modal_id);
+        let enter = transition::modal_enter(ctx, modal_id);
         let modal = egui::Modal::new(modal_id)
             .backdrop_color(t::veil(enter))
             .frame(modal_frame())
             .show(ctx, |ui| {
-                if enter < 0.999 {
-                    ui.multiply_opacity(enter);
-                }
                 ui.set_width(380.0);
                 ui.label(
                     egui::RichText::new("登录没有完成")
@@ -589,7 +577,7 @@ impl App {
                         .color(t::sub()),
                 );
             });
-        apply_modal_slide(ctx, modal.response.layer_id, enter);
+        transition::finish_modal(ctx, modal_id, modal.response.layer_id, enter, 1.0, true);
         if modal.backdrop_response.clicked() || escape_pressed(ctx) {
             close = true;
         }

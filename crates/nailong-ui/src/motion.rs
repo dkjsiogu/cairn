@@ -8,62 +8,98 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::theme as t;
 
-/// 统一圆角刻度：基础控件 8、卡片/缩略图 12、英雄舞台 16、弹窗 14。
-pub const R: u8 = 8;
-pub const R_CARD: u8 = 12;
-pub const R_HERO: u8 = 16;
-pub const R_MODAL: u8 = 14;
+/// 统一圆角刻度：基础控件 7、卡片/缩略图 10、弹窗 12。
+pub const R: u8 = 7;
+pub const R_CARD: u8 = 10;
+pub const R_MODAL: u8 = 12;
 
 pub fn ease_out_cubic(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     1.0 - (1.0 - t).powi(3)
 }
 
-/// 苹果风格的柔顺减速曲线：起手轻快、落点丝滑。
-pub fn ease_out_quart(t: f32) -> f32 {
+/// 柔顺对称缓动：适合退出层透明度平滑收敛。
+pub fn ease_in_out_cubic(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
-    1.0 - (1.0 - t).powi(4)
+    if t < 0.5 {
+        4.0 * t * t * t
+    } else {
+        1.0 - (-2.0 * t + 2.0).powi(3) * 0.5
+    }
 }
 
-/// 临界阻尼弹簧矩形：让侧栏选中光带、分段胶囊、下划线和命令面板光标在各项之间丝滑滑行，
-/// 到位后立即停止重绘（空闲 CPU 仍为 0%）。
+#[derive(Clone, Copy)]
+struct SpringRectState {
+    x: [f32; 4],
+    v: [f32; 4],
+    last_time: f64,
+}
+
+#[derive(Clone, Copy)]
+struct Spring1DState {
+    x: f32,
+    v: f32,
+    last_time: f64,
+}
+
+/// 临界阻尼弹簧矩形：让侧栏选中项、分段胶囊、下划线与命令面板光标在各项之间丝滑滑行；
+/// 使用真实单调时钟 `now - last_time` 积分，在 60/120/144/240Hz 及无垂直同步环境下速度完全一致；
+/// 静息唤醒首帧 `dt = 0`（零起跳），到位后立即停止重绘（空闲 CPU 仍为 0%）。
 pub fn spring_rect(ctx: &egui::Context, id: egui::Id, target: Rect) -> Rect {
     if reduced() {
         return target;
     }
-    let raw_dt = ctx.input(|input| input.stable_dt);
-    let stored = ctx.data(|d| d.get_temp::<([f32; 4], [f32; 4])>(id));
+    let now = ctx.input(|input| input.time);
     let goal = [target.min.x, target.min.y, target.max.x, target.max.y];
-    let Some((mut x, mut v)) = stored else {
-        ctx.data_mut(|d| d.insert_temp(id, (goal, [0.0; 4])));
+    let Some(mut st) = ctx.data(|d| d.get_temp::<SpringRectState>(id)) else {
+        ctx.data_mut(|d| {
+            d.insert_temp(
+                id,
+                SpringRectState {
+                    x: goal,
+                    v: [0.0; 4],
+                    last_time: now,
+                },
+            );
+        });
         return target;
     };
-    // 目标突变太大（例如窗口大幅缩放或从窄栏切宽栏）时避免横跨半屏，直接贴合。
-    let jump = (goal[0] - x[0]).abs().max((goal[1] - x[1]).abs());
+    let jump = (goal[0] - st.x[0]).abs().max((goal[1] - st.x[1]).abs());
     if jump > 520.0 {
-        ctx.data_mut(|d| d.insert_temp(id, (goal, [0.0; 4])));
+        ctx.data_mut(|d| {
+            d.insert_temp(
+                id,
+                SpringRectState {
+                    x: goal,
+                    v: [0.0; 4],
+                    last_time: now,
+                },
+            );
+        });
         return target;
     }
-    // 从静息态刚被唤醒的首帧把 dt 限在 1/60s，避免空闲后第一帧猛跳一大截。
-    let from_rest = v.iter().all(|vel| vel.abs() < 1e-3);
-    let dt = if from_rest {
-        raw_dt.min(1.0 / 60.0)
+    let elapsed = (now - st.last_time).max(0.0);
+    // 空闲超过 80ms 刚被唤醒的首帧不跨大步，从当前起点平滑起步。
+    let dt = if elapsed > 0.08 {
+        0.0
     } else {
-        raw_dt.min(1.0 / 20.0)
+        (elapsed as f32).min(1.0 / 24.0)
     };
-    let stiffness = 380.0_f32;
-    let damping = 36.0_f32;
+    let stiffness = 280.0_f32;
+    let damping = 32.0_f32;
     let steps = 4;
     let h = dt / steps as f32;
     let mut moving = false;
-    for i in 0..4 {
-        for _ in 0..steps {
-            v[i] += (stiffness * (goal[i] - x[i]) - damping * v[i]) * h;
-            x[i] += v[i] * h;
+    for ((x, v), &g) in st.x.iter_mut().zip(&mut st.v).zip(&goal) {
+        if dt > 0.0 {
+            for _ in 0..steps {
+                *v += (stiffness * (g - *x) - damping * *v) * h;
+                *x += *v * h;
+            }
         }
-        if (x[i] - goal[i]).abs() < 0.25 && v[i].abs() < 1.5 {
-            x[i] = goal[i];
-            v[i] = 0.0;
+        if (*x - g).abs() < 0.2 && v.abs() < 1.2 {
+            *x = g;
+            *v = 0.0;
         } else {
             moving = true;
         }
@@ -71,73 +107,9 @@ pub fn spring_rect(ctx: &egui::Context, id: egui::Id, target: Rect) -> Rect {
     if moving {
         ctx.request_repaint();
     }
-    ctx.data_mut(|d| d.insert_temp(id, (x, v)));
-    Rect::from_min_max(pos2(x[0], x[1]), pos2(x[2], x[3]))
-}
-
-/// 弹窗打开时的自动入场进度（0..=1）：通过帧号自动识别「刚打开」，无需各弹窗手写计时器。
-pub fn modal_enter(ctx: &egui::Context, id: egui::Id) -> f32 {
-    if reduced() {
-        return 1.0;
-    }
-    let frame = ctx.cumulative_frame_nr();
-    let now = ctx.input(|i| i.time);
-    let key = id.with("cairn_modal_enter");
-    let (last_frame, opened_at) = ctx
-        .data(|d| d.get_temp::<(u64, f64)>(key))
-        .unwrap_or((0, now));
-    let opened_at = if last_frame == 0 || frame > last_frame.saturating_add(2) {
-        now
-    } else {
-        opened_at
-    };
-    ctx.data_mut(|d| d.insert_temp(key, (frame, opened_at)));
-    let raw = (((now - opened_at) / 0.19) as f32).clamp(0.0, 1.0);
-    if raw < 1.0 {
-        ctx.request_repaint();
-    }
-    ease_out_quart(raw)
-}
-
-/// 弹窗打开时的柔和上浮位移（px）。
-pub fn modal_slide_y(eased: f32) -> f32 {
-    (1.0 - eased.clamp(0.0, 1.0)) * 12.0
-}
-
-/// 页内子标签或左侧列表切换时的柔和淡入（0..=1）。
-/// 刚切进当前页面时不重复淡入（交给整页转场），只在同页内切换选项时触发。
-pub fn key_fade(
-    ctx: &egui::Context,
-    id: egui::Id,
-    key: impl std::hash::Hash,
-    duration: f64,
-) -> f32 {
-    if reduced() {
-        return 1.0;
-    }
-    use std::hash::Hasher;
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    key.hash(&mut hasher);
-    let hash = hasher.finish();
-    let frame = ctx.cumulative_frame_nr();
-    let now = ctx.input(|i| i.time);
-    let prev = ctx.data(|d| d.get_temp::<(u64, u64, f64)>(id));
-    let changed_at = match prev {
-        Some((last_frame, last_hash, changed_at)) if frame <= last_frame.saturating_add(2) => {
-            if last_hash != hash {
-                now
-            } else {
-                changed_at
-            }
-        }
-        _ => now - duration - 1.0,
-    };
-    ctx.data_mut(|d| d.insert_temp(id, (frame, hash, changed_at)));
-    let raw = (((now - changed_at) / duration) as f32).clamp(0.0, 1.0);
-    if raw < 1.0 {
-        ctx.request_repaint();
-    }
-    ease_out_quart(raw)
+    st.last_time = now;
+    ctx.data_mut(|d| d.insert_temp(id, st));
+    Rect::from_min_max(pos2(st.x[0], st.x[1]), pos2(st.x[2], st.x[3]))
 }
 
 pub fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
@@ -151,29 +123,42 @@ pub fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
     )
 }
 
-/// 欠阻尼弹簧，只用在状态圆环上。运动中才请求下一帧。
+/// 物理弹簧（用于状态圆环与滑动开关）；采用真实单调时钟积分，运动中才请求下一帧。
 pub fn spring(ctx: &egui::Context, id: egui::Id, target: f32, stiffness: f32, damping: f32) -> f32 {
     if reduced() {
         return target;
     }
-    let dt = ctx.input(|input| input.stable_dt).min(1.0 / 20.0);
-    let (mut x, mut v) = ctx
-        .data(|data| data.get_temp::<(f32, f32)>(id))
-        .unwrap_or((target, 0.0));
+    let now = ctx.input(|input| input.time);
+    let mut st = ctx
+        .data(|data| data.get_temp::<Spring1DState>(id))
+        .unwrap_or(Spring1DState {
+            x: target,
+            v: 0.0,
+            last_time: now,
+        });
+    let elapsed = (now - st.last_time).max(0.0);
+    let dt = if elapsed > 0.08 {
+        0.0
+    } else {
+        (elapsed as f32).min(1.0 / 24.0)
+    };
     let steps = 4;
     let h = dt / steps as f32;
-    for _ in 0..steps {
-        v += (stiffness * (target - x) - damping * v) * h;
-        x += v * h;
+    if dt > 0.0 {
+        for _ in 0..steps {
+            st.v += (stiffness * (target - st.x) - damping * st.v) * h;
+            st.x += st.v * h;
+        }
     }
-    if (x - target).abs() < 0.002 && v.abs() < 0.01 {
-        x = target;
-        v = 0.0;
+    if (st.x - target).abs() < 0.002 && st.v.abs() < 0.01 {
+        st.x = target;
+        st.v = 0.0;
     } else {
         ctx.request_repaint();
     }
-    ctx.data_mut(|data| data.insert_temp(id, (x, v)));
-    x
+    st.last_time = now;
+    ctx.data_mut(|data| data.insert_temp(id, st));
+    st.x
 }
 
 static REDUCED: AtomicBool = AtomicBool::new(false);
@@ -269,7 +254,7 @@ pub fn primary_sized(
     )
 }
 
-/// 主按钮：立体渐变底色 + 底部色光环境阴影 + 顶部 1px 玻璃高光。
+/// 主按钮：一屏最多一个，只变颜色，不位移。
 pub fn primary_sized_glyph(
     ui: &mut egui::Ui,
     text: &str,
@@ -287,29 +272,24 @@ pub fn primary_sized_glyph(
     let (rect, response) = ui.allocate_exact_size(vec2(width.max(72.0), height.max(32.0)), sense);
     let hover = hover_amount(ui, response.id.with("hover"), enabled && response.hovered());
     let pressed = enabled && response.is_pointer_button_down_on();
-    let lift_y = if !enabled || reduced() {
-        0.0
+    let (fill, color) = if !enabled {
+        (t::wash(), t::dim())
     } else if pressed {
-        1.0
+        (t::accent_press(), t::on_accent())
     } else {
-        -hover
+        (mix(t::accent(), t::accent_hover(), hover), t::on_accent())
     };
-    let draw = rect.translate(vec2(0.0, lift_y));
-    let color = if !enabled { t::dim() } else { t::on_accent() };
+    ui.painter().rect_filled(rect, R, fill);
     if enabled {
-        if !pressed {
-            ui.painter()
-                .add(t::glow_shadow(t::accent(), 0.78 + 0.50 * hover).as_shape(draw, R));
-        }
-        crate::backdrop::paint_primary_fill(ui.ctx(), ui.painter(), draw, R, hover, pressed);
-        let top_highlight = Color32::from_white_alpha(if t::is_light() { 96 } else { 78 });
-        let rim_x0 = draw.left() + R as f32;
-        let rim_x1 = draw.right() - R as f32;
+        // 顶部 1px 轻高光线 + 克制描边，给实色主按钮一点物理厚度。
+        let top_highlight = Color32::from_white_alpha(if t::is_light() { 58 } else { 44 });
+        let rim_x0 = rect.left() + R as f32;
+        let rim_x1 = rect.right() - R as f32;
         if rim_x1 > rim_x0 && !pressed {
             ui.painter().line_segment(
                 [
-                    pos2(rim_x0, draw.top() + 1.0),
-                    pos2(rim_x1, draw.top() + 1.0),
+                    pos2(rim_x0, rect.top() + 1.0),
+                    pos2(rim_x1, rect.top() + 1.0),
                 ],
                 Stroke::new(1.0, top_highlight),
             );
@@ -317,20 +297,12 @@ pub fn primary_sized_glyph(
         let edge = if pressed {
             t::accent_press()
         } else {
-            mix(t::tint(t::accent_top(), 0.78), t::accent_hover_top(), hover)
+            mix(t::tint(t::accent_hover(), 0.7), t::accent_hover(), hover)
         };
         ui.painter()
-            .rect_stroke(draw, R, Stroke::new(1.0, edge), egui::StrokeKind::Inside);
-    } else {
-        ui.painter().rect(
-            draw,
-            R,
-            t::wash(),
-            Stroke::new(1.0, t::hairline()),
-            egui::StrokeKind::Inside,
-        );
+            .rect_stroke(rect, R, Stroke::new(1.0, edge), egui::StrokeKind::Inside);
     }
-    paint_label(ui.painter(), draw, text, glyph, color, 14.0, true);
+    paint_label(ui.painter(), rect, text, glyph, color, 14.0, true);
     if enabled && response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
@@ -408,7 +380,7 @@ fn paint_glyph(painter: &egui::Painter, c: egui::Pos2, glyph: PrimaryGlyph, colo
     }
 }
 
-/// 次按钮：玻璃感轻表面 + 顶部微高光 + 平滑悬停反馈。
+/// 次按钮：克制表面底 + 细边，悬停和按下有平滑层级过渡。
 pub fn secondary_sized(
     ui: &mut egui::Ui,
     text: &str,
@@ -424,33 +396,27 @@ pub fn secondary_sized(
     };
     let (rect, response) = ui.allocate_exact_size(vec2(width.max(48.0), height.max(32.0)), sense);
     let hover = hover_amount(ui, response.id.with("hover"), enabled && response.hovered());
-    let pressed = enabled && response.is_pointer_button_down_on();
     let fill = if !enabled {
         Color32::TRANSPARENT
-    } else if pressed {
-        mix(t::wash(), t::control(), 0.25)
+    } else if response.is_pointer_button_down_on() {
+        mix(t::wash(), t::control(), 0.28)
     } else {
-        mix(t::surface_glass(), t::elevated(), hover)
+        mix(t::tint(t::surface(), 0.72), t::wash(), hover)
     };
     if fill != Color32::TRANSPARENT {
         ui.painter().rect_filled(rect, R, fill);
     }
-    if enabled && !pressed && rect.width() > R as f32 * 2.0 {
-        ui.painter().line_segment(
-            [
-                pos2(rect.left() + R as f32, rect.top() + 1.0),
-                pos2(rect.right() - R as f32, rect.top() + 1.0),
-            ],
-            Stroke::new(1.0, t::rim()),
-        );
-    }
     ui.painter().rect_stroke(
         rect,
         R,
-        Stroke::new(1.0, mix(t::glass_border(), t::control(), hover)),
+        Stroke::new(1.0, mix(t::hairline(), t::control(), hover)),
         egui::StrokeKind::Inside,
     );
-    let color = if enabled { t::ink() } else { t::dim() };
+    let color = if enabled {
+        mix(t::ink(), t::ink(), hover)
+    } else {
+        t::dim()
+    };
     paint_label(
         ui.painter(),
         rect,
@@ -466,22 +432,16 @@ pub fn secondary_sized(
     response
 }
 
-/// 高 7 的流光渐变进度条。
+/// 高 5 的细进度条。
 pub fn progress_bar(ui: &mut egui::Ui, fraction: f32, indeterminate: bool, time: f64) {
     let width = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(vec2(width, 7.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(width, 5.0), Sense::hover());
     let painter = ui.painter();
-    painter.rect(
-        rect,
-        4,
-        t::rail(),
-        Stroke::new(1.0, t::hairline()),
-        egui::StrokeKind::Inside,
-    );
+    painter.rect_filled(rect, 3, t::hairline());
     let time = if reduced() { 0.0 } else { time as f32 };
     let (from, to) = if indeterminate {
-        let seg = (rect.width() * 0.26).max(52.0);
-        let x = rect.left() - seg + (rect.width() + seg) * (time * 0.42).rem_euclid(1.0);
+        let seg = (rect.width() * 0.25).max(48.0);
+        let x = rect.left() - seg + (rect.width() + seg) * (time * 0.4).rem_euclid(1.0);
         (x.max(rect.left()), (x + seg).min(rect.right()))
     } else {
         (
@@ -489,8 +449,57 @@ pub fn progress_bar(ui: &mut egui::Ui, fraction: f32, indeterminate: bool, time:
             rect.left() + rect.width() * fraction.clamp(0.0, 1.0),
         )
     };
-    if to - from > 1.0 {
-        let fill_rect = Rect::from_min_max(pos2(from, rect.top()), pos2(to, rect.bottom()));
-        crate::backdrop::paint_progress_fill(ui.ctx(), painter, fill_rect, 4);
+    if to - from > 0.5 {
+        painter.rect_filled(
+            Rect::from_min_max(pos2(from, rect.top()), pos2(to, rect.bottom())),
+            3,
+            t::accent(),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spring_rect_glides_smoothly_without_snapping() {
+        set_reduced(false);
+        let ctx = egui::Context::default();
+        let id = egui::Id::unique("test_spring_rect");
+        let a = Rect::from_min_size(pos2(12.0, 100.0), vec2(172.0, 36.0));
+        let b = Rect::from_min_size(pos2(12.0, 220.0), vec2(172.0, 36.0));
+
+        let step_run = |time: f64, target: Rect| -> Rect {
+            let mut out = Rect::NOTHING;
+            let raw = egui::RawInput {
+                time: Some(time),
+                ..Default::default()
+            };
+            let mut full = ctx.run_ui(raw, |ui| {
+                out = spring_rect(ui.ctx(), id, target);
+            });
+            full.textures_delta.clear();
+            out
+        };
+
+        // 首次记录起点 a。
+        let out = step_run(1.0, a);
+        assert!((out.min.y - 100.0).abs() < 0.01);
+
+        // 空闲 0.5s 后目标切到 b：首帧平滑起步不瞬移。
+        let out = step_run(1.5, b);
+        assert!((out.min.y - 100.0).abs() < 0.01);
+
+        // 50ms 后应处在中途滑行状态，而不是直接跳到终点 220。
+        let mut out = Rect::NOTHING;
+        for step in 1..=3 {
+            out = step_run(1.5 + step as f64 * 0.016, b);
+        }
+        assert!(
+            out.min.y > 105.0 && out.min.y < 190.0,
+            "got y={}",
+            out.min.y
+        );
     }
 }
