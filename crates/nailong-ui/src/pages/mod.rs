@@ -200,9 +200,10 @@ impl App {
                     }
                 }
                 if let Some(target) = active_nav_rect {
-                    let pill = motion::spring_rect(
+                    let pill = motion::spring_rect_on_key(
                         ui.ctx(),
                         egui::Id::unique("cairn_sidebar_pill"),
+                        active as u64,
                         target,
                     );
                     ui.painter().set(
@@ -335,6 +336,14 @@ impl App {
                         settings_clicked = true;
                     }
                 }
+                let panel_rect = ui.clip_rect();
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(panel_rect.right() - 0.5, panel_rect.top()),
+                        egui::pos2(panel_rect.right() - 0.5, panel_rect.bottom()),
+                    ],
+                    egui::Stroke::new(1.0, t::hairline()),
+                );
             });
 
         if let Some(nav) = go {

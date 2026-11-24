@@ -28,6 +28,11 @@
   <url type="bugtracker">https://github.com/dkjsiogu/cairn/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.48.0" date="2026-11-24">
+      <description>
+        <p>Flagship flat-matte Fog Craft polish and interaction pass while keeping 0% idle CPU, zero new dependencies, WCAG AA contrast across all semantic accents, and full reduce-motion support: key-gated critically-damped springs (zero scroll/resize lag) expanded to Versions list, Install loader tiles, Saves world list, Settings segmented controls, and lightbox filmstrip; full-viewport 220ms Dark/Light theme luminance cross-fade; floating animated bottom toasts; dual-region transitions for library status filters and Discover categories plus smooth lightbox photo cross-sliding; crisp 1.3px monochrome vector glyphs, 1px top rim edges, muted semantic loader pills, architectural matte monograms, real world icon.png previews, and keycap shortcuts.</p>
+      </description>
+    </release>
     <release version="0.47.1" date="2026-11-24">
       <description>
         <p>Returns to the clean matte minimalist Fog Craft aesthetic (removing the 0.47.0 glossy gradients and scenic hero banner) while introducing a true dual-page paint-list transition compositor: outgoing pages glide out and dissolve smoothly alongside incoming pages with staggered Shared-Axis curves and zero layout reflow across primary navigation, drill-ins, in-page panes, and tabs; fixes monotonic-clock critically-damped springs for gliding sidebar/tab/palette indicators and toggle switches across 60–240Hz displays; adds unified open and close animations to all modals and popovers while maintaining 0% idle CPU and reduce-motion support.</p>

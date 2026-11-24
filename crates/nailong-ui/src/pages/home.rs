@@ -61,7 +61,7 @@ impl App {
                             });
                         });
                         ui.add_space(18.0);
-                        egui::Frame::new()
+                        let welcome_card = egui::Frame::new()
                             .fill(t::surface())
                             .stroke(egui::Stroke::new(1.0, t::hairline()))
                             .corner_radius(motion::R_CARD)
@@ -246,7 +246,9 @@ impl App {
                                         import_pack = true;
                                     }
                                 });
-                            });
+                            })
+                            .response;
+                        motion::rim_top(ui.painter(), welcome_card.rect, motion::R_CARD);
                         ui.add_space(24.0);
                     });
                 });
@@ -391,9 +393,17 @@ impl App {
                         child.horizontal(|ui| {
                             if running {
                                 // 游戏开着：主按钮看这一局的输出，旁边能结束它。
-                                if motion::secondary_sized(ui, "查看日志", true, 104.0, 40.0, 14.0)
-                                    .on_hover_text("实时查看游戏输出")
-                                    .clicked()
+                                if motion::secondary_sized_glyph(
+                                    ui,
+                                    "查看日志",
+                                    true,
+                                    114.0,
+                                    40.0,
+                                    14.0,
+                                    motion::SecondaryGlyph::Terminal,
+                                )
+                                .on_hover_text("实时查看游戏输出")
+                                .clicked()
                                 {
                                     primary = true;
                                 }
@@ -409,13 +419,14 @@ impl App {
                                     {
                                         stop = Some(false);
                                     }
-                                } else if motion::secondary_sized(
+                                } else if motion::secondary_sized_glyph(
                                     ui,
                                     "结束游戏",
                                     true,
-                                    96.0,
+                                    110.0,
                                     40.0,
                                     14.0,
+                                    motion::SecondaryGlyph::Stop,
                                 )
                                 .on_hover_text("强制结束进程（正常退出请在游戏内操作）")
                                 .clicked()
@@ -479,10 +490,16 @@ impl App {
                             None => ("还没有快照".to_string(), "打开存档页创建".to_string()),
                         };
                         let content_highlight = !ring_data.update_names.is_empty();
-                        for (index, (kicker, main, sub, accent_val)) in [
-                            ("最近世界", world_main, world_sub, false),
-                            ("内容", content_main, content_sub, content_highlight),
-                            ("备份", backup_main, backup_sub, false),
+                        for (index, (glyph, kicker, main, sub, accent_val)) in [
+                            (MiniGlyph::World, "最近世界", world_main, world_sub, false),
+                            (
+                                MiniGlyph::Blocks,
+                                "内容",
+                                content_main,
+                                content_sub,
+                                content_highlight,
+                            ),
+                            (MiniGlyph::Shield, "备份", backup_main, backup_sub, false),
                         ]
                         .into_iter()
                         .enumerate()
@@ -504,6 +521,7 @@ impl App {
                             let cell = summary_cell(
                                 ui,
                                 rect,
+                                glyph,
                                 kicker,
                                 &main,
                                 &sub,
@@ -514,7 +532,7 @@ impl App {
                             if let Some((button, world)) = enter {
                                 let mut child =
                                     ui.new_child(egui::UiBuilder::new().max_rect(button));
-                                let response = small_accent(&mut child, "▶ 进入")
+                                let response = small_accent_play(&mut child, "进入")
                                     .on_hover_text(format!("开始游戏，直接进「{world}」"));
                                 on_button = response.hovered();
                                 if response.clicked() {
@@ -916,10 +934,12 @@ fn switch_row(
     }
 }
 
-/// 启动台的一张摘要卡片：轻表面 + 三层信息层级 + 悬停微亮箭头。
+/// 启动台的一张摘要卡片：轻表面 + 单色微图标 + 三层信息层级 + 悬停边框提亮与微位移箭头。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn summary_cell(
     ui: &mut egui::Ui,
     rect: egui::Rect,
+    glyph: MiniGlyph,
     kicker: &str,
     main: &str,
     sub: &str,
@@ -944,24 +964,29 @@ pub(crate) fn summary_cell(
         egui::Stroke::new(1.0, motion::mix(t::hairline(), t::control(), hover)),
         egui::StrokeKind::Inside,
     );
-    ui.painter().line_segment(
-        [
-            egui::pos2(rect.left() + motion::R_CARD as f32, rect.top() + 1.0),
-            egui::pos2(rect.right() - motion::R_CARD as f32, rect.top() + 1.0),
-        ],
-        egui::Stroke::new(1.0, t::rim()),
-    );
+    motion::rim_top(ui.painter(), rect, motion::R_CARD);
     let left = rect.left() + 16.0;
+    let kicker_color = motion::mix(t::dim(), t::sub(), hover);
+    mini_glyph(
+        ui.painter(),
+        egui::pos2(left + 5.5, rect.top() + 19.0),
+        glyph,
+        if accent_main {
+            t::accent()
+        } else {
+            kicker_color
+        },
+    );
     ui.painter().text(
-        egui::pos2(left, rect.top() + 13.0),
+        egui::pos2(left + 17.0, rect.top() + 13.0),
         egui::Align2::LEFT_TOP,
         kicker,
         egui::FontId::proportional(12.0),
-        t::dim(),
+        kicker_color,
     );
     if show_chevron {
         ui.painter().text(
-            egui::pos2(rect.right() - 14.0, rect.top() + 12.0),
+            egui::pos2(rect.right() - 14.0 + hover * 2.5, rect.top() + 12.0),
             egui::Align2::RIGHT_TOP,
             "›",
             egui::FontId::proportional(15.0),
@@ -976,14 +1001,14 @@ pub(crate) fn summary_cell(
         (rect.width() - 104.0).max(80.0)
     };
     ui.painter().text(
-        egui::pos2(left, rect.top() + 33.0),
+        egui::pos2(left, rect.top() + 34.0),
         egui::Align2::LEFT_TOP,
         elide_middle(ui, main, &main_font, max_main_w),
         main_font,
         main_color,
     );
     ui.painter().text(
-        egui::pos2(left, rect.top() + 57.0),
+        egui::pos2(left, rect.top() + 58.0),
         egui::Align2::LEFT_TOP,
         sub,
         egui::FontId::proportional(12.5),

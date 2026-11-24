@@ -272,7 +272,7 @@ impl App {
         let mut mode: Option<bool> = None;
         let mut wanted_kind: Option<mods::ContentKind> = None;
         ui.horizontal(|ui| {
-            segmented_bar(ui, |ui| {
+            segmented_bar(ui, "content_mode", |ui| {
                 if content_tab(ui, "已安装", installed_count, self.content.show_installed).clicked()
                 {
                     mode = Some(true);
@@ -312,9 +312,10 @@ impl App {
                     egui::pos2(target.left() + 8.0, target.bottom() - 2.5),
                     egui::pos2(target.right() - 8.0, target.bottom() - 0.5),
                 );
-                let bar = motion::spring_rect(
+                let bar = motion::spring_rect_on_key(
                     ui.ctx(),
                     egui::Id::unique("cairn_content_kind_bar"),
+                    self.content.kind as u64,
                     bar_target,
                 );
                 ui.painter().rect_filled(bar, 1.5, t::accent());

@@ -273,11 +273,11 @@ impl App {
                             ui.add_space(14.0);
                             egui::ComboBox::from_id_salt("saves_target")
                                 .selected_text(
-                                    egui::RichText::new(short_text(&row.label, 16))
+                                    egui::RichText::new(short_text(&row.label, 28))
                                         .size(13.0)
                                         .color(t::sub()),
                                 )
-                                .width(196.0)
+                                .width(236.0)
                                 .show_ui(ui, |ui| {
                                     for item in &version_rows {
                                         if ui
@@ -370,6 +370,10 @@ impl App {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
+                        let world_bg_slot = ui.painter().add(egui::Shape::Noop);
+                        let world_bar_slot = ui.painter().add(egui::Shape::Noop);
+                        let mut active_world_rect = None;
+                        let mut active_world_key = 0u64;
                         let worlds = self.worlds.list.clone();
                         for world in &worlds {
                             let active =
@@ -380,9 +384,29 @@ impl App {
                                 .get(&world.name)
                                 .map(|items| items.len())
                                 .unwrap_or(0);
-                            if save_world_row(ui, world, snapshots, active).clicked() {
+                            let icon = world_icon_texture(ui.ctx(), &game_dir, &world.name);
+                            let resp = save_world_row(ui, world, snapshots, active, icon.as_ref());
+                            if active {
+                                active_world_rect = Some(resp.rect);
+                                active_world_key = transition::hash_u64(&world.name);
+                            }
+                            if resp.clicked() {
                                 chosen_world = Some(world.name.clone());
                             }
+                        }
+                        if let Some(target) = active_world_rect {
+                            let pill = motion::spring_rect_on_key(
+                                ui.ctx(),
+                                egui::Id::unique("cairn_worlds_active_pill"),
+                                active_world_key,
+                                target,
+                            );
+                            ui.painter().set(
+                                world_bg_slot,
+                                egui::epaint::RectShape::filled(pill, motion::R, t::wash()),
+                            );
+                            ui.painter()
+                                .set(world_bar_slot, active_accent_bar_shape(pill));
                         }
                         if worlds.is_empty() {
                             ui.add_space(16.0);
@@ -396,6 +420,14 @@ impl App {
                             );
                         }
                     });
+                let panel_rect = ui.clip_rect();
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(panel_rect.right() - 0.5, panel_rect.top()),
+                        egui::pos2(panel_rect.right() - 0.5, panel_rect.bottom()),
+                    ],
+                    egui::Stroke::new(1.0, t::hairline()),
+                );
             });
 
         let mut open_shots: Option<String> = None;
@@ -597,7 +629,7 @@ impl App {
                                     }
                                 }
                                 if !snapshots.is_empty() {
-                                    egui::Frame::new()
+                                    let snap_card = egui::Frame::new()
                                         .fill(t::surface())
                                         .stroke(egui::Stroke::new(1.0, t::hairline()))
                                         .corner_radius(motion::R_CARD)
@@ -635,7 +667,9 @@ impl App {
                                                         Some((world.clone(), snapshot.id.clone()));
                                                 }
                                             }
-                                        });
+                                        })
+                                        .response;
+                                    motion::rim_top(ui.painter(), snap_card.rect, motion::R_CARD);
                                 }
                             });
                     },
@@ -738,19 +772,82 @@ impl App {
     }
 }
 
+/// 懒加载并按路径缓存世界的 `icon.png`（游戏真实资源，只在首次读取磁盘，零重复 IO）。
+fn world_icon_texture(
+    ctx: &egui::Context,
+    game_dir: &std::path::Path,
+    world_name: &str,
+) -> Option<egui::TextureHandle> {
+    let path = game_dir.join("saves").join(world_name).join("icon.png");
+    let cache_id = egui::Id::unique(("cairn_world_icon", &path));
+    if let Some(cached) = ctx.data(|d| d.get_temp::<Option<egui::TextureHandle>>(cache_id)) {
+        return cached;
+    }
+    let loaded = std::fs::read(&path)
+        .ok()
+        .and_then(|bytes| image::load_from_memory(&bytes).ok())
+        .map(|img| {
+            let rgba = img.to_rgba8();
+            let size = [rgba.width() as usize, rgba.height() as usize];
+            let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+            ctx.load_texture(
+                format!("world-icon:{}", path.display()),
+                color,
+                egui::TextureOptions::LINEAR,
+            )
+        });
+    ctx.data_mut(|d| d.insert_temp(cache_id, loaded.clone()));
+    loaded
+}
+
 pub(crate) fn save_world_row(
     ui: &mut egui::Ui,
     world: &saves::World,
     snapshots: usize,
     active: bool,
+    icon: Option<&egui::TextureHandle>,
 ) -> egui::Response {
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 56.0), egui::Sense::click());
-    list_row_fill(ui, rect, active, &response);
-    if active {
-        active_accent_bar(ui.painter(), rect);
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 58.0), egui::Sense::click());
+    if !active {
+        list_row_fill(ui, rect, false, &response);
     }
-    let inner = rect.shrink2(egui::vec2(14.0, 8.0));
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 30.0, rect.center().y),
+        egui::vec2(32.0, 32.0),
+    );
+    if let Some(tex) = icon {
+        ui.painter().add(
+            egui::epaint::RectShape::filled(icon_rect, 6, egui::Color32::WHITE).with_texture(
+                tex.id(),
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            ),
+        );
+        ui.painter().rect_stroke(
+            icon_rect,
+            6,
+            egui::Stroke::new(1.0, t::hairline()),
+            egui::StrokeKind::Inside,
+        );
+    } else {
+        ui.painter().rect(
+            icon_rect,
+            6,
+            if active { t::surface() } else { t::elevated() },
+            egui::Stroke::new(1.0, t::hairline()),
+            egui::StrokeKind::Inside,
+        );
+        mini_glyph(
+            ui.painter(),
+            icon_rect.center(),
+            MiniGlyph::World,
+            if active { t::accent() } else { t::dim() },
+        );
+    }
+    let inner = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 54.0, rect.top() + 8.0),
+        egui::pos2(rect.right() - 10.0, rect.bottom() - 8.0),
+    );
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(inner)
@@ -758,24 +855,30 @@ pub(crate) fn save_world_row(
     );
     child.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 2.0;
-        ui.label(
-            egui::RichText::new(&world.name)
-                .size(14.0)
-                .family(if active {
-                    bold_family()
-                } else {
-                    egui::FontFamily::Proportional
-                }),
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(&world.name)
+                    .size(14.0)
+                    .family(if active {
+                        bold_family()
+                    } else {
+                        egui::FontFamily::Proportional
+                    }),
+            )
+            .truncate(),
         );
-        ui.label(
-            egui::RichText::new(format!(
-                "{} · {} · {} 份快照",
-                human_size(world.size),
-                human_age(world.modified),
-                snapshots
-            ))
-            .size(12.5)
-            .color(t::sub()),
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(format!(
+                    "{} · {} · {} 份快照",
+                    human_size(world.size),
+                    human_age(world.modified),
+                    snapshots
+                ))
+                .size(12.5)
+                .color(t::sub()),
+            )
+            .truncate(),
         );
     });
     response
@@ -800,8 +903,10 @@ pub(crate) fn snapshot_row(
     let mut action = SnapshotAction::default();
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 56.0), egui::Sense::hover());
-    if response.hovered() {
-        ui.painter().rect_filled(rect, motion::R, t::wash());
+    let hover = motion::hover_amount(ui, response.id.with("snap_row_h"), response.hovered());
+    if hover > 0.0 {
+        ui.painter()
+            .rect_filled(rect, motion::R, t::tint(t::wash(), 0.78 * hover));
     }
     // 时间线轨道 + 节点圆点
     let node_x = rect.left() + 18.0;

@@ -256,7 +256,16 @@ pub fn show(ui: &mut egui::Ui, rect: egui::Rect, data: &Data) -> Option<Layer> {
     } else {
         ctx.animate_bool_with_time(id.with("warn"), data.state == State::Missing, 0.4)
     };
-    let state_color = motion::mix(t::accent(), t::warn(), warn_amount);
+    let run_amount = if motion::reduced() {
+        f32::from(data.state == State::Running)
+    } else {
+        ctx.animate_bool_with_time(id.with("run"), data.state == State::Running, 0.4)
+    };
+    let state_color = motion::mix(
+        motion::mix(t::accent(), t::ok(), run_amount),
+        t::warn(),
+        warn_amount,
+    );
     let time = ctx.input(|input| input.time) as f32;
     let painter = ui.painter_at(rect.expand(8.0));
 
@@ -439,8 +448,19 @@ pub fn show(ui: &mut egui::Ui, rect: egui::Rect, data: &Data) -> Option<Layer> {
         t::tint(state_color, core_fade),
     );
 
+    let tip_alpha = if motion::reduced() {
+        f32::from(hot.is_some())
+    } else {
+        ctx.animate_bool_with_time(id.with("tip_vis"), hot.is_some(), 0.14)
+    };
     if let Some(layer) = hot {
-        paint_tip(&ctx, rect, &tip(data, layer), state_color, layer);
+        ctx.data_mut(|d| d.insert_temp(id.with("last_tip_layer"), layer));
+    }
+    if tip_alpha > 0.01
+        && let Some(layer) =
+            hot.or_else(|| ctx.data(|d| d.get_temp::<Layer>(id.with("last_tip_layer"))))
+    {
+        paint_tip(&ctx, rect, &tip(data, layer), state_color, layer, tip_alpha);
     }
 
     if response.clicked() {
@@ -450,25 +470,36 @@ pub fn show(ui: &mut egui::Ui, rect: egui::Rect, data: &Data) -> Option<Layer> {
     }
 }
 
-/// 说明卡片浮在圆环左边，带柔和投影和状态色点，窄窗下自动钳制不越界。
-fn paint_tip(ctx: &egui::Context, rect: egui::Rect, tip: &Tip, state_color: Color32, layer: Layer) {
+/// 说明卡片浮在圆环左边，带柔和投影、1px 轻棱线、状态色点与平滑淡入，窄窗下自动钳制不越界。
+fn paint_tip(
+    ctx: &egui::Context,
+    rect: egui::Rect,
+    tip: &Tip,
+    state_color: Color32,
+    layer: Layer,
+    alpha: f32,
+) {
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::Tooltip,
         egui::Id::unique("nailong_ring_tip"),
     ));
+    let alpha = alpha.clamp(0.0, 1.0);
     let width = 192.0;
     let pad = 13.0;
     let inner = width - pad * 2.0;
+    let ink = t::tint(t::ink(), alpha);
+    let sub = t::tint(t::sub(), alpha);
+    let accent = t::tint(t::accent(), alpha);
     let title = painter.layout(
         tip.title.clone(),
         egui::FontId::new(14.0, crate::bold_family()),
-        t::ink(),
+        ink,
         inner - 14.0,
     );
     let detail = painter.layout(
         tip.detail.clone(),
         egui::FontId::proportional(13.0),
-        t::sub(),
+        sub,
         inner,
     );
     let action_text = if tip.action.is_empty() {
@@ -476,45 +507,50 @@ fn paint_tip(ctx: &egui::Context, rect: egui::Rect, tip: &Tip, state_color: Colo
     } else {
         format!("{} →", tip.action)
     };
-    let action = painter.layout(
-        action_text,
-        egui::FontId::proportional(12.5),
-        t::accent(),
-        inner,
-    );
+    let action = painter.layout(action_text, egui::FontId::proportional(12.5), accent, inner);
     let mut height = pad * 2.0 + title.size().y + 4.0 + detail.size().y;
     if !tip.action.is_empty() {
         height += 7.0 + action.size().y;
     }
     let screen = ctx.content_rect();
-    let x = (rect.left() - width + 24.0).clamp(screen.left() + 12.0, screen.right() - width - 12.0);
+    let drift = (1.0 - motion::ease_out_cubic(alpha)) * 5.0;
+    let x = (rect.left() - width + 24.0 + drift)
+        .clamp(screen.left() + 12.0, screen.right() - width - 12.0);
     let y_top = (rect.center().y - height * 0.5)
         .clamp(screen.top() + 12.0, screen.bottom() - height - 12.0);
     let card = egui::Rect::from_min_size(pos2(x, y_top), vec2(width, height));
-    painter.add(t::modal_shadow().as_shape(card, motion::R_CARD));
+    let mut shadow = t::modal_shadow();
+    shadow.color = shadow.color.gamma_multiply(alpha);
+    painter.add(shadow.as_shape(card, motion::R_CARD));
     painter.rect(
         card,
         motion::R_CARD,
-        t::surface(),
-        Stroke::new(1.0, t::hairline()),
+        t::tint(t::surface(), alpha),
+        Stroke::new(1.0, t::tint(t::hairline(), alpha)),
         egui::StrokeKind::Inside,
     );
-    let dot_color = match layer {
-        Layer::Core | Layer::Files => state_color,
-        Layer::Mods => t::accent(),
-        Layer::Saves => t::ok(),
-    };
+    if alpha > 0.5 {
+        motion::rim_top(&painter, card, motion::R_CARD);
+    }
+    let dot_color = t::tint(
+        match layer {
+            Layer::Core | Layer::Files => state_color,
+            Layer::Mods => t::accent(),
+            Layer::Saves => t::ok(),
+        },
+        alpha,
+    );
     let mut y = card.top() + pad;
     let left = card.left() + pad;
     let title_h = title.size().y;
     painter.circle_filled(pos2(left + 4.0, y + title_h * 0.5), 3.5, dot_color);
-    painter.galley(pos2(left + 13.0, y), title, t::ink());
+    painter.galley(pos2(left + 13.0, y), title, ink);
     y += title_h + 4.0;
     let detail_h = detail.size().y;
-    painter.galley(pos2(left, y), detail, t::sub());
+    painter.galley(pos2(left, y), detail, sub);
     y += detail_h + 7.0;
     if !tip.action.is_empty() {
-        painter.galley(pos2(left, y), action, t::accent());
+        painter.galley(pos2(left, y), action, accent);
     }
 }
 

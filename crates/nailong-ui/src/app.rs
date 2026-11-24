@@ -193,6 +193,7 @@ impl App {
             version_query: String::new(),
             version_search_focus: false,
             settings_tab: Default::default(),
+            pending_theme: None,
             rx: None,
         };
         app.play.versions = launchcfg::load_all(&app.root);
@@ -862,15 +863,22 @@ impl App {
         }
     }
 
-    /// 页面底部的一行提示：错误、完成通知，以及「查看日志」「复制」和崩溃后的「退回改动」。
-    /// 所有页面共用这一处。完成通知过几秒自己消失，错误留到玩家关掉。
-    pub(crate) fn message_bar(&mut self, ui: &mut egui::Ui) {
+    /// 切换深浅外观：延迟到本帧末整屏原子切换，避免同帧内上下卡片一明一暗撕裂，并触发 220ms 哑光亮度交融。
+    pub(crate) fn switch_theme(&mut self, ctx: &egui::Context, pref: t::Preference) {
+        self.prefs.theme = pref;
+        self.save_ui_config();
+        self.pending_theme = Some(pref);
+        ctx.request_repaint();
+    }
+
+    /// 悬浮哑光底部提示胶囊：不挤压主页面布局；出现时平滑上浮淡入，关闭或自动消失时柔和回落淡出。
+    pub(crate) fn message_toast(&mut self, ctx: &egui::Context, stage_rect: egui::Rect) {
         const NOTICE_SECONDS: f64 = 6.0;
         // 安装没完成的那一页自己把原因写在正中间，不用再说一遍。
         if self.page == Page::Install && self.install.repair_target.is_some() {
             return;
         }
-        let now = ui.input(|i| i.time);
+        let now = ctx.input(|i| i.time);
         let (text, color, is_error) = match (&self.error, &self.notice) {
             (Some(error), _) => (error.clone(), t::danger(), true),
             (None, Some(notice)) => (notice.clone(), t::ok(), false),
@@ -893,85 +901,105 @@ impl App {
         let mut copy = false;
         let mut recover = false;
         let has_recovery = is_error && self.play.recovery.is_some();
-        let response = egui::Panel::bottom("message_bar")
-            .resizable(false)
-            .show_separator_line(false)
-            .exact_size(40.0)
-            .frame(
-                egui::Frame::new()
+        let toast_w = (stage_rect.width() - 48.0).clamp(300.0, 620.0);
+        let toast_id = egui::Id::unique("cairn_message_toast");
+        let enter = transition::modal_enter(ctx, toast_id);
+        let area = egui::Area::new(toast_id)
+            .order(egui::Order::Foreground)
+            .pivot(egui::Align2::CENTER_BOTTOM)
+            .fixed_pos(egui::pos2(
+                stage_rect.center().x,
+                stage_rect.bottom() - 10.0,
+            ))
+            .show(ctx, |ui| {
+                let frame_resp = egui::Frame::new()
                     .fill(t::surface())
-                    .inner_margin(egui::Margin::symmetric(24, 0)),
-            )
-            .show(ui, |ui| {
-                let bar = ui.max_rect().expand2(egui::vec2(24.0, 0.0));
-                ui.painter().line_segment(
-                    [bar.left_top(), bar.right_top()],
-                    egui::Stroke::new(1.0, t::hairline()),
-                );
-                ui.painter().rect_filled(
-                    egui::Rect::from_min_max(
-                        bar.left_top(),
-                        egui::pos2(bar.left() + 3.0, bar.bottom()),
-                    ),
-                    0.0,
-                    color,
-                );
-                ui.horizontal_centered(|ui| {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add(
-                                egui::Button::new(egui::RichText::new("×").size(15.0)).frame(false),
-                            )
-                            .on_hover_text("关闭提示")
-                            .clicked()
-                        {
-                            close = true;
-                        }
-                        if is_error {
-                            if action_link(ui, "查看日志")
-                                .on_hover_text("Ctrl+L")
-                                .clicked()
-                            {
-                                show_log = true;
-                            }
-                            if action_link(ui, "复制").clicked() {
-                                copy = true;
-                            }
-                        }
-                        if has_recovery && small_accent(ui, "退回改动").clicked() {
-                            recover = true;
-                        }
-                        // 剩下的地方给文字，放不下从末尾省略，悬停看全文。
-                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                            let (dot, _) =
-                                ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
-                            ui.painter().circle_filled(dot.center(), 3.5, color);
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(&text).size(13.0).color(color),
-                                )
-                                .truncate(),
-                            )
-                            .on_hover_text(&text);
+                    .stroke(egui::Stroke::new(1.0, t::hairline()))
+                    .corner_radius(motion::R_CARD)
+                    .shadow(t::modal_shadow())
+                    .inner_margin(egui::Margin::symmetric(14, 8))
+                    .show(ui, |ui| {
+                        ui.set_width(toast_w - 28.0);
+                        ui.horizontal(|ui| {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                egui::RichText::new("×").size(15.0).color(t::dim()),
+                                            )
+                                            .frame(false),
+                                        )
+                                        .on_hover_text("关闭提示")
+                                        .clicked()
+                                    {
+                                        close = true;
+                                    }
+                                    if is_error {
+                                        if action_link(ui, "查看日志")
+                                            .on_hover_text("Ctrl+L")
+                                            .clicked()
+                                        {
+                                            show_log = true;
+                                        }
+                                        if action_link(ui, "复制").clicked() {
+                                            copy = true;
+                                        }
+                                    }
+                                    if has_recovery && small_accent(ui, "退回改动").clicked() {
+                                        recover = true;
+                                    }
+                                    ui.with_layout(
+                                        egui::Layout::left_to_right(egui::Align::Center),
+                                        |ui| {
+                                            let (dot, _) = ui.allocate_exact_size(
+                                                egui::vec2(8.0, 14.0),
+                                                egui::Sense::hover(),
+                                            );
+                                            ui.painter().circle_filled(dot.center(), 3.5, color);
+                                            ui.add(
+                                                egui::Label::new(
+                                                    egui::RichText::new(&text).size(13.0).color(
+                                                        if is_error {
+                                                            t::danger()
+                                                        } else {
+                                                            t::ink()
+                                                        },
+                                                    ),
+                                                )
+                                                .truncate(),
+                                            )
+                                            .on_hover_text(&text);
+                                        },
+                                    );
+                                },
+                            );
                         });
-                    });
-                });
-            })
-            .response;
+                    })
+                    .response;
+                motion::rim_top(ui.painter(), frame_resp.rect, motion::R_CARD);
+                let bar = egui::Rect::from_center_size(
+                    egui::pos2(frame_resp.rect.left() + 3.5, frame_resp.rect.center().y),
+                    egui::vec2(2.5, (frame_resp.rect.height() - 14.0).max(12.0)),
+                );
+                ui.painter().rect_filled(bar, 2.0, color);
+                frame_resp
+            });
+        transition::finish_modal(ctx, toast_id, area.response.layer_id, enter, 0.0, false);
+        let response = area.inner;
         if !is_error && let Some((_, since)) = &self.notice_seen {
             let left = NOTICE_SECONDS - (now - since);
             if response.contains_pointer() {
-                // 指着它就不走，挪开再重新数。
                 self.notice_seen = Some((text.clone(), now));
             } else if left <= 0.0 {
                 close = true;
             } else {
-                ui.ctx()
-                    .request_repaint_after(Duration::from_secs_f64(left.max(0.05)));
+                ctx.request_repaint_after(Duration::from_secs_f64(left.max(0.05)));
             }
         }
         if copy {
-            ui.ctx().copy_text(text);
+            ctx.copy_text(text);
         }
         if close {
             self.error = None;
@@ -1051,6 +1079,8 @@ pub(crate) struct App {
     pub(crate) show_settings: bool,
     /// 设置弹窗现在看的是哪一栏。
     pub(crate) settings_tab: crate::dialogs::settings::SettingsTab,
+    /// 等待本帧末原子生效的外观偏好（杜绝同帧半深半浅卡片撕裂）。
+    pub(crate) pending_theme: Option<t::Preference>,
     /// 设置里的「查看计算」展开了没有。
     pub(crate) show_tuning: bool,
     /// 实测调参的确认弹窗。
@@ -1160,12 +1190,13 @@ impl eframe::App for App {
             self.play.tuning_cache.clear();
         }
         let stage_key = self.stage_key();
+        let mut toast_stage = ctx.content_rect();
         egui::CentralPanel::no_frame()
             .frame(egui::Frame::new().fill(t::bg()))
             .show(ui, |ui| {
                 self.version_line(ui);
-                self.message_bar(ui);
                 let stage_rect = ui.available_rect_before_wrap();
+                toast_stage = stage_rect;
                 transition::run_region(
                     ui,
                     egui::Id::unique("cairn_main_stage"),
@@ -1189,6 +1220,7 @@ impl eframe::App for App {
                 );
                 self.drop_overlay(ui);
             });
+        self.message_toast(&ctx, toast_stage);
         self.account_overlay(&ctx);
         self.settings_overlay(&ctx);
         self.bench_overlay(&ctx);
@@ -1210,6 +1242,16 @@ impl eframe::App for App {
         }
         self.palette_overlay(&ctx);
         transition::paint_closing_modals(&ctx);
+        transition::paint_theme_dissolve(&ctx);
+        if let Some(pref) = self.pending_theme.take() {
+            let old_light = t::is_light();
+            let old_bg = t::bg();
+            pref.apply(&ctx);
+            if t::is_light() != old_light {
+                transition::begin_theme_dissolve(&ctx, old_bg);
+            }
+            ctx.request_repaint();
+        }
         self.remember_selection();
         motion::focus_ring(&ctx);
         motion::pointer_on_clickables(&ctx);

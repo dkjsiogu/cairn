@@ -431,6 +431,73 @@ pub(crate) fn paint_closing_modals(ctx: &egui::Context) {
 }
 
 // ============================================================================
+// 全屏深浅主题平滑交融（Dark ↔ Light 零闪断亮度柔化过渡）
+// ============================================================================
+
+#[derive(Clone, Copy, Default)]
+struct ThemeDissolve {
+    old_bg: egui::Color32,
+    peak_alpha: f32,
+    started_at: f64,
+    duration: f64,
+}
+
+fn theme_dissolve_id() -> egui::Id {
+    egui::Id::unique("cairn_theme_dissolve")
+}
+
+fn theme_dissolve_layer() -> egui::LayerId {
+    egui::LayerId::new(
+        egui::Order::Tooltip,
+        egui::Id::unique("cairn_theme_dissolve_layer"),
+    )
+}
+
+/// 切换深浅外观时启动 220ms 哑光亮度交融：按人眼亮度曲线设定起始不透明度
+/// （深→浅 0.85 单调提亮防闪白；浅→深 0.55 单调沉降防泛白），绝不触碰跨主题字体图集。
+pub(crate) fn begin_theme_dissolve(ctx: &egui::Context, old_bg: egui::Color32) {
+    if motion::reduced() {
+        return;
+    }
+    let now = ctx.input(|i| i.time);
+    let old_is_light = old_bg.r() > 128;
+    ctx.data_mut(|d| {
+        d.insert_temp(
+            theme_dissolve_id(),
+            ThemeDissolve {
+                old_bg,
+                peak_alpha: if old_is_light { 0.55 } else { 0.85 },
+                started_at: now,
+                duration: 0.22,
+            },
+        );
+    });
+    ctx.request_repaint();
+}
+
+/// 每帧收尾时绘制深浅主题亮度交融层；220ms 后自动清除并停止重绘（空闲 CPU 为 0%）。
+pub(crate) fn paint_theme_dissolve(ctx: &egui::Context) {
+    let Some(tr) = ctx.data(|d| d.get_temp::<ThemeDissolve>(theme_dissolve_id())) else {
+        return;
+    };
+    let now = ctx.input(|i| i.time);
+    let raw = ((now - tr.started_at) / tr.duration) as f32;
+    if raw >= 1.0 || motion::reduced() {
+        ctx.data_mut(|d| d.remove_temp::<ThemeDissolve>(theme_dissolve_id()));
+        return;
+    }
+    ctx.request_repaint();
+    let alpha =
+        ((1.0 - motion::ease_out_cubic(raw.clamp(0.0, 1.0))) * tr.peak_alpha).clamp(0.0, 1.0);
+    if alpha <= 0.005 {
+        return;
+    }
+    let screen = ctx.content_rect();
+    let painter = ctx.layer_painter(theme_dissolve_layer());
+    painter.rect_filled(screen, 0.0, tr.old_bg.gamma_multiply(alpha));
+}
+
+// ============================================================================
 // 零深拷贝图形平移与透明度调节
 // ============================================================================
 

@@ -320,37 +320,41 @@ impl App {
             });
         });
 
-        // 第二行：状态就是筛选。只显示有东西的状态。
+        // 第二行：状态就是筛选，用滑行分段胶囊统一交互语言。只显示有东西的状态。
         if !entries_all.is_empty() {
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                for (filter, count, tone) in [
-                    (StatusFilter::All, entries_all.len(), None),
-                    (StatusFilter::Enabled, enabled, None),
-                    (StatusFilter::Disabled, disabled, Some(t::warn())),
-                    (StatusFilter::Updates, updates.len(), Some(t::accent())),
-                    (
-                        StatusFilter::Duplicates,
-                        duplicate_rank.len(),
-                        Some(t::warn()),
-                    ),
-                ] {
-                    let show = match filter {
-                        StatusFilter::All => true,
-                        StatusFilter::Enabled | StatusFilter::Disabled => disabled > 0,
-                        _ => count > 0,
-                    };
-                    if !show && status != filter {
-                        continue;
+                segmented_bar(ui, "library_status", |ui| {
+                    for (filter, count, tone) in [
+                        (StatusFilter::All, entries_all.len(), None),
+                        (StatusFilter::Enabled, enabled, None),
+                        (StatusFilter::Disabled, disabled, Some(t::warn())),
+                        (StatusFilter::Updates, updates.len(), Some(t::accent())),
+                        (
+                            StatusFilter::Duplicates,
+                            duplicate_rank.len(),
+                            Some(t::warn()),
+                        ),
+                    ] {
+                        let show = match filter {
+                            StatusFilter::All => true,
+                            StatusFilter::Enabled | StatusFilter::Disabled => disabled > 0,
+                            _ => count > 0,
+                        };
+                        if !show && status != filter {
+                            continue;
+                        }
+                        if content_tab_toned(ui, filter.label(), count, status == filter, tone)
+                            .clicked()
+                        {
+                            wanted_status = Some(if status == filter {
+                                StatusFilter::All
+                            } else {
+                                filter
+                            });
+                        }
                     }
-                    if status_chip(ui, filter.label(), count, status == filter, tone).clicked() {
-                        wanted_status = Some(if status == filter {
-                            StatusFilter::All
-                        } else {
-                            filter
-                        });
-                    }
-                }
+                });
                 if filtered {
                     inline_dot(ui);
                     ui.label(
@@ -549,48 +553,66 @@ impl App {
                     });
             } else {
                 ui.add_space(12.0);
-                egui::Frame::new()
-                    .fill(t::surface())
-                    .stroke(egui::Stroke::new(1.0, t::hairline()))
-                    .corner_radius(motion::R_CARD)
-                    .inner_margin(egui::Margin::symmetric(6, 5))
-                    .show(ui, |ui| {
-                        for (index, entry) in entries.iter().enumerate() {
-                            let size = entry.size.or_else(|| content_size(&game_dir, kind, entry));
-                            let candidate = updates.iter().find(|c| c.entry.file == entry.file);
-                            let confirming =
-                                self.content.delete_confirm.as_deref() == Some(entry.file.as_str());
-                            let action = installed_row(
-                                ui,
-                                entry,
-                                size,
-                                candidate.map(|c| c.latest.version_number.as_str()),
-                                confirming,
-                                self.content.recent.contains(&entry.file),
-                                index + 1 == entries.len(),
-                            );
-                            if let Some(enabled) = action.toggle {
-                                toggles.push((entry.clone(), enabled));
-                            }
-                            if action.reveal {
-                                reveal = Some(installed::path_of(&game_dir, entry));
-                            }
-                            if action.ask_delete {
-                                self.content.delete_confirm = Some(entry.file.clone());
-                            }
-                            if action.cancel_delete {
-                                self.content.delete_confirm = None;
-                            }
-                            if action.delete {
-                                deletes.push(entry.clone());
-                            }
-                            if action.update
-                                && let Some(candidate) = candidate
-                            {
-                                update_one = Some(candidate.clone());
-                            }
-                        }
-                    });
+                let list_stage = ui.available_rect_before_wrap();
+                let filter_key = self.content.status as u64;
+                transition::run_region(
+                    ui,
+                    egui::Id::unique("cairn_installed_filter_stage"),
+                    filter_key,
+                    list_stage,
+                    |from, to| {
+                        let sign = if to >= from { 1.0 } else { -1.0 };
+                        (egui::vec2(sign, 0.0), transition::Spec::SUB_TAB)
+                    },
+                    |ui| {
+                        let card_resp = egui::Frame::new()
+                            .fill(t::surface())
+                            .stroke(egui::Stroke::new(1.0, t::hairline()))
+                            .corner_radius(motion::R_CARD)
+                            .inner_margin(egui::Margin::symmetric(6, 5))
+                            .show(ui, |ui| {
+                                for (index, entry) in entries.iter().enumerate() {
+                                    let size =
+                                        entry.size.or_else(|| content_size(&game_dir, kind, entry));
+                                    let candidate =
+                                        updates.iter().find(|c| c.entry.file == entry.file);
+                                    let confirming = self.content.delete_confirm.as_deref()
+                                        == Some(entry.file.as_str());
+                                    let action = installed_row(
+                                        ui,
+                                        entry,
+                                        size,
+                                        candidate.map(|c| c.latest.version_number.as_str()),
+                                        confirming,
+                                        self.content.recent.contains(&entry.file),
+                                        index + 1 == entries.len(),
+                                    );
+                                    if let Some(enabled) = action.toggle {
+                                        toggles.push((entry.clone(), enabled));
+                                    }
+                                    if action.reveal {
+                                        reveal = Some(installed::path_of(&game_dir, entry));
+                                    }
+                                    if action.ask_delete {
+                                        self.content.delete_confirm = Some(entry.file.clone());
+                                    }
+                                    if action.cancel_delete {
+                                        self.content.delete_confirm = None;
+                                    }
+                                    if action.delete {
+                                        deletes.push(entry.clone());
+                                    }
+                                    if action.update
+                                        && let Some(candidate) = candidate
+                                    {
+                                        update_one = Some(candidate.clone());
+                                    }
+                                }
+                            })
+                            .response;
+                        motion::rim_top(ui.painter(), card_resp.rect, motion::R_CARD);
+                    },
+                );
             }
         }
 
@@ -797,8 +819,10 @@ pub(crate) fn installed_row(
     let mut action = RowAction::default();
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 58.0), egui::Sense::hover());
-    if response.hovered() {
-        ui.painter().rect_filled(rect, motion::R, t::wash());
+    let hover = motion::hover_amount(ui, response.id.with("inst_row_h"), response.hovered());
+    if hover > 0.0 {
+        ui.painter()
+            .rect_filled(rect, motion::R, t::tint(t::wash(), 0.78 * hover));
     }
     let inner = rect.shrink2(egui::vec2(12.0, 6.0));
     let mut child = ui.new_child(
@@ -919,52 +943,4 @@ pub(crate) fn installed_row(
         );
     }
     action
-}
-
-/// 状态筛选胶囊：「已禁用 3」。有颜色的数字提醒这里有事，点了就只看这些。
-pub(crate) fn status_chip(
-    ui: &mut egui::Ui,
-    label: &str,
-    count: usize,
-    selected: bool,
-    tone: Option<egui::Color32>,
-) -> egui::Response {
-    let (fill, border) = if selected {
-        (t::wash(), t::control())
-    } else {
-        (egui::Color32::TRANSPARENT, t::hairline())
-    };
-    let mut job = egui::text::LayoutJob::default();
-    job.append(
-        label,
-        0.0,
-        egui::TextFormat::simple(
-            egui::FontId::proportional(13.0),
-            if selected { t::ink() } else { t::sub() },
-        ),
-    );
-    job.append(
-        &count.to_string(),
-        6.0,
-        egui::TextFormat::simple(
-            egui::FontId::new(13.0, bold_family()),
-            tone.filter(|_| count > 0)
-                .unwrap_or(if selected { t::ink() } else { t::sub() }),
-        ),
-    );
-    let response = ui.add(
-        egui::Button::new(job)
-            .fill(fill)
-            .stroke(egui::Stroke::new(1.0, border))
-            .corner_radius(motion::R)
-            .min_size(egui::vec2(0.0, 28.0)),
-    );
-    if response.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-    response.on_hover_text(if selected {
-        "再点一次看全部"
-    } else {
-        "只看这些"
-    })
 }

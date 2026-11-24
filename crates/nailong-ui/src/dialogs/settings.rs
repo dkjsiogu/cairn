@@ -138,11 +138,14 @@ impl App {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("回收器").size(13.0).color(t::sub()));
-                    for gc in tuning::GcChoice::ALL {
-                        if chip(ui, gc.label(), self.prefs.gc == gc).clicked() {
-                            self.prefs.gc = gc;
+                    ui.add_space(4.0);
+                    segmented_bar(ui, "settings_gc", |ui| {
+                        for gc in tuning::GcChoice::ALL {
+                            if content_tab(ui, gc.label(), 0, self.prefs.gc == gc).clicked() {
+                                self.prefs.gc = gc;
+                            }
                         }
-                    }
+                    });
                 });
                 let (Some(row), Some(plan)) = (row, plan) else {
                     return;
@@ -469,9 +472,10 @@ impl App {
                                 }
                             }
                             if let Some(target) = active_tab_rect {
-                                let pill = motion::spring_rect(
+                                let pill = motion::spring_rect_on_key(
                                     ui.ctx(),
                                     egui::Id::unique("cairn_settings_tab_pill"),
+                                    self.settings_tab as u64,
                                     target,
                                 );
                                 ui.painter().set(
@@ -695,17 +699,18 @@ impl App {
 
     /// 「启动器」：外观、缩放、动效、截图、更新和下载源。
     fn settings_launcher(&mut self, ui: &mut egui::Ui) {
+        let mut wanted_theme: Option<t::Preference> = None;
         settings_card(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("外观").size(13.0).color(t::sub()));
                 ui.add_space(8.0);
-                for pref in t::Preference::ALL {
-                    if chip(ui, pref.label(), self.prefs.theme == pref).clicked() {
-                        self.prefs.theme = pref;
-                        pref.apply(ui.ctx());
-                        self.save_ui_config();
+                segmented_bar(ui, "settings_theme", |ui| {
+                    for pref in t::Preference::ALL {
+                        if content_tab(ui, pref.label(), 0, self.prefs.theme == pref).clicked() {
+                            wanted_theme = Some(pref);
+                        }
                     }
-                }
+                });
             });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
@@ -735,6 +740,9 @@ impl App {
                 self.save_ui_config();
             }
         });
+        if let Some(pref) = wanted_theme {
+            self.switch_theme(ui.ctx(), pref);
+        }
         ui.add_space(10.0);
         settings_card(ui, |ui| {
             if toggle_row(
@@ -901,7 +909,7 @@ impl App {
                     .into_iter()
                     .enumerate()
                     {
-                        ui.label(egui::RichText::new(keys).size(13.0).monospace());
+                        kbd_badge(ui, keys);
                         ui.label(egui::RichText::new(what).size(13.0).color(t::sub()));
                         if index % 2 == 1 {
                             ui.end_row();
@@ -960,9 +968,9 @@ impl SettingsTab {
     }
 }
 
-/// 设置里的一块：`bg` 底、细边、`R_CARD` 圆角，占满这一栏的宽度。
+/// 设置里的一块：`bg` 底、细边、`R_CARD` 圆角，顶部 1px 轻棱线，占满这一栏的宽度。
 pub(crate) fn settings_card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
-    egui::Frame::new()
+    let resp = egui::Frame::new()
         .fill(t::bg())
         .stroke(egui::Stroke::new(1.0, t::hairline()))
         .corner_radius(motion::R_CARD)
@@ -970,7 +978,9 @@ pub(crate) fn settings_card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) 
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             add(ui);
-        });
+        })
+        .response;
+    motion::rim_top(ui.painter(), resp.rect, motion::R_CARD);
 }
 
 /// 一行开关：左边开关和名字，右边一句说明。整行都能点；返回是否点了。
@@ -1020,12 +1030,14 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("下载源").size(13.0).color(t::sub()));
                     ui.add_space(8.0);
-                    for (key, label, _) in SOURCES {
-                        if chip(ui, label, self.prefs.source == key).clicked() {
-                            self.prefs.source = key.to_string();
-                            self.save_ui_config();
+                    segmented_bar(ui, "settings_source", |ui| {
+                        for (key, label, _) in SOURCES {
+                            if content_tab(ui, label, 0, self.prefs.source == key).clicked() {
+                                self.prefs.source = key.to_string();
+                                self.save_ui_config();
+                            }
                         }
-                    }
+                    });
                 });
                 ui.add_space(4.0);
                 let hint = SOURCES

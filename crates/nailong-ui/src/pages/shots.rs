@@ -68,6 +68,8 @@ struct Viewer {
     pan: egui::Vec2,
     /// 「移到回收站」点了一次，等确认。
     trash_armed: bool,
+    /// 翻页交叉滑行快照：(上一张纹理, 方向 ±1, 切换时间)。
+    slide_from: Option<(egui::TextureHandle, f32, f64)>,
 }
 
 /// 看大图时做完的事，交回给 App 处理（要写提示、刷新列表）。
@@ -381,17 +383,31 @@ impl Shots {
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
             trash_armed: false,
+            slide_from: None,
         });
         let _ = self.jobs.send(Job::Full(first, Purpose::View));
     }
 
-    fn show_pos(&mut self, pos: usize) {
+    fn show_pos(&mut self, pos: usize, now: f64) {
         let Some(viewer) = &mut self.viewer else {
             return;
         };
         if pos == viewer.pos || pos >= viewer.seq.len() {
             return;
         }
+        let dir = if pos > viewer.pos { 1.0 } else { -1.0 };
+        let prev_tex = viewer
+            .full
+            .as_ref()
+            .map(|(_, tex, _)| tex.clone())
+            .or_else(|| {
+                let prev_path = viewer.seq.get(viewer.pos)?;
+                match self.thumbs.get(prev_path) {
+                    Some(Thumb::Ready(tex, _)) => Some(tex.clone()),
+                    _ => None,
+                }
+            });
+        viewer.slide_from = prev_tex.map(|tex| (tex, dir, now));
         viewer.pos = pos;
         viewer.full = None;
         viewer.copied_at = None;
@@ -684,6 +700,18 @@ impl Shots {
         let mut zoom = viewer.zoom;
         let mut pan = viewer.pan;
         let trash_armed = viewer.trash_armed;
+        let slide_anim = viewer.slide_from.as_ref().and_then(|(tex, dir, at)| {
+            if reduced {
+                return None;
+            }
+            let raw = ((now - at) / 0.20) as f32;
+            if raw >= 1.0 {
+                None
+            } else {
+                ctx.request_repaint();
+                Some((tex.clone(), *dir, ease(raw)))
+            }
+        });
         let strip_paths: Vec<PathBuf> = {
             let start = pos.saturating_sub(4);
             let end = (start + 9).min(count);
@@ -873,12 +901,42 @@ impl Shots {
                     egui::pos2(screen.right(), screen.bottom() - 80.0),
                 );
                 let painter = ui.painter().with_clip_rect(clip);
+                let (in_offset, in_alpha) = match &slide_anim {
+                    Some((prev_tex, dir, t)) => {
+                        let out_alpha = alpha * (1.0 - *t);
+                        let prev_nat = prev_tex.size_vec2();
+                        let prev_fit = (area.width() / prev_nat.x).min(area.height() / prev_nat.y);
+                        let prev_rect = egui::Rect::from_center_size(
+                            area.center() - egui::vec2(*dir * 32.0 * *t, 0.0),
+                            prev_nat * prev_fit,
+                        );
+                        if out_alpha > 0.01 {
+                            painter.add(
+                                egui::epaint::RectShape::filled(
+                                    prev_rect,
+                                    2,
+                                    egui::Color32::WHITE.gamma_multiply(out_alpha),
+                                )
+                                .with_texture(
+                                    prev_tex.id(),
+                                    egui::Rect::from_min_max(
+                                        egui::pos2(0.0, 0.0),
+                                        egui::pos2(1.0, 1.0),
+                                    ),
+                                ),
+                            );
+                        }
+                        (egui::vec2(*dir * 36.0 * (1.0 - *t), 0.0), alpha * *t)
+                    }
+                    None => (egui::Vec2::ZERO, alpha),
+                };
+                let draw_rect = rect.translate(in_offset);
                 if let Some(texture) = &texture {
                     painter.add(
                         egui::epaint::RectShape::filled(
-                            rect,
+                            draw_rect,
                             2,
-                            egui::Color32::WHITE.gamma_multiply(alpha),
+                            egui::Color32::WHITE.gamma_multiply(in_alpha),
                         )
                         .with_texture(
                             texture.id(),
@@ -886,7 +944,11 @@ impl Shots {
                         ),
                     );
                 } else {
-                    painter.rect_filled(rect, 2, t::tint(egui::Color32::from_gray(40), alpha));
+                    painter.rect_filled(
+                        draw_rect,
+                        2,
+                        t::tint(egui::Color32::from_gray(40), in_alpha),
+                    );
                 }
                 if resolution.is_none() {
                     painter.text(
@@ -1009,6 +1071,7 @@ impl Shots {
                 let gap = 6.0;
                 let total_w = strip_shots.len() as f32 * (thumb.x + gap) - gap + 12.0;
                 let mut x = screen.center().x - total_w / 2.0;
+                let mut active_film_rect = None;
                 for (s, texture) in strip_shots.iter().zip(&strip_textures) {
                     let current = s.path == shot.path;
                     let size = if current {
@@ -1047,12 +1110,7 @@ impl Shots {
                         }
                     }
                     if current {
-                        ui.painter().rect_stroke(
-                            r.expand(2.0),
-                            3,
-                            egui::Stroke::new(2.0, t::accent().gamma_multiply(alpha)),
-                            egui::StrokeKind::Inside,
-                        );
+                        active_film_rect = Some(r.expand(2.0));
                     }
                     if response
                         .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -1060,6 +1118,20 @@ impl Shots {
                     {
                         jump_path = Some(s.path.clone());
                     }
+                }
+                if let Some(target) = active_film_rect {
+                    let ring = motion::spring_rect_on_key(
+                        ui.ctx(),
+                        egui::Id::unique("cairn_shot_film_ring"),
+                        transition::hash_u64(&shot.path),
+                        target,
+                    );
+                    ui.painter().rect_stroke(
+                        ring,
+                        3,
+                        egui::Stroke::new(2.0, t::accent().gamma_multiply(alpha)),
+                        egui::StrokeKind::Inside,
+                    );
                 }
             });
         let keys = ctx.input(|i| {
@@ -1132,11 +1204,15 @@ impl Shots {
         }
         let jump = jump_path.and_then(|p| self.viewer.as_ref()?.seq.iter().position(|q| q == &p));
         if let Some(target) = jump {
-            self.show_pos(target);
+            self.show_pos(target, now);
             ctx.request_repaint();
         } else if step != 0 {
-            self.show_pos((pos as i32 + step) as usize);
+            self.show_pos((pos as i32 + step) as usize, now);
             ctx.request_repaint();
+        } else if slide_anim.is_none()
+            && let Some(viewer) = &mut self.viewer
+        {
+            viewer.slide_from = None;
         }
         if close && let Some(viewer) = &mut self.viewer {
             if viewer.closing_at.is_none() {

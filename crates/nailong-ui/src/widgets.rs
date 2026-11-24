@@ -69,8 +69,9 @@ pub(crate) fn kbd_badge(ui: &mut egui::Ui, text: &str) {
     );
 }
 
-/// 分段切换容器：凹陷轨道底色 + 细边，内部选中胶囊随临界阻尼弹簧丝滑滑动变形。
-pub(crate) fn segmented_bar(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
+/// 分段切换容器：凹陷轨道底色 + 细边，内部选中胶囊随键值门控临界阻尼弹簧丝滑滑动变形，
+/// 顶部带 1px 轻高光棱线，每个分段栏使用独立 `id_salt` 防止同页多栏互相串位。
+pub(crate) fn segmented_bar(ui: &mut egui::Ui, id_salt: &str, add: impl FnOnce(&mut egui::Ui)) {
     let active_key = egui::Id::unique("cairn_seg_active_capture");
     egui::Frame::new()
         .fill(t::rail())
@@ -78,20 +79,21 @@ pub(crate) fn segmented_bar(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) 
         .corner_radius(motion::R + 2)
         .inner_margin(egui::Margin::same(3))
         .show(ui, |ui| {
-            let bar_id = ui.scope_id().with("cairn_seg_spring");
+            let bar_id = egui::Id::unique(("cairn_seg_spring", id_salt));
             let pill_slot = ui.painter().add(egui::Shape::Noop);
+            let rim_slot = ui.painter().add(egui::Shape::Noop);
             ui.ctx()
-                .data_mut(|d| d.insert_temp::<Option<egui::Rect>>(active_key, None));
+                .data_mut(|d| d.insert_temp::<Option<(u64, egui::Rect)>>(active_key, None));
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 add(ui);
             });
-            if let Some(target) = ui
+            if let Some((key, target)) = ui
                 .ctx()
-                .data(|d| d.get_temp::<Option<egui::Rect>>(active_key))
+                .data(|d| d.get_temp::<Option<(u64, egui::Rect)>>(active_key))
                 .flatten()
             {
-                let pill = motion::spring_rect(ui.ctx(), bar_id, target);
+                let pill = motion::spring_rect_on_key(ui.ctx(), bar_id, key, target);
                 ui.painter().set(
                     pill_slot,
                     egui::epaint::RectShape::new(
@@ -102,6 +104,19 @@ pub(crate) fn segmented_bar(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) 
                         egui::StrokeKind::Inside,
                     ),
                 );
+                let inset = f32::from(motion::R);
+                if pill.width() > inset * 2.0 {
+                    ui.painter().set(
+                        rim_slot,
+                        egui::Shape::line_segment(
+                            [
+                                egui::pos2(pill.left() + inset, pill.top() + 1.0),
+                                egui::pos2(pill.right() - inset, pill.top() + 1.0),
+                            ],
+                            egui::Stroke::new(1.0, t::rim()),
+                        ),
+                    );
+                }
             }
         });
 }
@@ -112,6 +127,17 @@ pub(crate) fn content_tab(
     label: &str,
     count: usize,
     active: bool,
+) -> egui::Response {
+    content_tab_toned(ui, label, count, active, None)
+}
+
+/// 带自定义数量徽章色调的分段选项（用于已安装页筛选胶囊：禁用/更新/重复状态数字更醒目）。
+pub(crate) fn content_tab_toned(
+    ui: &mut egui::Ui,
+    label: &str,
+    count: usize,
+    active: bool,
+    badge_tone: Option<egui::Color32>,
 ) -> egui::Response {
     let font = egui::FontId::new(
         13.5,
@@ -125,24 +151,23 @@ pub(crate) fn content_tab(
     let galley = ui
         .painter()
         .layout_no_wrap(label.to_owned(), font, text_color);
+    let tone = badge_tone.unwrap_or_else(|| if active { t::accent() } else { t::dim() });
     let badge_galley = (count > 0).then(|| {
-        ui.painter().layout_no_wrap(
-            count.to_string(),
-            egui::FontId::proportional(11.5),
-            if active { t::accent() } else { t::dim() },
-        )
+        ui.painter()
+            .layout_no_wrap(count.to_string(), egui::FontId::proportional(11.5), tone)
     });
     let badge_w = badge_galley
         .as_ref()
         .map_or(0.0, |g| (g.size().x + 10.0).max(20.0) + 6.0);
-    let w = (galley.size().x + badge_w + 22.0).max(58.0);
+    let w = (galley.size().x + badge_w + 22.0).max(54.0);
     let (rect, response) = ui.allocate_exact_size(egui::vec2(w, 28.0), egui::Sense::click());
     let hover = motion::hover_amount(ui, response.id.with("seg_hover"), response.hovered());
     if active {
+        let key = transition::hash_u64(&label);
         ui.ctx().data_mut(|d| {
-            d.insert_temp::<Option<egui::Rect>>(
+            d.insert_temp::<Option<(u64, egui::Rect)>>(
                 egui::Id::unique("cairn_seg_active_capture"),
-                Some(rect),
+                Some((key, rect)),
             )
         });
     } else if hover > 0.0 {
@@ -167,24 +192,173 @@ pub(crate) fn content_tab(
             egui::pos2(x + content_w - bw * 0.5, rect.center().y),
             egui::vec2(bw, 17.0),
         );
-        ui.painter().rect_filled(
-            br,
-            8,
-            if active {
-                t::tint(t::accent(), 0.16)
-            } else {
-                t::tint(t::wash(), 0.85)
-            },
-        );
+        let pill_fill = if let Some(custom) = badge_tone {
+            t::tint(custom, if active { 0.20 } else { 0.13 })
+        } else if active {
+            t::tint(t::accent(), 0.16)
+        } else {
+            t::tint(t::wash(), 0.85)
+        };
+        ui.painter().rect_filled(br, 8, pill_fill);
         ui.painter().galley(
             egui::pos2(
                 br.center().x - bg.size().x * 0.5,
                 br.center().y - bg.size().y * 0.5,
             ),
             bg,
-            if active { t::accent() } else { t::dim() },
+            tone,
         );
     }
+    response
+}
+
+/// 精巧的 1.35px 单色矢量微图标，与侧边栏线宽严格一致，用于摘要卡与总览数据条。
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MiniGlyph {
+    World,
+    Blocks,
+    Shield,
+}
+
+pub(crate) fn mini_glyph(
+    painter: &egui::Painter,
+    c: egui::Pos2,
+    glyph: MiniGlyph,
+    color: egui::Color32,
+) {
+    let stroke = egui::Stroke::new(1.25, color);
+    let p = |x: f32, y: f32| c + egui::vec2(x, y);
+    match glyph {
+        MiniGlyph::World => {
+            painter.circle_stroke(c, 5.2, stroke);
+            painter.line_segment([p(-5.2, 0.0), p(5.2, 0.0)], stroke);
+            painter.add(egui::Shape::ellipse_stroke(c, egui::vec2(2.3, 5.2), stroke));
+        }
+        MiniGlyph::Blocks => {
+            for (x, y) in [(-4.8, -4.8), (0.8, -4.8), (-4.8, 0.8), (0.8, 0.8)] {
+                painter.rect_stroke(
+                    egui::Rect::from_min_size(p(x, y), egui::vec2(4.0, 4.0)),
+                    0.8,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+            }
+        }
+        MiniGlyph::Shield => {
+            painter.circle_stroke(c, 5.2, stroke);
+            painter.line_segment([c, p(0.0, -3.0)], stroke);
+            painter.line_segment([c, p(2.4, 1.4)], stroke);
+        }
+    }
+}
+
+/// 加载器的极简 1.35px 几何单色标识（用于安装页四选一卡片）。
+pub(crate) fn loader_glyph(
+    painter: &egui::Painter,
+    c: egui::Pos2,
+    kind: LoaderKind,
+    color: egui::Color32,
+) {
+    let stroke = egui::Stroke::new(1.35, color);
+    let p = |x: f32, y: f32| c + egui::vec2(x, y);
+    match kind {
+        LoaderKind::Vanilla => {
+            // 极简等轴立方体轮廓
+            painter.add(egui::Shape::closed_line(
+                vec![
+                    p(0.0, -6.2),
+                    p(5.6, -3.0),
+                    p(5.6, 3.0),
+                    p(0.0, 6.2),
+                    p(-5.6, 3.0),
+                    p(-5.6, -3.0),
+                ],
+                stroke,
+            ));
+            painter.line_segment([p(-5.6, -3.0), p(0.0, 0.2)], stroke);
+            painter.line_segment([p(5.6, -3.0), p(0.0, 0.2)], stroke);
+            painter.line_segment([p(0.0, 0.2), p(0.0, 6.2)], stroke);
+        }
+        LoaderKind::Fabric => {
+            // 极简编织卷轴线条
+            painter.rect_stroke(
+                egui::Rect::from_center_size(c, egui::vec2(10.5, 11.5)),
+                2.0,
+                stroke,
+                egui::StrokeKind::Middle,
+            );
+            painter.line_segment([p(-2.6, -2.2), p(2.6, -2.2)], stroke);
+            painter.line_segment([p(-2.6, 0.5), p(2.6, 0.5)], stroke);
+            painter.line_segment([p(-2.6, 3.2), p(1.0, 3.2)], stroke);
+        }
+        LoaderKind::NeoForge => {
+            // 极简六角护盾 + 中心竖脊
+            painter.add(egui::Shape::closed_line(
+                vec![
+                    p(0.0, -6.2),
+                    p(5.4, -3.2),
+                    p(4.8, 2.4),
+                    p(0.0, 6.2),
+                    p(-4.8, 2.4),
+                    p(-5.4, -3.2),
+                ],
+                stroke,
+            ));
+            painter.line_segment([p(0.0, -3.2), p(0.0, 3.2)], stroke);
+            painter.line_segment([p(-2.6, -0.4), p(2.6, -0.4)], stroke);
+        }
+        LoaderKind::Forge => {
+            // 极简铁砧轮廓
+            painter.add(egui::Shape::closed_line(
+                vec![
+                    p(-5.8, -3.6),
+                    p(5.8, -3.6),
+                    p(4.2, -0.4),
+                    p(2.2, -0.4),
+                    p(3.6, 4.4),
+                    p(-3.6, 4.4),
+                    p(-2.2, -0.4),
+                    p(-4.6, -0.4),
+                ],
+                stroke,
+            ));
+        }
+    }
+}
+
+/// 带矢量小三角的紧凑雾蓝按钮（替代 Unicode `▶`，跨平台像素完全一致）。
+pub(crate) fn small_accent_play(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    let font = egui::FontId::new(12.5, bold_family());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font, t::accent());
+    let w = (galley.size().x + 30.0).max(64.0);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(w, 26.0), egui::Sense::click());
+    let hover = motion::hover_amount(ui, response.id.with("splay_hover"), response.hovered());
+    ui.painter().rect(
+        rect,
+        motion::R,
+        t::tint(t::accent(), 0.13 + 0.10 * hover),
+        egui::Stroke::new(1.0, t::tint(t::accent(), 0.58 + 0.28 * hover)),
+        egui::StrokeKind::Inside,
+    );
+    let content_w = 8.0 + 5.0 + galley.size().x;
+    let left = rect.center().x - content_w * 0.5;
+    let c = egui::pos2(left + 3.5, rect.center().y);
+    ui.painter().add(egui::Shape::convex_polygon(
+        vec![
+            c + egui::vec2(-2.5, -4.0),
+            c + egui::vec2(4.2, 0.0),
+            c + egui::vec2(-2.5, 4.0),
+        ],
+        t::accent(),
+        egui::Stroke::NONE,
+    ));
+    ui.painter().galley(
+        egui::pos2(left + 13.0, rect.center().y - galley.size().y * 0.5),
+        galley,
+        t::accent(),
+    );
     response
 }
 

@@ -483,45 +483,50 @@ impl App {
         let mut installs = Vec::new();
         let mut more: Option<mods::Sort> = None;
         let mut order = 0usize;
-        for shelf in &shelves {
-            ui.add_space(16.0);
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(shelf.title)
-                        .size(15.0)
-                        .family(bold_family()),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new("更多 ›").size(13.0).color(t::sub()),
-                            )
-                            .fill(t::surface())
-                            .stroke(egui::Stroke::new(1.0, t::hairline()))
-                            .corner_radius(motion::R)
-                            .min_size(egui::vec2(64.0, 24.0)),
-                        )
-                        .clicked()
-                    {
-                        more = Some(shelf.sort);
+        let browse_stage = ui.available_rect_before_wrap();
+        let browse_key = transition::hash_u64(&(
+            self.content.category.map(|c| (c.modrinth, c.curseforge)),
+            self.content.source_filter,
+        ));
+        transition::run_region(
+            ui,
+            egui::Id::unique("cairn_discover_shelves_stage"),
+            browse_key,
+            browse_stage,
+            |_, _| (egui::vec2(1.0, 0.0), transition::Spec::SUB_TAB),
+            |ui| {
+                for shelf in &shelves {
+                    ui.add_space(16.0);
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(shelf.title)
+                                .size(15.0)
+                                .family(bold_family()),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if action_link(ui, "更多 ›").clicked() {
+                                more = Some(shelf.sort);
+                            }
+                        });
+                    });
+                    ui.add_space(8.0);
+                    for row in shelf.projects.chunks(per_row) {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 10.0;
+                            for project in row {
+                                if let Some(chosen) =
+                                    self.project_card(ui, project, card_width, order)
+                                {
+                                    installs.push(chosen);
+                                }
+                                order += 1;
+                            }
+                        });
+                        ui.add_space(10.0);
                     }
-                });
-            });
-            ui.add_space(8.0);
-            for row in shelf.projects.chunks(per_row) {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 10.0;
-                    for project in row {
-                        if let Some(chosen) = self.project_card(ui, project, card_width, order) {
-                            installs.push(chosen);
-                        }
-                        order += 1;
-                    }
-                });
-                ui.add_space(10.0);
-            }
-        }
+                }
+            },
+        );
         self.content.browse = shelves;
         if let Some(sort) = more {
             self.start_shelf(sort);
@@ -736,6 +741,7 @@ impl App {
             ),
             egui::StrokeKind::Inside,
         );
+        motion::rim_top(ui.painter(), paint, motion::R_CARD);
 
         let inner = paint.shrink2(egui::vec2(14.0, 12.0));
         let mut install = None;
@@ -768,11 +774,12 @@ impl App {
                 );
             } else {
                 let (icon_rect, _) = ui.allocate_exact_size(icon_size, egui::Sense::hover());
+                let tone = t::monogram_tone(&project.name);
                 ui.painter().rect(
                     icon_rect,
                     motion::R,
-                    t::elevated(),
-                    egui::Stroke::new(1.0, t::hairline()),
+                    t::tint(tone, 0.13),
+                    egui::Stroke::new(1.0, t::tint(tone, 0.30)),
                     egui::StrokeKind::Inside,
                 );
                 let letter = project
@@ -786,7 +793,7 @@ impl App {
                     egui::Align2::CENTER_CENTER,
                     letter,
                     egui::FontId::new(16.0, bold_family()),
-                    t::sub(),
+                    tone,
                 );
             }
             ui.add(

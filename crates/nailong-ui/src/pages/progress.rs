@@ -28,11 +28,14 @@ impl App {
         // 总进度：几步同时进行时加在一起算，不会每一步都从 0 开始。
         let overall = activity.overall();
         let indeterminate = overall.is_none();
-        let shown = ui.ctx().animate_value_with_time(
-            egui::Id::unique("progress_value"),
+        let shown = motion::spring(
+            ui.ctx(),
+            egui::Id::unique("cairn_progress_value"),
             overall.unwrap_or(0.0),
-            0.30,
-        );
+            85.0,
+            19.0,
+        )
+        .clamp(0.0, 1.0);
         let ring_h: f32 = if compact_h { 140.0 } else { 190.0 };
         let (files_done, files_total) = activity.files();
         let counts = if files_total > 0 {
@@ -153,7 +156,7 @@ impl App {
                 // 步骤和刚下载的文件。
                 if !bench {
                     ui.add_space(14.0);
-                    egui::Frame::new()
+                    let card_resp = egui::Frame::new()
                         .fill(t::surface())
                         .stroke(egui::Stroke::new(1.0, t::hairline()))
                         .corner_radius(motion::R_CARD)
@@ -280,7 +283,9 @@ impl App {
                                 ui.add_space(10.0);
                                 ui.vertical(files);
                             }
-                        });
+                        })
+                        .response;
+                    motion::rim_top(ui.painter(), card_resp.rect, motion::R_CARD);
                 }
 
                 ui.add_space(if compact_h { 12.0 } else { 18.0 });

@@ -149,6 +149,70 @@ pub fn tint(color: Color32, alpha: f32) -> Color32 {
     color.gamma_multiply(alpha.clamp(0.0, 1.0))
 }
 
+/// 加载器的低饱和哑光语义色：严格遵守雾蓝克制色调与 WCAG AA 对比度，仅用于小圆点、微徽章与字母占位底色。
+pub fn loader_tone(name: &str) -> Color32 {
+    let light = is_light();
+    match name.to_lowercase().as_str() {
+        "neoforge" => {
+            if light {
+                rgb(0x8A, 0x5A, 0x2B)
+            } else {
+                rgb(0xD2, 0xA2, 0x74)
+            }
+        }
+        "fabric" => {
+            if light {
+                rgb(0x6E, 0x62, 0x35)
+            } else {
+                rgb(0xC6, 0xB8, 0x8E)
+            }
+        }
+        "forge" => {
+            if light {
+                rgb(0x46, 0x5E, 0x7E)
+            } else {
+                rgb(0x94, 0xA8, 0xC4)
+            }
+        }
+        "quilt" => {
+            if light {
+                rgb(0x67, 0x4E, 0x88)
+            } else {
+                rgb(0xB3, 0x9B, 0xCE)
+            }
+        }
+        "vanilla" | "原版" => ok(),
+        _ => accent(),
+    }
+}
+
+/// 发现页无图标项目首字母底块的克制哑光建筑色系（6 种低饱和色调，按名称稳定映射）。
+pub fn monogram_tone(seed: &str) -> Color32 {
+    let hash = seed.bytes().fold(2166136261u32, |acc, b| {
+        acc.wrapping_mul(16777619) ^ b as u32
+    });
+    let palette = if is_light() {
+        [
+            LIGHT.accent,
+            LIGHT.ok,
+            rgb(0x8A, 0x5A, 0x2B),
+            rgb(0x46, 0x5E, 0x7E),
+            rgb(0x67, 0x4E, 0x88),
+            rgb(0x3B, 0x6B, 0x6D),
+        ]
+    } else {
+        [
+            DARK.accent,
+            DARK.ok,
+            rgb(0xD2, 0xA2, 0x74),
+            rgb(0x94, 0xA8, 0xC4),
+            rgb(0xB3, 0x9B, 0xCE),
+            rgb(0x7C, 0xB2, 0xB5),
+        ]
+    };
+    palette[(hash as usize) % palette.len()]
+}
+
 /// 弹窗后面的遮罩。
 pub fn veil(alpha: f32) -> Color32 {
     let alpha = alpha.clamp(0.0, 1.0);
@@ -322,9 +386,15 @@ mod tests {
 
     #[test]
     fn both_palettes_meet_the_spec_contrast() {
-        for p in [DARK, LIGHT] {
+        for (p, light) in [(DARK, false), (LIGHT, true)] {
+            IS_LIGHT.store(light, Ordering::Relaxed);
             for text in [p.ink, p.sub, p.dim, p.accent, p.ok, p.warn, p.danger] {
                 assert!(contrast(text, p.bg) >= 4.5, "{text:?} on bg");
+            }
+            for loader in ["neoforge", "fabric", "forge", "quilt", "vanilla"] {
+                let c = loader_tone(loader);
+                assert!(contrast(c, p.bg) >= 4.5, "loader {loader} on bg");
+                assert!(contrast(c, p.surface) >= 4.5, "loader {loader} on surface");
             }
             for text in [p.ink, p.sub, p.dim] {
                 assert!(contrast(text, p.surface) >= 4.5, "{text:?} on surface");
@@ -332,6 +402,7 @@ mod tests {
             assert!(contrast(p.on_accent, p.accent) >= 4.5);
             assert!(contrast(p.control, p.bg) >= 3.0);
         }
+        IS_LIGHT.store(false, Ordering::Relaxed);
     }
 
     #[test]

@@ -368,7 +368,7 @@ impl App {
                 });
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
-                    segmented_bar(ui, |ui| {
+                    segmented_bar(ui, "gallery_tab", |ui| {
                         for (tab, label) in [
                             (GalleryTab::Overview, "总览"),
                             (GalleryTab::Time, "时间"),
@@ -541,7 +541,7 @@ impl App {
                             ),
                         ];
                         let (row, _) =
-                            ui.allocate_exact_size(egui::vec2(width, 68.0), egui::Sense::hover());
+                            ui.allocate_exact_size(egui::vec2(width, 72.0), egui::Sense::hover());
                         ui.painter().rect(
                             row,
                             motion::R_CARD,
@@ -549,22 +549,28 @@ impl App {
                             egui::Stroke::new(1.0, t::hairline()),
                             egui::StrokeKind::Inside,
                         );
+                        motion::rim_top(ui.painter(), row, motion::R_CARD);
                         let cell_w = width / cells.len() as f32;
                         for (i, (value, label, tab)) in cells.iter().enumerate() {
                             let rect = egui::Rect::from_min_size(
                                 egui::pos2(row.left() + i as f32 * cell_w, row.top()),
-                                egui::vec2(cell_w, 68.0),
+                                egui::vec2(cell_w, 72.0),
                             );
                             let response = ui.interact(
                                 rect,
                                 egui::Id::unique(("overview_cell", i)),
                                 egui::Sense::click(),
                             );
+                            let hover = motion::hover_amount(
+                                ui,
+                                response.id.with("ov_h"),
+                                response.hovered(),
+                            );
                             list_row_fill(ui, rect.shrink(4.0), false, &response);
                             if i > 0 {
                                 ui.painter().vline(
                                     rect.left(),
-                                    rect.y_range().shrink(12.0),
+                                    rect.y_range().shrink(13.0),
                                     egui::Stroke::new(1.0, t::hairline()),
                                 );
                             }
@@ -572,16 +578,28 @@ impl App {
                                 rect.left_top() + egui::vec2(16.0, 12.0),
                                 egui::Align2::LEFT_TOP,
                                 value,
-                                egui::FontId::new(20.0, light_family()),
-                                t::ink(),
+                                egui::FontId::new(22.0, light_family()),
+                                motion::mix(t::ink(), t::accent(), hover),
                             );
                             ui.painter().text(
-                                rect.left_top() + egui::vec2(16.0, 42.0),
+                                rect.left_top() + egui::vec2(16.0, 44.0),
                                 egui::Align2::LEFT_TOP,
                                 label,
                                 egui::FontId::proportional(12.5),
-                                t::dim(),
+                                motion::mix(t::dim(), t::sub(), hover),
                             );
+                            if hover > 0.02 {
+                                ui.painter().text(
+                                    egui::pos2(
+                                        rect.right() - 14.0 + hover * 2.5,
+                                        rect.top() + 14.0,
+                                    ),
+                                    egui::Align2::RIGHT_TOP,
+                                    "›",
+                                    egui::FontId::proportional(14.0),
+                                    t::tint(t::accent(), hover),
+                                );
+                            }
                             if response
                                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                                 .clicked()
@@ -1194,12 +1212,11 @@ fn month_bars(ui: &mut egui::Ui, list: &[Shot], width: f32) -> Option<(i32, u32)
             egui::pos2(column.center().x - slot * 0.22, column.top() + 58.0 - bar_h),
             egui::pos2(column.center().x + slot * 0.22, column.top() + 58.0),
         );
+        let hover = motion::hover_amount(ui, response.id.with("mb_h"), response.hovered());
         let color = if *count == 0 {
             t::hairline()
-        } else if response.hovered() {
-            t::accent()
         } else {
-            t::tint(t::accent(), 0.55)
+            motion::mix(t::tint(t::accent(), 0.55), t::accent(), hover)
         };
         ui.painter().rect_filled(bar, 2, color);
         let label = if *m == 1 {
@@ -1212,11 +1229,7 @@ fn month_bars(ui: &mut egui::Ui, list: &[Shot], width: f32) -> Option<(i32, u32)
             egui::Align2::CENTER_CENTER,
             label,
             egui::FontId::proportional(12.0),
-            if response.hovered() {
-                t::ink()
-            } else {
-                t::dim()
-            },
+            motion::mix(t::dim(), t::ink(), hover),
         );
         if *count > 0 {
             let response = response
@@ -1243,16 +1256,12 @@ fn person_chip(
             .layout_no_wrap(name.to_string(), egui::FontId::proportional(14.0), t::ink());
     let width = 52.0 + galley.size().x + 60.0;
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 44.0), egui::Sense::click());
-    let hovered = response.hovered();
+    let hover = motion::hover_amount(ui, response.id.with("pchip_h"), response.hovered());
     ui.painter().rect(
         rect,
         motion::R,
-        if hovered {
-            t::wash()
-        } else {
-            egui::Color32::TRANSPARENT
-        },
-        egui::Stroke::new(1.0, t::hairline()),
+        motion::mix(t::surface(), t::wash(), hover),
+        egui::Stroke::new(1.0, motion::mix(t::hairline(), t::control(), hover)),
         egui::StrokeKind::Inside,
     );
     let avatar = egui::Rect::from_min_size(

@@ -398,19 +398,27 @@ impl App {
                             .color(t::ink()),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new("＋").size(13.0).color(t::accent()),
-                                )
-                                .fill(t::bg())
-                                .stroke(egui::Stroke::new(1.0, t::hairline()))
-                                .corner_radius(motion::R)
-                                .min_size(egui::vec2(24.0, 22.0)),
-                            )
-                            .on_hover_text("安装新版本")
-                            .clicked()
-                        {
+                        let (plus_rect, plus_resp) =
+                            ui.allocate_exact_size(egui::vec2(26.0, 24.0), egui::Sense::click());
+                        let ph = motion::hover_amount(
+                            ui,
+                            plus_resp.id.with("plus_h"),
+                            plus_resp.hovered(),
+                        );
+                        ui.painter().rect(
+                            plus_rect,
+                            motion::R,
+                            motion::mix(t::surface(), t::wash(), ph),
+                            egui::Stroke::new(1.0, motion::mix(t::hairline(), t::accent(), ph)),
+                            egui::StrokeKind::Inside,
+                        );
+                        let c = plus_rect.center();
+                        let s = egui::Stroke::new(1.5, motion::mix(t::sub(), t::accent(), ph));
+                        ui.painter()
+                            .line_segment([c + egui::vec2(-4.0, 0.0), c + egui::vec2(4.0, 0.0)], s);
+                        ui.painter()
+                            .line_segment([c + egui::vec2(0.0, -4.0), c + egui::vec2(0.0, 4.0)], s);
+                        if plus_resp.on_hover_text("安装新版本").clicked() {
                             go_install = true;
                         }
                         ui.label(
@@ -449,6 +457,10 @@ impl App {
                                     .color(t::dim()),
                             );
                         }
+                        let ver_bg_slot = ui.painter().add(egui::Shape::Noop);
+                        let ver_bar_slot = ui.painter().add(egui::Shape::Noop);
+                        let mut active_ver_rect = None;
+                        let mut active_ver_key = 0u64;
                         for &row in &shown {
                             let active = selected.as_ref().is_some_and(|item| item.id == row.id);
                             let note =
@@ -469,6 +481,10 @@ impl App {
                                     }
                                 };
                             let response = version_row(ui, row, active, note);
+                            if active {
+                                active_ver_rect = Some(response.rect);
+                                active_ver_key = transition::hash_u64(&row.id);
+                            }
                             if response.clicked() {
                                 chosen = Some(row.clone());
                             }
@@ -511,6 +527,20 @@ impl App {
                                 }
                             });
                         }
+                        if let Some(target) = active_ver_rect {
+                            let pill = motion::spring_rect_on_key(
+                                ui.ctx(),
+                                egui::Id::unique("cairn_versions_active_pill"),
+                                active_ver_key,
+                                target,
+                            );
+                            ui.painter().set(
+                                ver_bg_slot,
+                                egui::epaint::RectShape::filled(pill, motion::R, t::wash()),
+                            );
+                            ui.painter()
+                                .set(ver_bar_slot, active_accent_bar_shape(pill));
+                        }
                     });
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     ui.label(
@@ -520,6 +550,14 @@ impl App {
                     );
                     ui.add_space(4.0);
                 });
+                let panel_rect = ui.clip_rect();
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(panel_rect.right() - 0.5, panel_rect.top()),
+                        egui::pos2(panel_rect.right() - 0.5, panel_rect.bottom()),
+                    ],
+                    egui::Stroke::new(1.0, t::hairline()),
+                );
             });
 
         egui::CentralPanel::default()
@@ -606,8 +644,16 @@ impl App {
                             ui.add_space(1.0);
                             ui.horizontal(|ui| {
                                 status_dot(ui, row.health.missing == 0);
+                                let ltone = t::loader_tone(row.loader.name());
+                                tag_pill(ui, row.loader.name(), ltone, t::tint(ltone, 0.12));
+                                let spec_line = match (&row.pack, &row.loader_version) {
+                                    (Some(_), Some(v)) => format!("整合包 · {} · {v}", row.mc),
+                                    (Some(_), None) => format!("整合包 · {}", row.mc),
+                                    (None, Some(v)) => format!("{} · {v}", row.mc),
+                                    (None, None) => row.mc.clone(),
+                                };
                                 ui.label(
-                                    egui::RichText::new(row_kind(&row))
+                                    egui::RichText::new(spec_line)
                                         .size(13.0)
                                         .color(t::sub()),
                                 );
@@ -662,7 +708,7 @@ impl App {
                         let memory = self.memory_label(&row);
                         let mut go_content: Option<mods::ContentKind> = None;
                         let mut go_worlds = false;
-                        egui::Frame::new()
+                        let stats_frame = egui::Frame::new()
                             .fill(t::surface())
                             .stroke(egui::Stroke::new(1.0, t::hairline()))
                             .corner_radius(motion::R_CARD)
@@ -715,7 +761,9 @@ impl App {
                                         },
                                     );
                                 });
-                            });
+                            })
+                            .response;
+                        motion::rim_top(ui.painter(), stats_frame.rect, motion::R_CARD);
                         if let Some(kind) = go_content {
                             self.selected = Some(row.id.clone());
                             self.open_content(true);
@@ -733,7 +781,7 @@ impl App {
                                 .color(t::sub()),
                         );
                         ui.add_space(8.0);
-                        egui::Frame::new()
+                        let info_frame = egui::Frame::new()
                             .fill(t::surface())
                             .stroke(egui::Stroke::new(1.0, t::hairline()))
                             .corner_radius(motion::R_CARD)
@@ -779,7 +827,9 @@ impl App {
                                         .color(t::warn()),
                                     );
                                 }
-                            });
+                            })
+                            .response;
+                        motion::rim_top(ui.painter(), info_frame.rect, motion::R_CARD);
 
                         ui.add_space(16.0);
                         ui.horizontal(|ui| {
@@ -844,21 +894,36 @@ impl App {
                                 {
                                     delete_target = Some((row.clone(), false));
                                 }
-                            } else if ui
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new("删除这个版本")
-                                            .size(13.0)
-                                            .color(t::danger()),
-                                    )
-                                    .fill(t::surface())
-                                    .stroke(egui::Stroke::new(1.0, t::hairline()))
-                                    .corner_radius(motion::R)
-                                    .min_size(egui::vec2(104.0, 30.0)),
-                                )
-                                .clicked()
-                            {
-                                self.delete_confirm = Some(row.id.clone());
+                            } else {
+                                let (del_rect, del_resp) = ui.allocate_exact_size(
+                                    egui::vec2(108.0, 32.0),
+                                    egui::Sense::click(),
+                                );
+                                let dh = motion::hover_amount(
+                                    ui,
+                                    del_resp.id.with("del_h"),
+                                    del_resp.hovered(),
+                                );
+                                ui.painter().rect(
+                                    del_rect,
+                                    motion::R,
+                                    motion::mix(t::surface(), t::tint(t::danger(), 0.12), dh),
+                                    egui::Stroke::new(
+                                        1.0,
+                                        motion::mix(t::hairline(), t::tint(t::danger(), 0.65), dh),
+                                    ),
+                                    egui::StrokeKind::Inside,
+                                );
+                                ui.painter().text(
+                                    del_rect.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    "删除这个版本",
+                                    egui::FontId::proportional(13.0),
+                                    t::danger(),
+                                );
+                                if del_resp.clicked() {
+                                    self.delete_confirm = Some(row.id.clone());
+                                }
                             }
                         });
                     });
@@ -1065,7 +1130,7 @@ impl App {
                                 egui::Layout::top_down(egui::Align::LEFT),
                                 |ui| {
                                     ui.set_width(left_w);
-                                    egui::Frame::new()
+                                    let left_card = egui::Frame::new()
                                         .fill(t::surface())
                                         .stroke(egui::Stroke::new(1.0, t::hairline()))
                                         .corner_radius(motion::R_CARD)
@@ -1106,6 +1171,7 @@ impl App {
                                                 .clamp(96.0, 132.0);
                                             ui.horizontal(|ui| {
                                                 ui.spacing_mut().item_spacing.x = 6.0;
+                                                let mut active_tile_rect = None;
                                                 for candidate in [
                                                     LoaderKind::Vanilla,
                                                     LoaderKind::Fabric,
@@ -1120,19 +1186,44 @@ impl App {
                                                         LoaderKind::NeoForge => &nv,
                                                         LoaderKind::Forge => &gv,
                                                     };
-                                                    if loader_tile(
+                                                    let resp = loader_tile(
                                                         ui,
                                                         candidate,
                                                         subtitle,
                                                         kind == candidate,
                                                         enabled,
                                                         tile_w,
-                                                    )
-                                                    .clicked()
-                                                        && enabled
-                                                    {
+                                                    );
+                                                    if kind == candidate {
+                                                        active_tile_rect = Some(resp.rect);
+                                                    }
+                                                    if resp.clicked() && enabled {
                                                         kind = candidate;
                                                     }
+                                                }
+                                                if let Some(target) = active_tile_rect {
+                                                    let sel = motion::spring_rect_on_key(
+                                                        ui.ctx(),
+                                                        egui::Id::unique(
+                                                            "cairn_install_loader_ring",
+                                                        ),
+                                                        kind as u64,
+                                                        target,
+                                                    );
+                                                    ui.painter().rect_stroke(
+                                                        sel,
+                                                        motion::R,
+                                                        egui::Stroke::new(1.5, t::accent()),
+                                                        egui::StrokeKind::Inside,
+                                                    );
+                                                    ui.painter().circle_filled(
+                                                        egui::pos2(
+                                                            sel.right() - 10.0,
+                                                            sel.top() + 10.0,
+                                                        ),
+                                                        3.2,
+                                                        t::accent(),
+                                                    );
                                                 }
                                             });
                                             if kind != LoaderKind::Vanilla {
@@ -1206,7 +1297,9 @@ impl App {
                                                 .size(13.0)
                                                 .color(t::sub()),
                                             );
-                                        });
+                                        })
+                                        .response;
+                                    motion::rim_top(ui.painter(), left_card.rect, motion::R_CARD);
                                 },
                             );
                             ui.add_space(gap);
@@ -1215,7 +1308,7 @@ impl App {
                                 egui::Layout::top_down(egui::Align::LEFT),
                                 |ui| {
                                     ui.set_width(right_w);
-                                    egui::Frame::new()
+                                    let right_card = egui::Frame::new()
                                         .fill(t::surface())
                                         .stroke(egui::Stroke::new(1.0, t::hairline()))
                                         .corner_radius(motion::R_CARD)
@@ -1309,14 +1402,16 @@ impl App {
                                             ) {
                                                 go = true;
                                             }
-                                        });
+                                        })
+                                        .response;
+                                    motion::rim_top(ui.painter(), right_card.rect, motion::R_CARD);
                                 },
                             );
                         });
 
                         ui.add_space(16.0);
                         let hovering = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
-                        egui::Frame::new()
+                        let import_card = egui::Frame::new()
                             .fill(if hovering {
                                 t::tint(t::accent(), 0.08)
                             } else {
@@ -1346,25 +1441,24 @@ impl App {
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
-                                            if ui
-                                                .add(
-                                                    egui::Button::new("选择文件")
-                                                        .fill(t::bg())
-                                                        .stroke(egui::Stroke::new(
-                                                            1.0,
-                                                            t::hairline(),
-                                                        ))
-                                                        .corner_radius(motion::R)
-                                                        .min_size(egui::vec2(86.0, 30.0)),
-                                                )
-                                                .clicked()
+                                            if motion::secondary_sized(
+                                                ui,
+                                                "选择文件",
+                                                true,
+                                                88.0,
+                                                30.0,
+                                                13.0,
+                                            )
+                                            .clicked()
                                             {
                                                 choose_pack = true;
                                             }
                                         },
                                     );
                                 });
-                            });
+                            })
+                            .response;
+                        motion::rim_top(ui.painter(), import_card.rect, motion::R_CARD);
                         ui.add_space(24.0);
                     });
                 });
@@ -1487,32 +1581,41 @@ impl App {
     }
 }
 
-/// 版本详情里一格能点的数字：大一点的数，下面是它是什么。
+/// 版本详情里一格能点的数字：轻字重大数字，下面是标签，悬停微亮雾蓝与轻量右箭头。
 fn stat_button(ui: &mut egui::Ui, value: usize, label: &str, divider: bool) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(84.0, 52.0), egui::Sense::click());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(88.0, 56.0), egui::Sense::click());
     let hover = motion::hover_amount(ui, response.id.with("stat_hover"), response.hovered());
     if divider {
         ui.painter().vline(
             rect.left(),
-            rect.y_range().shrink(10.0),
+            rect.y_range().shrink(11.0),
             egui::Stroke::new(1.0, t::hairline()),
         );
     }
     list_row_fill(ui, rect.shrink2(egui::vec2(3.0, 1.0)), false, &response);
     ui.painter().text(
-        rect.left_top() + egui::vec2(12.0, 7.0),
+        rect.left_top() + egui::vec2(12.0, 6.0),
         egui::Align2::LEFT_TOP,
         value.to_string(),
-        egui::FontId::new(18.0, bold_family()),
+        egui::FontId::new(22.0, light_family()),
         motion::mix(t::ink(), t::accent(), hover),
     );
     ui.painter().text(
-        rect.left_top() + egui::vec2(12.0, 31.0),
+        rect.left_top() + egui::vec2(12.0, 34.0),
         egui::Align2::LEFT_TOP,
         label,
         egui::FontId::proportional(12.5),
-        t::sub(),
+        motion::mix(t::sub(), t::ink(), 0.45 * hover),
     );
+    if hover > 0.02 {
+        ui.painter().text(
+            egui::pos2(rect.right() - 10.0 + hover * 2.0, rect.top() + 12.0),
+            egui::Align2::RIGHT_TOP,
+            "›",
+            egui::FontId::proportional(13.0),
+            t::tint(t::accent(), hover),
+        );
+    }
     response
 }
 
@@ -1530,29 +1633,35 @@ pub(crate) fn loader_tile(
     } else {
         egui::Sense::hover()
     };
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 62.0), sense);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 68.0), sense);
     let hover = motion::hover_amount(ui, response.id.with("hover"), enabled && response.hovered());
     let fill = if selected {
-        t::tint(t::accent(), 0.13)
+        t::tint(t::accent(), 0.11)
     } else if hover > 0.0 {
         t::tint(t::wash(), hover)
     } else {
         t::bg()
     };
     let border = if selected {
-        egui::Stroke::new(1.5, t::accent())
+        egui::Stroke::new(1.0, t::tint(t::accent(), 0.28))
     } else {
         egui::Stroke::new(1.0, motion::mix(t::hairline(), t::control(), hover))
     };
     ui.painter()
         .rect(rect, motion::R, fill, border, egui::StrokeKind::Inside);
-    if selected {
-        ui.painter().circle_filled(
-            egui::pos2(rect.right() - 10.0, rect.top() + 10.0),
-            3.2,
-            t::accent(),
-        );
-    }
+    let glyph_color = if !enabled {
+        t::dim()
+    } else if selected {
+        t::accent()
+    } else {
+        motion::mix(t::sub(), t::ink(), hover)
+    };
+    loader_glyph(
+        ui.painter(),
+        rect.left_top() + egui::vec2(19.0, 21.0),
+        kind,
+        glyph_color,
+    );
     let sub = if enabled && !subtitle.is_empty() {
         subtitle.to_string()
     } else if enabled {
@@ -1561,7 +1670,7 @@ pub(crate) fn loader_tile(
         "不可用".to_string()
     };
     ui.painter().text(
-        rect.left_top() + egui::vec2(12.0, 12.0),
+        rect.left_top() + egui::vec2(31.0, 14.0),
         egui::Align2::LEFT_TOP,
         kind.name(),
         egui::FontId::new(
@@ -1575,7 +1684,7 @@ pub(crate) fn loader_tile(
         if enabled { t::ink() } else { t::dim() },
     );
     ui.painter().text(
-        rect.left_top() + egui::vec2(12.0, 34.0),
+        rect.left_top() + egui::vec2(12.0, 41.0),
         egui::Align2::LEFT_TOP,
         sub,
         egui::FontId::proportional(12.5),
@@ -1596,7 +1705,7 @@ enum RowAction {
 }
 
 /// 版本列表的一行：名字、游戏版本和加载器；第一行右侧留给「运行中」或上次游玩时间，
-/// 第二行占满整行宽度避免过早截断加载器版本号。
+/// 第二行占满整行宽度避免过早截断加载器版本号。选中底板与雾蓝竖条由外层弹簧滑行槽位统一绘制。
 pub(crate) fn version_row(
     ui: &mut egui::Ui,
     row: &Row,
@@ -1605,9 +1714,8 @@ pub(crate) fn version_row(
 ) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 56.0), egui::Sense::click());
-    list_row_fill(ui, rect, active, &response);
-    if active {
-        active_accent_bar(ui.painter(), rect);
+    if !active {
+        list_row_fill(ui, rect, false, &response);
     }
     let dot_pos = egui::pos2(rect.left() + 18.0, rect.top() + 20.0);
     match &note {

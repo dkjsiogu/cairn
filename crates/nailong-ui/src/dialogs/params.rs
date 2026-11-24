@@ -93,7 +93,7 @@ impl App {
         let cfg = self.version_cfg(&row.id);
         let planned = self.plan_for(row, &cfg);
         let mut open = false;
-        egui::Frame::new()
+        let frame_resp = egui::Frame::new()
             .fill(t::surface())
             .stroke(egui::Stroke::new(1.0, t::hairline()))
             .corner_radius(motion::R)
@@ -180,7 +180,9 @@ impl App {
                         open = true;
                     }
                 });
-            });
+            })
+            .response;
+        motion::rim_top(ui.painter(), frame_resp.rect, motion::R);
         if open {
             self.open_launch_edit(row);
         }

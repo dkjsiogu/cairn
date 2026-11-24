@@ -457,9 +457,10 @@ impl App {
                     }
                 }
                 if let Some(target) = active_row_rect {
-                    let pill = motion::spring_rect(
+                    let pill = motion::spring_rect_on_key(
                         ui.ctx(),
                         egui::Id::unique("cairn_palette_cursor"),
+                        palette.cursor as u64,
                         target,
                     );
                     ui.painter().set(
@@ -603,11 +604,7 @@ impl App {
             }
             Action::AddAccount => self.open_add_account(AddTab::Microsoft),
             Action::SwitchAccount(id) => self.select_account(&id),
-            Action::Theme(pref) => {
-                self.prefs.theme = pref;
-                pref.apply(ctx);
-                self.save_ui_config();
-            }
+            Action::Theme(pref) => self.switch_theme(ctx, pref),
             Action::LaunchParams => {
                 if let Some(row) = self.selected_row() {
                     self.open_launch_edit(&row);
@@ -631,17 +628,41 @@ impl App {
     }
 }
 
-/// 面板里的一行：选中带雾蓝左竖条，右侧胶囊类别徽章。
+/// 面板里的一行：选中带雾蓝左竖条，右侧低饱和哑光语义类别徽章。
 fn palette_row(ui: &mut egui::Ui, item: &Item, active: bool) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 40.0), egui::Sense::click());
-    // 选中底板与雾蓝竖条由外层弹簧滑行槽位统一绘制。
+    // 选中底板与雾蓝竖条由外层弹簧滑行槽位统一绘制；非选中行悬停时柔和淡染。
+    if !active {
+        let hover = motion::hover_amount(ui, response.id.with("pal_h"), response.hovered());
+        if hover > 0.0 {
+            ui.painter()
+                .rect_filled(rect, motion::R, t::tint(t::wash(), 0.48 * hover));
+        }
+    }
     let kind_font = egui::FontId::proportional(11.0);
-    let kind = ui.painter().layout_no_wrap(
-        item.kind.to_string(),
-        kind_font,
-        if active { t::sub() } else { t::dim() },
-    );
+    let semantic = match item.kind {
+        "版本" => Some(t::accent()),
+        "世界" => Some(t::ok()),
+        "操作" => Some(t::warn()),
+        "账户" => Some(t::loader_tone("forge")),
+        _ => None,
+    };
+    let (pill_fill, pill_border, pill_text) = match semantic {
+        Some(tone) => (
+            t::tint(tone, if active { 0.16 } else { 0.10 }),
+            t::tint(tone, if active { 0.36 } else { 0.22 }),
+            tone,
+        ),
+        None => (
+            if active { t::surface() } else { t::bg() },
+            t::hairline(),
+            if active { t::sub() } else { t::dim() },
+        ),
+    };
+    let kind = ui
+        .painter()
+        .layout_no_wrap(item.kind.to_string(), kind_font, pill_text);
     let pill_w = kind.size().x + 12.0;
     let pill_rect = egui::Rect::from_center_size(
         egui::pos2(rect.right() - 10.0 - pill_w * 0.5, rect.center().y),
@@ -650,8 +671,8 @@ fn palette_row(ui: &mut egui::Ui, item: &Item, active: bool) -> egui::Response {
     ui.painter().rect(
         pill_rect,
         5,
-        if active { t::surface() } else { t::bg() },
-        egui::Stroke::new(1.0, t::hairline()),
+        pill_fill,
+        egui::Stroke::new(1.0, pill_border),
         egui::StrokeKind::Inside,
     );
     ui.painter().galley(
@@ -660,7 +681,7 @@ fn palette_row(ui: &mut egui::Ui, item: &Item, active: bool) -> egui::Response {
             pill_rect.center().y - kind.size().y * 0.5,
         ),
         kind,
-        if active { t::sub() } else { t::dim() },
+        pill_text,
     );
     let left = rect.left() + 14.0;
     let room = rect.width() - 28.0 - pill_w - 12.0;
