@@ -195,6 +195,16 @@ pub(crate) fn run_region<F>(
         });
     }
 
+    // 转场中新页面已经在最终位置接收点击，但画面上还是旧页面、新页面几乎看不见：
+    // 在舞台上盖一层透明的点击区，转场结束前点了也不算，免得点到看不见的按钮。
+    if active_params.is_some() {
+        ui.interact(
+            stage_rect,
+            id.with("transition_input_block"),
+            egui::Sense::click_and_drag(),
+        );
+    }
+
     // 4) 记录当前可见的新画面快照，供下一次切换时平滑接续。
     //    在极早期（第 0 帧 enter_alpha 接近 0）保留上一帧有效快照，防止极速双击抓到空白帧。
     let should_snapshot = match active_params {

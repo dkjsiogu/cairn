@@ -646,6 +646,7 @@ impl App {
                                                     confirming,
                                                     index == 0,
                                                     index + 1 == snapshots.len(),
+                                                    self.worlds.busy,
                                                 );
                                                 if action.restore {
                                                     restore =
@@ -756,14 +757,25 @@ impl App {
         if prune && self.worlds.busy {
             self.worlds.error = Some("正在做快照，完成后再清理".into());
         } else if prune {
-            match snapshots::prune(&game_dir, self.worlds.backup.keep) {
-                Ok((removed, deleted)) => {
-                    self.worlds.notice =
-                        Some(format!("清理了 {removed} 份旧快照、{deleted} 个无用块"));
-                    self.reload_saves();
-                }
-                Err(e) => self.worlds.error = Some(e.to_string()),
-            }
+            // 清理可能要把几百 MB 还在用的数据挪进新包，放到后台做。
+            let dir = game_dir.clone();
+            let keep = self.worlds.backup.keep;
+            self.worlds.busy = true;
+            self.worlds.auto_backup_running = false;
+            self.worlds.notice = None;
+            self.worlds.error = None;
+            let (tx, rx) = mpsc::channel();
+            self.worlds.rx = Some(rx);
+            let ctx = ui.ctx().clone();
+            std::thread::spawn(move || {
+                let result = snapshots::prune(&dir, keep)
+                    .map(|(removed, deleted)| {
+                        format!("清理了 {removed} 份旧快照、{deleted} 个无用块")
+                    })
+                    .map_err(|e| e.to_string());
+                let _ = tx.send(Msg::SavesDone(result));
+                ctx.request_repaint();
+            });
         }
         if let Some(row) = wanted_row {
             self.selected = Some(row.id.clone());
@@ -899,6 +911,7 @@ pub(crate) fn snapshot_row(
     confirming: bool,
     newest: bool,
     last: bool,
+    busy: bool,
 ) -> SnapshotAction {
     let mut action = SnapshotAction::default();
     let (rect, response) =
@@ -980,6 +993,10 @@ pub(crate) fn snapshot_row(
     });
     child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
+        // 快照、恢复、清理在后台跑时，删除和回档要等仓库锁：先不让点，免得界面卡住。
+        if busy {
+            ui.disable();
+        }
         if confirming {
             if danger_tiny(ui, "确认删除").clicked() {
                 action.delete = true;

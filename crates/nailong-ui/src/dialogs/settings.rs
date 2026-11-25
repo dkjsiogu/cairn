@@ -224,6 +224,14 @@ impl App {
                     && entry
                         .as_ref()
                         .is_none_or(|(_, _, learned)| learned.as_ref().is_none_or(|l| l.live_mb.is_none()));
+                // 内存从哪来：玩过就按实测，没玩过提示一句（不用展开「查看计算」也看得到）。
+                if estimated_mem {
+                    ui.label(
+                        egui::RichText::new("内存当前按公式估算，玩过一局后改按游戏实测调整")
+                            .size(13.0)
+                            .color(t::dim()),
+                    );
+                }
                 // 回收器从哪来：这台电脑测过没有。
                 let java = entry.as_ref().map(|(_, java, _)| java.clone());
                 let (text, color, action) = self.bench_status(java.as_ref());
@@ -253,14 +261,6 @@ impl App {
                         );
                     }
                     return;
-                }
-                if estimated_mem {
-                    ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new("内存当前按公式估算，玩过一局后改按游戏实测调整")
-                            .size(13.0)
-                            .color(t::dim()),
-                    );
                 }
                 ui.add_space(8.0);
                 for step in &plan.steps {

@@ -871,11 +871,21 @@ impl App {
         ctx.request_repaint();
     }
 
-    /// 悬浮哑光底部提示胶囊：不挤压主页面布局；出现时平滑上浮淡入，关闭或自动消失时柔和回落淡出。
+    /// 安装没完成的那一页自己把原因写在正中间，不用再说一遍。
+    fn toast_hidden(&self) -> bool {
+        self.page == Page::Install && self.install.repair_target.is_some()
+    }
+
+    /// 报错会一直留着，给它在页面底下让出位置，不压住列表和按钮；完成提示几秒就走，浮在上面。
+    fn toast_reserves_space(&self) -> bool {
+        self.error.is_some() && !self.toast_hidden()
+    }
+
+    /// 底部提示胶囊：出现时上浮淡入，关闭或自动消失时回落淡出。
+    /// 放在 `Order::Middle`：盖在页面上，但在弹窗和它的遮罩下面。
     pub(crate) fn message_toast(&mut self, ctx: &egui::Context, stage_rect: egui::Rect) {
         const NOTICE_SECONDS: f64 = 6.0;
-        // 安装没完成的那一页自己把原因写在正中间，不用再说一遍。
-        if self.page == Page::Install && self.install.repair_target.is_some() {
+        if self.toast_hidden() {
             return;
         }
         let now = ctx.input(|i| i.time);
@@ -905,7 +915,7 @@ impl App {
         let toast_id = egui::Id::unique("cairn_message_toast");
         let enter = transition::modal_enter(ctx, toast_id);
         let area = egui::Area::new(toast_id)
-            .order(egui::Order::Foreground)
+            .order(egui::Order::Middle)
             .pivot(egui::Align2::CENTER_BOTTOM)
             .fixed_pos(egui::pos2(
                 stage_rect.center().x,
@@ -1195,8 +1205,16 @@ impl eframe::App for App {
             .frame(egui::Frame::new().fill(t::bg()))
             .show(ui, |ui| {
                 self.version_line(ui);
+                toast_stage = ui.available_rect_before_wrap();
+                if self.toast_reserves_space() {
+                    egui::Panel::bottom("toast_space")
+                        .resizable(false)
+                        .show_separator_line(false)
+                        .exact_size(TOAST_SPACE)
+                        .frame(egui::Frame::new())
+                        .show(ui, |_| {});
+                }
                 let stage_rect = ui.available_rect_before_wrap();
-                toast_stage = stage_rect;
                 transition::run_region(
                     ui,
                     egui::Id::unique("cairn_main_stage"),
@@ -1264,6 +1282,9 @@ impl eframe::App for App {
         let _ = nailong_core::update::apply_staged(&self.root.cache(), false);
     }
 }
+
+/// 报错提示在页面底下占的高度：胶囊约 36 加上下留白。
+const TOAST_SPACE: f32 = 52.0;
 
 impl App {
     /// 主舞台级联切页键：内容页内部的「已安装/发现/搜索/详情」共用顶部栏，交由内容区自己的子转场处理，

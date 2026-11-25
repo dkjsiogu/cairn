@@ -43,6 +43,18 @@ struct Spring1DState {
     x: f32,
     v: f32,
     last_time: f64,
+    /// 上一帧还在动。静止后第一帧不积分（离上次画面可能隔了很久），之后每帧都积分。
+    moving: bool,
+}
+
+/// 这一帧积分多长时间。刚从静止醒来的那一帧不动；之后按真实间隔走，最多 1/24 秒一步，
+/// 所以帧再慢也会一点点到位，不会停在半路一直重画。
+fn spring_dt(elapsed: f64, waking: bool) -> f32 {
+    if waking {
+        0.0
+    } else {
+        (elapsed.max(0.0) as f32).min(1.0 / 24.0)
+    }
 }
 
 /// 键值门控临界阻尼弹簧矩形：
@@ -72,6 +84,7 @@ pub fn spring_rect_on_key(ctx: &egui::Context, id: egui::Id, key: u64, target: R
         return target;
     };
 
+    let waking = !st.animating;
     if key != st.last_key {
         let jump = (goal[0] - st.x[0]).abs().max((goal[1] - st.x[1]).abs());
         st.last_key = key;
@@ -103,12 +116,7 @@ pub fn spring_rect_on_key(ctx: &egui::Context, id: egui::Id, key: u64, target: R
         st.last_target = goal;
     }
 
-    let elapsed = (now - st.last_time).max(0.0);
-    let dt = if elapsed > 0.08 {
-        0.0
-    } else {
-        (elapsed as f32).min(1.0 / 24.0)
-    };
+    let dt = spring_dt(now - st.last_time, waking);
     let stiffness = 300.0_f32;
     let damping = 34.0_f32;
     let steps = 4;
@@ -173,13 +181,9 @@ pub fn spring(ctx: &egui::Context, id: egui::Id, target: f32, stiffness: f32, da
             x: target,
             v: 0.0,
             last_time: now,
+            moving: false,
         });
-    let elapsed = (now - st.last_time).max(0.0);
-    let dt = if elapsed > 0.08 {
-        0.0
-    } else {
-        (elapsed as f32).min(1.0 / 24.0)
-    };
+    let dt = spring_dt(now - st.last_time, !st.moving);
     let steps = 4;
     let h = dt / steps as f32;
     if dt > 0.0 {
@@ -191,7 +195,9 @@ pub fn spring(ctx: &egui::Context, id: egui::Id, target: f32, stiffness: f32, da
     if (st.x - target).abs() < 0.002 && st.v.abs() < 0.01 {
         st.x = target;
         st.v = 0.0;
+        st.moving = false;
     } else {
+        st.moving = true;
         ctx.request_repaint();
     }
     st.last_time = now;
@@ -608,5 +614,38 @@ mod tests {
             out = step_run(1.5 + step as f64 * 0.016, 2, b);
         }
         assert!(out.min.y > 50.0 && out.min.y < 140.0, "got y={}", out.min.y);
+    }
+
+    #[test]
+    fn springs_still_arrive_when_every_frame_is_slow() {
+        set_reduced(false);
+        let ctx = egui::Context::default();
+        let run = |time: f64, f: &mut dyn FnMut(&egui::Context)| {
+            let raw = egui::RawInput {
+                time: Some(time),
+                ..Default::default()
+            };
+            let mut full = ctx.run_ui(raw, |ui| f(ui.ctx()));
+            full.textures_delta.clear();
+        };
+        let id = egui::Id::unique("test_slow_spring");
+        let rect_id = egui::Id::unique("test_slow_spring_rect");
+        let a = Rect::from_min_size(pos2(0.0, 0.0), vec2(100.0, 40.0));
+        let b = Rect::from_min_size(pos2(0.0, 200.0), vec2(100.0, 40.0));
+        let mut x = 0.0;
+        let mut rect = Rect::NOTHING;
+        run(1.0, &mut |ctx| {
+            x = spring(ctx, id, 0.0, 300.0, 30.0);
+            rect = spring_rect_on_key(ctx, rect_id, 1, a);
+        });
+        // 每帧 150 ms：以前积分步长被当成 0，永远停在原地。
+        for frame in 1..=80 {
+            run(1.0 + frame as f64 * 0.15, &mut |ctx| {
+                x = spring(ctx, id, 1.0, 300.0, 30.0);
+                rect = spring_rect_on_key(ctx, rect_id, 2, b);
+            });
+        }
+        assert_eq!(x, 1.0);
+        assert_eq!(rect, b);
     }
 }

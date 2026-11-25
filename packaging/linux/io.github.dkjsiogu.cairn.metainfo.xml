@@ -28,6 +28,11 @@
   <url type="bugtracker">https://github.com/dkjsiogu/cairn/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.48.1" date="2026-11-25">
+      <description>
+        <p>Fixes: animations no longer stall and keep the CPU busy on slow frames; clicks during page transitions no longer hit the hidden new page; error messages no longer cover the bottom of the page or sit above dialogs; deleting a snapshot during a backup no longer freezes the window, and pruning runs in the background; the Linux update check no longer blocks the interface.</p>
+      </description>
+    </release>
     <release version="0.48.0" date="2026-11-24">
       <description>
         <p>Flagship flat-matte Fog Craft polish and interaction pass while keeping 0% idle CPU, zero new dependencies, WCAG AA contrast across all semantic accents, and full reduce-motion support: key-gated critically-damped springs (zero scroll/resize lag) expanded to Versions list, Install loader tiles, Saves world list, Settings segmented controls, and lightbox filmstrip; full-viewport 220ms Dark/Light theme luminance cross-fade; floating animated bottom toasts; dual-region transitions for library status filters and Discover categories plus smooth lightbox photo cross-sliding; crisp 1.3px monochrome vector glyphs, 1px top rim edges, muted semantic loader pills, architectural matte monograms, real world icon.png previews, and keycap shortcuts.</p>

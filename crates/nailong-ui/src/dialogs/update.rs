@@ -52,6 +52,8 @@ pub(crate) struct UpdateState {
     system: bool,
     /// Linux：标记后台更新服务启动的时间，留出 systemd 切入 activating 状态的缓冲。
     system_started: Option<Instant>,
+    /// Linux：后台正在问 systemd 更新服务还在不在跑（`systemctl` 不放在界面线程上）。
+    probe: Option<mpsc::Receiver<bool>>,
 }
 
 impl UpdateState {
@@ -183,11 +185,11 @@ impl App {
             self.update.ready = update::staged(&cache).map(|staged| staged.version);
             if self.update.ready.is_none()
                 && matches!(self.update.kind, Install::AptRepo | Install::Deb)
-                && update::system_update_active()
             {
-                self.update.mark_system_running();
+                self.probe_system_update(ctx);
             }
         }
+        self.poll_system_probe(ctx);
         if starting
             && self.update.rx.is_none()
             && now().saturating_sub(self.prefs.update_checked) > CHECK_ON_START_AFTER_SECS
@@ -203,17 +205,8 @@ impl App {
             {
                 if let Some(version) = detect_replaced_version() {
                     self.update.mark_ready(version);
-                } else if self.update.system
-                    && self
-                        .update
-                        .system_started
-                        .is_none_or(|started| started.elapsed() >= Duration::from_secs(3))
-                    && !update::system_update_active()
-                {
-                    // 后台更新服务已经结束但没有换掉程序（例如 apt 源尚未同步或自动更新已关闭），
-                    // 退出「后台安装中」状态，把手动「更新」按钮还给玩家。
-                    self.update.system = false;
-                    self.update.system_started = None;
+                } else if self.update.system {
+                    self.probe_system_update(ctx);
                 }
             }
             let next = Duration::from_secs(if self.update.system { 2 } else { 60 });
@@ -326,6 +319,55 @@ impl App {
         });
     }
 
+    /// 在后台问一次 `cairn-update.service` 还在不在跑；结果由 `poll_system_probe` 收。
+    fn probe_system_update(&mut self, ctx: &egui::Context) {
+        if self.update.probe.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        self.update.probe = Some(rx);
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(update::system_update_active());
+            ctx.request_repaint();
+        });
+    }
+
+    fn poll_system_probe(&mut self, ctx: &egui::Context) {
+        let Some(rx) = &self.update.probe else {
+            return;
+        };
+        let active = match rx.try_recv() {
+            Ok(active) => active,
+            Err(mpsc::TryRecvError::Empty) => return,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.update.probe = None;
+                return;
+            }
+        };
+        self.update.probe = None;
+        if self.update.ready.is_some() {
+            return;
+        }
+        if active {
+            if !self.update.system {
+                self.update.mark_system_running();
+                self.update.tick = Some(Instant::now());
+                ctx.request_repaint_after(Duration::from_secs(2));
+            }
+        } else if self.update.system
+            && self
+                .update
+                .system_started
+                .is_none_or(|started| started.elapsed() >= Duration::from_secs(3))
+        {
+            // 后台更新服务已经结束但没有换掉程序（例如 apt 源尚未同步或自动更新已关闭），
+            // 退出「后台安装中」状态，把手动「更新」按钮还给玩家。
+            self.update.system = false;
+            self.update.system_started = None;
+        }
+    }
+
     /// 下载新版本，然后按装法接着做：Windows 记下等着换上，Linux 弹授权窗口装上。
     fn start_update(&mut self, ctx: &egui::Context) {
         if self.update.rx.is_some() || self.update.ready.is_some() {
@@ -337,7 +379,7 @@ impl App {
                 self.update.mark_ready(version);
                 return;
             }
-            if self.update.system || update::system_update_active() {
+            if self.update.system {
                 self.update.mark_system_running();
                 self.update.tick = Some(Instant::now());
                 ctx.request_repaint_after(Duration::from_secs(2));
@@ -367,6 +409,12 @@ impl App {
         self.update.rx = Some(rx);
         let ctx = ctx.clone();
         std::thread::spawn(move || {
+            // 后台更新服务已经在装：不用再下一遍，也别和它抢 dpkg 锁。
+            if matches!(kind, Install::AptRepo | Install::Deb) && update::system_update_active() {
+                let _ = tx.send(UpdateMsg::SystemRunning);
+                ctx.request_repaint();
+                return;
+            }
             let progress = tx.clone();
             let repaint = ctx.clone();
             let sink = from_fn(move |p| {
