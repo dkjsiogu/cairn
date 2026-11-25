@@ -635,8 +635,18 @@ pub fn list(game_dir: &Path, world: &str) -> Result<Vec<Snapshot>> {
     }
     // created_at 只到秒；同一秒内的多次备份用 id（毫秒-序号）兜底，
     // 否则 read_dir 的顺序会让“最新快照”不稳定，prune 可能删错。
-    out.sort_by(|a, b| (b.created_at, &b.id).cmp(&(a.created_at, &a.id)));
+    // id 按数字比：按字符串比时同一毫秒里的 `-11` 会排在 `-8` 前面。
+    out.sort_by(|a, b| {
+        (b.created_at, id_order(&b.id), &b.id).cmp(&(a.created_at, id_order(&a.id), &a.id))
+    });
     Ok(out)
+}
+
+/// 快照 id「毫秒-序号」按数字排序用的键；不是这个格式的排在前面（当成最旧）。
+fn id_order(id: &str) -> (u128, u64) {
+    id.split_once('-')
+        .and_then(|(millis, seq)| Some((millis.parse().ok()?, seq.parse().ok()?)))
+        .unwrap_or((0, 0))
 }
 
 fn load(game_dir: &Path, world: &str, id: &str) -> Result<Snapshot> {
@@ -1646,6 +1656,14 @@ mod tests {
             chunk(0, 500)
         );
         let _ = fs::remove_dir_all(&game);
+    }
+
+    #[test]
+    fn snapshots_in_the_same_millisecond_sort_by_number() {
+        assert!(id_order("1795583368258-11") > id_order("1795583368258-8"));
+        assert!(id_order("1795583368259-0") > id_order("1795583368258-99"));
+        assert_eq!(id_order("1-0"), (1, 0));
+        assert_eq!(id_order("old"), (0, 0));
     }
 
     #[test]
