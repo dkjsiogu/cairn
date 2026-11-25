@@ -8,7 +8,7 @@ A small, native Minecraft: Java Edition launcher written in Rust (formerly nailo
 
 [简体中文](README.md) | **English**
 
-> Current version: **0.48.2** (preview) · [Changelog](CHANGELOG.md) · [Implementation status](docs/design/14-implementation-status.md)
+> Current version: **0.48.3** (preview) · [Changelog](CHANGELOG.md) · [Implementation status](docs/design/14-implementation-status.md)
 
 ## Why Cairn
 
@@ -74,7 +74,7 @@ The Content page unifies **Installed** and **Discover** for mods, resource packs
 | Platform | File | Size | Requirements |
 |---|---|---:|---|
 | Windows x64 | [cairn.exe](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn.exe) | ~9 MB | Windows 10/11 |
-| Linux x64 (deb) | [cairn_0.48.2_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.48.2_amd64.deb) | ~3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39 |
+| Linux x64 (deb) | [cairn_0.48.3_amd64.deb](https://github.com/dkjsiogu/cairn/releases/latest/download/cairn_0.48.3_amd64.deb) | ~3.7 MB | Ubuntu 24.04+ / glibc ≥ 2.39 |
 
 Checksums: [SHA256SUMS](https://github.com/dkjsiogu/cairn/releases/latest/download/SHA256SUMS) (Cairn can download Mojang's Java runtime automatically if none is installed).
 
@@ -97,7 +97,7 @@ sudo apt update && sudo apt install cairn
 Or install the `.deb` directly (adds the same apt source and replaces `nailong`):
 
 ```bash
-sudo apt install ./cairn_0.48.2_amd64.deb
+sudo apt install ./cairn_0.48.3_amd64.deb
 ```
 
 Default data lives in `~/.local/share/cairn/.minecraft` (override with `--root` or in Settings). To disable system background upgrades: `sudo rm /etc/apt/apt.conf.d/52cairn-auto-update`. Uninstall: `sudo apt remove cairn`.

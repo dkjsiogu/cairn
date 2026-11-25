@@ -24,6 +24,11 @@ const MIN_CHUNK: usize = 64 * 1024;
 const MAX_CHUNK: usize = 4 * 1024 * 1024;
 const MASK: u64 = (1 << 18) - 1;
 const WINDOW: usize = 32;
+/// 比这大的普通文件边读边分块，不整个读进内存。
+#[cfg(not(test))]
+const STREAM_ABOVE: u64 = 64 * 1024 * 1024;
+#[cfg(test)]
+const STREAM_ABOVE: u64 = 256 * 1024;
 
 /// 区域文件所在的三种目录。
 const REGION_KINDS: [&str; 3] = ["region", "entities", "poi"];
@@ -478,6 +483,57 @@ fn assemble(store: &mut Store, entry: &FileEntry) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// 普通文件按块直接写到磁盘，大文件也不用整个放进内存。
+fn write_chunks(store: &mut Store, entry: &FileEntry, dest: &Path) -> Result<()> {
+    let file = fs::File::create(dest).map_err(|e| crate::error::io(dest, e))?;
+    let mut out = BufWriter::new(file);
+    let mut written = 0u64;
+    for hash in &entry.chunks {
+        let data = store.get_hex(hash)?;
+        out.write_all(&data)
+            .map_err(|e| crate::error::io(dest, e))?;
+        written += data.len() as u64;
+    }
+    out.flush().map_err(|e| crate::error::io(dest, e))?;
+    if written != entry.size {
+        return Err(Error::Plain(format!("快照文件大小不符: {}", entry.path)));
+    }
+    Ok(())
+}
+
+/// 边读边分块存一个大文件，返回实际读到的字节数和块列表。
+fn store_stream(store: &mut Store, path: &Path) -> Result<(u64, Vec<String>)> {
+    let mut file = fs::File::open(path).map_err(|e| crate::error::io(path, e))?;
+    let mut cutter = Cutter::new();
+    let mut buf = vec![0u8; 1024 * 1024];
+    let mut current = Vec::with_capacity(MAX_CHUNK);
+    let mut chunks = Vec::new();
+    let mut size = 0u64;
+    loop {
+        let n = match file.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(crate::error::io(path, e)),
+        };
+        size += n as u64;
+        let mut start = 0;
+        for (i, &byte) in buf[..n].iter().enumerate() {
+            if cutter.push(byte) {
+                current.extend_from_slice(&buf[start..=i]);
+                chunks.push(hex(&store.put(&current)?));
+                current.clear();
+                start = i + 1;
+            }
+        }
+        current.extend_from_slice(&buf[start..n]);
+    }
+    if !current.is_empty() {
+        chunks.push(hex(&store.put(&current)?));
+    }
+    Ok((size, chunks))
+}
+
 /// 还原一个文件的完整内容。区域文件按区块重新排布，和原文件逐字节不同但内容一样。
 fn file_bytes(store: &mut Store, entry: &FileEntry) -> Result<Vec<u8>> {
     if entry.region.is_none() {
@@ -550,6 +606,18 @@ fn backup_locked(game_dir: &Path, world: &str, note: Option<&str>) -> Result<Sna
         {
             bytes += old.size;
             files.push(old.clone());
+            return Ok(());
+        }
+        if meta.len() > STREAM_ABOVE && !is_region_path(&relative) {
+            let (size, chunks) = store_stream(&mut store, path)?;
+            bytes += size;
+            files.push(FileEntry {
+                path: relative,
+                size,
+                chunks,
+                region: None,
+                modified,
+            });
             return Ok(());
         }
         let mut data = Vec::new();
@@ -702,8 +770,12 @@ pub fn restore(game_dir: &Path, world: &str, id: &str) -> Result<PathBuf> {
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(|e| crate::error::io(parent, e))?;
         }
-        let bytes = file_bytes(&mut store, file)?;
-        fs::write(&dest, &bytes).map_err(|e| crate::error::io(&dest, e))?;
+        if file.region.is_none() {
+            write_chunks(&mut store, file, &dest)?;
+        } else {
+            let bytes = file_bytes(&mut store, file)?;
+            fs::write(&dest, &bytes).map_err(|e| crate::error::io(&dest, e))?;
+        }
     }
     for dir in &snapshot.dirs {
         let dest = target.join(safe_relative(dir)?);
@@ -1298,7 +1370,7 @@ fn walk(
         let meta = entry.metadata().map_err(|e| crate::error::io(&path, e))?;
         if meta.is_dir() {
             walk(&path, &inner, handle)?;
-        } else if meta.is_file() && meta.len() <= 512 * 1024 * 1024 {
+        } else if meta.is_file() {
             handle(&inner, &path)?;
         }
     }
@@ -1306,28 +1378,61 @@ fn walk(
 }
 
 fn split_chunks(data: &[u8]) -> Vec<&[u8]> {
-    let gear = gear_table();
+    let mut cutter = Cutter::new();
     let mut out = Vec::new();
     let mut start = 0usize;
-    let mut hash: u64 = 0;
-    let mut index = 0usize;
-    while index < data.len() {
-        hash = hash.rotate_left(1).wrapping_add(gear[data[index] as usize]);
-        if index >= WINDOW {
-            hash ^= gear[data[index - WINDOW] as usize].rotate_left(WINDOW as u32);
-        }
-        let len = index - start + 1;
-        if len >= MAX_CHUNK || (len >= MIN_CHUNK && (hash & MASK) == 0) {
+    for (index, &byte) in data.iter().enumerate() {
+        if cutter.push(byte) {
             out.push(&data[start..=index]);
             start = index + 1;
-            hash = 0;
         }
-        index += 1;
     }
     if start < data.len() {
         out.push(&data[start..]);
     }
     out
+}
+
+/// 内容定义分块的切点判断，一次喂一个字节；整块和边读边切得到同样的块。
+struct Cutter {
+    gear: &'static [u64; 256],
+    hash: u64,
+    window: [u8; WINDOW],
+    index: usize,
+    len: usize,
+}
+
+impl Cutter {
+    fn new() -> Self {
+        Self {
+            gear: gear_table(),
+            hash: 0,
+            window: [0; WINDOW],
+            index: 0,
+            len: 0,
+        }
+    }
+
+    /// 喂一个字节；返回 true 表示这个字节是当前块的最后一个。
+    fn push(&mut self, byte: u8) -> bool {
+        self.hash = self
+            .hash
+            .rotate_left(1)
+            .wrapping_add(self.gear[byte as usize]);
+        let slot = self.index % WINDOW;
+        if self.index >= WINDOW {
+            self.hash ^= self.gear[self.window[slot] as usize].rotate_left(WINDOW as u32);
+        }
+        self.window[slot] = byte;
+        self.index += 1;
+        self.len += 1;
+        if self.len >= MAX_CHUNK || (self.len >= MIN_CHUNK && (self.hash & MASK) == 0) {
+            self.hash = 0;
+            self.len = 0;
+            return true;
+        }
+        false
+    }
 }
 
 fn gear_table() -> &'static [u64; 256] {
@@ -1501,6 +1606,76 @@ mod tests {
         assert_eq!(restored.len(), payload.len());
         assert_eq!(restored[300_000], 2);
         assert_eq!(restored[500_000], 1);
+        let _ = fs::remove_dir_all(&game);
+    }
+
+    /// 改写前的分块实现，用来确认新的 Cutter 切出一样的块（旧快照能继续去重）。
+    fn old_split(data: &[u8]) -> Vec<&[u8]> {
+        let gear = gear_table();
+        let mut out = Vec::new();
+        let (mut start, mut hash) = (0usize, 0u64);
+        for index in 0..data.len() {
+            hash = hash.rotate_left(1).wrapping_add(gear[data[index] as usize]);
+            if index >= WINDOW {
+                hash ^= gear[data[index - WINDOW] as usize].rotate_left(WINDOW as u32);
+            }
+            let len = index - start + 1;
+            if len >= MAX_CHUNK || (len >= MIN_CHUNK && (hash & MASK) == 0) {
+                out.push(&data[start..=index]);
+                start = index + 1;
+                hash = 0;
+            }
+        }
+        if start < data.len() {
+            out.push(&data[start..]);
+        }
+        out
+    }
+
+    fn noise(len: usize, seed: u64) -> Vec<u8> {
+        let mut x = seed | 1;
+        (0..len)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                (x >> 24) as u8
+            })
+            .collect()
+    }
+
+    #[test]
+    fn cutter_matches_the_old_split() {
+        for (len, seed) in [(0, 1), (100, 2), (3_000_000, 3), (9_000_000, 4)] {
+            let data = noise(len, seed);
+            assert_eq!(split_chunks(&data), old_split(&data), "len {len}");
+        }
+        let flat = vec![5u8; 9_000_000];
+        assert_eq!(split_chunks(&flat), old_split(&flat));
+    }
+
+    #[test]
+    fn big_files_are_streamed_not_skipped() {
+        let game = temp_dir("big-file");
+        write_world(&game, "World", b"not a region");
+        let big = noise(STREAM_ABOVE as usize * 12 + 12_345, 9);
+        let big_path = saves::saves_dir(&game).join("World/data/big.dat");
+        fs::create_dir_all(big_path.parent().unwrap()).unwrap();
+        fs::write(&big_path, &big).unwrap();
+
+        let snap = backup(&game, "World").unwrap();
+        let entry = snap
+            .files
+            .iter()
+            .find(|f| f.path == "data/big.dat")
+            .unwrap();
+        assert_eq!(entry.size, big.len() as u64);
+        let whole: Vec<String> = split_chunks(&big).iter().map(|c| hex(&sha1(c))).collect();
+        assert_eq!(entry.chunks, whole, "边读边切要和整块切一样");
+
+        fs::remove_dir_all(saves::saves_dir(&game).join("World")).unwrap();
+        let target = restore(&game, "World", &snap.id).unwrap();
+        assert_eq!(fs::read(target.join("data/big.dat")).unwrap(), big);
         let _ = fs::remove_dir_all(&game);
     }
 

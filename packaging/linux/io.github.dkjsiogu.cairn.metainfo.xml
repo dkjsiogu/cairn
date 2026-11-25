@@ -28,6 +28,11 @@
   <url type="bugtracker">https://github.com/dkjsiogu/cairn/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.48.3" date="2026-11-26">
+      <description>
+        <p>Snapshots no longer skip files over 512 MB. Large files are backed up and restored in chunks without loading them into memory.</p>
+      </description>
+    </release>
     <release version="0.48.2" date="2026-11-25">
       <description>
         <p>Saves page: while a snapshot, restore or prune runs, Back up all, Prune and Delete world are disabled too, and the busy status has its own line. Long data folder paths are shortened so Open folder and Refresh stay visible. Snapshots made in the same millisecond sort correctly.</p>
