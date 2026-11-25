@@ -170,11 +170,20 @@ impl App {
         backup_all: &mut bool,
         prune: &mut bool,
     ) {
-        if quick_action(ui, "清理旧快照").clicked() {
+        // 后台在做快照、恢复或清理时先不让点，免得同时跑两个、互相等仓库锁。
+        let idle = !self.worlds.busy;
+        let busy_tip = "正在处理快照，完成后再试";
+        if motion::secondary_sized(ui, "清理旧快照", idle, 88.0, 30.0, 11.0)
+            .on_disabled_hover_text(busy_tip)
+            .clicked()
+        {
             *prune = true;
         }
         ui.add_space(4.0);
-        if quick_action(ui, "备份全部").clicked() {
+        if motion::secondary_sized(ui, "备份全部", idle, 88.0, 30.0, 11.0)
+            .on_disabled_hover_text(busy_tip)
+            .clicked()
+        {
             *backup_all = true;
         }
         ui.add_space(8.0);
@@ -312,28 +321,38 @@ impl App {
                     );
                 }
                 ui.add_space(6.0);
+                // 路径太长时从末尾省略（悬停看全文），右边的「打开目录」「刷新」始终看得见。
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(game_dir.display().to_string())
-                            .size(13.0)
-                            .color(t::sub()),
-                    );
-                    ui.add_space(8.0);
-                    if action_link(ui, "打开目录").clicked() {
-                        open_dir = Some(game_dir.clone());
-                    }
-                    if action_link(ui, "刷新").clicked() {
-                        reload = true;
-                    }
-                    if self.worlds.busy {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if action_link(ui, "刷新").clicked() {
+                            reload = true;
+                        }
+                        if action_link(ui, "打开目录").clicked() {
+                            open_dir = Some(game_dir.clone());
+                        }
+                        ui.add_space(8.0);
+                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            let path = game_dir.display().to_string();
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(&path).size(13.0).color(t::sub()),
+                                )
+                                .truncate(),
+                            )
+                            .on_hover_text(path);
+                        });
+                    });
+                });
+                if self.worlds.busy {
+                    ui.horizontal(|ui| {
                         busy_spinner(ui);
                         ui.label(
-                            egui::RichText::new("正在写入快照…")
+                            egui::RichText::new("正在处理快照…")
                                 .size(13.0)
                                 .color(t::sub()),
                         );
-                    }
-                });
+                    });
+                }
                 if let Some(note) = &self.worlds.notice {
                     ui.label(egui::RichText::new(note).size(13.0).color(t::ok()));
                 }
@@ -605,7 +624,14 @@ impl App {
                                         {
                                             delete_world = Some(world.clone());
                                         }
-                                    } else if ghost_button(ui, "删除世界").clicked() {
+                                    } else if ui
+                                        .add_enabled_ui(!self.worlds.busy, |ui| {
+                                            ghost_button(ui, "删除世界")
+                                        })
+                                        .inner
+                                        .on_disabled_hover_text("正在处理快照，完成后再删除")
+                                        .clicked()
+                                    {
                                         self.worlds.confirm = Some(world.clone());
                                     }
                                 },
@@ -705,6 +731,11 @@ impl App {
             restore = None;
             delete_world = None;
             backup_all = false;
+        }
+        // 按钮在忙时已经点不了；确认删除那一步是在忙之前点开的，这里再拦一次。
+        if self.worlds.busy {
+            backup_all = false;
+            delete_world = None;
         }
         if let Some(world) = new_snapshot {
             self.start_snapshot(world);
